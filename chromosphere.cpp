@@ -115,6 +115,9 @@ Vec find_spectral_radius_ii(const Vec& xn_ii) {
     return res_ii;
 }
 
+// Explicit source: pressure-area (geometric) and gravity, per writeup §4.3.
+// S_E = [0, 0, p_i B D - rho_i G, p_n B D - rho_n G, 0, 0]^T
+// with D = d(1/B)/ds, G = d phi_g/ds.
 Vec cal_S_ii(const Vec& xn_ii) {
     Vec S_ii(arma::size(xn_ii), arma::fill::zeros);
     const Vec rhoi = get_scalar(xn_ii, CNI);
@@ -124,19 +127,17 @@ Vec cal_S_ii(const Vec& xn_ii) {
     const Vec ei = get_scalar(xn_ii, CEI);
     const Vec en = get_scalar(xn_ii, CEN);
 
-    const Vec ni = rhoi/m_i;
-    const Vec nn = rhon/m_n;
-
     const Vec vv = rhov / rhoi;
     const Vec uu = rhou / rhon;
     const Vec phig = 0.5*(gPotential_imh+gPotential_iph);
-    const Vec pi = 2.0/3.0*ei - 1.0/3.0*rhoi%vv%vv - 2.0/3.0*rhoi%phig; 
+    const Vec pi = 2.0/3.0*ei - 1.0/3.0*rhoi%vv%vv - 2.0/3.0*rhoi%phig;
     const Vec pn = 2.0/3.0*en - 1.0/3.0*rhon%uu%uu - 2.0/3.0*rhon%phig;
-    const Vec Ti = pi/(2.0*ni*k_b);
-    const Vec Tn = pn/(nn*k_b);
 
-    S_ii += scalar_to(pi%dinvB_ds_i, CNV);
-    S_ii += scalar_to(pn%dinvB_ds_i, CNU);
+    // Gravity: g = -d phi_g/ds evaluated cell-centered from the face potentials.
+    const Vec gb = -(gPotential_iph-gPotential_imh)/ds_i;
+
+    S_ii += scalar_to(pi%B_i%dinvB_ds_i + rhoi%gb, CNV);
+    S_ii += scalar_to(pn%B_i%dinvB_ds_i + rhon%gb, CNU);
     return S_ii;
 }
 
@@ -243,111 +244,112 @@ Vec rhs_explicit_ii(const Vec& xn_ii) {
     return xn_rhs_ii;
 }
 
-// includes all non-advective terms, such as collison, diffusion, etc.
-// refer to normalized equations on overleaf
+// Implicit terms (writeup §4.3, R_I): ion-neutral drag, collisional heating,
+// frictional heating, and heat conduction. Pressure-area and gravity sit in
+// the explicit source cal_S_ii.
 Vec rhs_implicit_ii(const Vec& xn_ii) {
     Vec RI_ii(arma::size(xn_ii), fill::zeros);
+
+    // Cell-centered primitives.
     const Vec rhoi = get_scalar(xn_ii, CNI);
     const Vec rhon = get_scalar(xn_ii, CNN);
     const Vec rhov = get_scalar(xn_ii, CNV);
     const Vec rhou = get_scalar(xn_ii, CNU);
-    const Vec ei = get_scalar(xn_ii, CEI);
-    const Vec en = get_scalar(xn_ii, CEN);
+    const Vec ei   = get_scalar(xn_ii, CEI);
+    const Vec en   = get_scalar(xn_ii, CEN);
 
     const Vec ni = rhoi/m_i;
     const Vec nn = rhon/m_n;
-
     const Vec vv = rhov / rhoi;
     const Vec uu = rhou / rhon;
     const Vec phig = 0.5*(gPotential_imh+gPotential_iph);
-    const Vec pi = 2.0/3.0*ei - 1.0/3.0*rhoi%vv%vv - 2.0/3.0*rhoi%phig; 
+    const Vec pi = 2.0/3.0*ei - 1.0/3.0*rhoi%vv%vv - 2.0/3.0*rhoi%phig;
     const Vec pn = 2.0/3.0*en - 1.0/3.0*rhon%uu%uu - 2.0/3.0*rhon%phig;
     const Vec Ti = pi/(2.0*ni*k_b);
     const Vec Tn = pn/(nn*k_b);
 
-    // Collision rate
-    const Vec nuin = nu_in(nn, Ti, Tn);
-
-    // Gravitational acceleration
-    const Vec gb = -(gPotential_iph-gPotential_imh)/ds_i;
-
-    // ------ CNV and CNU
-    // Expansion
-    RI_ii += scalar_to(2.0*pi%B_i%dinvB_ds_i, CNV);
-    RI_ii += scalar_to(pn%B_i%dinvB_ds_i, CNU);
-    // Gravitational force
-    RI_ii += scalar_to(rhoi%gb, CNV);
-    RI_ii += scalar_to(rhon%gb, CNU);
-    // Collisions
-    RI_ii += scalar_to(-rhoi%nuin%(vv-uu), CNV);
-    RI_ii += scalar_to( rhon%nuin%(vv-uu), CNU);
-
-    // ------ CEI and CEN
     const Vec Ke = kappa_e(ni, nn, Ti);
     const Vec Ki(size(Ti), arma::fill::zeros);
     const Vec Kn = kappa_n(ni, nn, Ti, Tn);
 
-    // --------------- Calculate derivatives
-    // Get ip1
+    // i+1 neighbor (uses outer ghost at i = ns-1).
     const Vec xn_iip1 = ip1(xn_ii);
     const Vec rhoi_ip1 = get_scalar(xn_iip1, CNI);
     const Vec rhon_ip1 = get_scalar(xn_iip1, CNN);
     const Vec rhov_ip1 = get_scalar(xn_iip1, CNV);
     const Vec rhou_ip1 = get_scalar(xn_iip1, CNU);
-    const Vec ei_ip1 = get_scalar(xn_iip1, CEI);
-    const Vec en_ip1 = get_scalar(xn_iip1, CEN);
+    const Vec ei_ip1   = get_scalar(xn_iip1, CEI);
+    const Vec en_ip1   = get_scalar(xn_iip1, CEN);
 
     const Vec ni_ip1 = rhoi_ip1/m_i;
     const Vec nn_ip1 = rhon_ip1/m_n;
-
     const Vec vv_ip1 = rhov_ip1 / rhoi_ip1;
     const Vec uu_ip1 = rhou_ip1 / rhon_ip1;
     Vec phig_ip1 = ip1(0.5*(gPotential_iph+gPotential_imh), SLICE);
     phig_ip1[ns-1] = gPotential_iph[ns-1];
-    const Vec pi_ip1 = 2.0/3.0*ei_ip1 - 1.0/3.0*rhoi_ip1%vv_ip1%vv_ip1 - 2.0/3.0*rhoi_ip1%phig_ip1; 
+    const Vec pi_ip1 = 2.0/3.0*ei_ip1 - 1.0/3.0*rhoi_ip1%vv_ip1%vv_ip1 - 2.0/3.0*rhoi_ip1%phig_ip1;
     const Vec pn_ip1 = 2.0/3.0*en_ip1 - 1.0/3.0*rhon_ip1%uu_ip1%uu_ip1 - 2.0/3.0*rhon_ip1%phig_ip1;
-    const Vec Ti_ip1 = pi_ip1/(ni_ip1*k_b);
+    const Vec Ti_ip1 = pi_ip1/(2.0*ni_ip1*k_b);
     const Vec Tn_ip1 = pn_ip1/(nn_ip1*k_b);
 
     const Vec Ke_ip1 = kappa_e(ni_ip1, nn_ip1, Ti_ip1);
     const Vec Ki_ip1(size(Ti), arma::fill::zeros);
     const Vec Kn_ip1 = kappa_n(ni_ip1, nn_ip1, Ti_ip1, Tn_ip1);
 
-    // Get derivatives
-    Vec dTi_ds = (Ti_ip1 - Ti)/ds_i;
-    Vec dTn_ds = (Tn_ip1 - Tn)/ds_i;
-    Vec dKe_ds = (Ke_ip1 - Ke)/ds_i;
-    Vec dKi_ds = (Ki_ip1 - Ki)/ds_i;
-    Vec dKn_ds = (Kn_ip1 - Kn)/ds_i;
-    // ---------------- End calculation
-    // cout << "dTi_ds = " << dTi_ds << endl;
-    // cout << "dTn_ds = " << dTn_ds << endl;
-    // cout << "dKe_ds = " << dKe_ds << endl;
-    // cout << "dKn_ds = " << dKn_ds << endl;
-    // cout << "Ti_ip1 = " << Tn_ip1 << endl;
-    // cout << "Ti = " << Ti << endl;
-    // cout << "Tn = " << Tn << endl;
-    // cout << "ds = " << ds_i << endl;
+    // i-1 neighbor (uses inner ghost at i = 0).
+    const Vec xn_iim1 = im1(xn_ii);
+    const Vec rhoi_im1 = get_scalar(xn_iim1, CNI);
+    const Vec rhon_im1 = get_scalar(xn_iim1, CNN);
+    const Vec rhov_im1 = get_scalar(xn_iim1, CNV);
+    const Vec rhou_im1 = get_scalar(xn_iim1, CNU);
+    const Vec ei_im1   = get_scalar(xn_iim1, CEI);
+    const Vec en_im1   = get_scalar(xn_iim1, CEN);
 
-    // Heat conduction
-    RI_ii += scalar_to(((Ke+Ki)%B_i%dinvB_ds_i + (dKe_ds+dKi_ds))%dTi_ds, CEI);
-    RI_ii += scalar_to((Kn%B_i%dinvB_ds_i + dKn_ds)%dTn_ds, CEN);
-    // Collisions
-    RI_ii += scalar_to(0.5*nuin%ni%(3.0*k_b*(Tn-Ti) + m_n*(vv-uu)%(vv-uu)) - nuin%rhoi%vv%(vv-uu), CEI);
-    RI_ii += scalar_to(0.5*nuin%nn%(3.0*k_b*(Ti-Tn) + m_i*(vv-uu)%(vv-uu)) + nuin%rhoi%uu%(vv-uu), CEN);
+    const Vec ni_im1 = rhoi_im1/m_i;
+    const Vec nn_im1 = rhon_im1/m_n;
+    const Vec vv_im1 = rhov_im1 / rhoi_im1;
+    const Vec uu_im1 = rhou_im1 / rhon_im1;
+    Vec phig_im1 = im1(0.5*(gPotential_iph+gPotential_imh), SLICE);
+    phig_im1[0] = gPotential_imh[0];
+    const Vec pi_im1 = 2.0/3.0*ei_im1 - 1.0/3.0*rhoi_im1%vv_im1%vv_im1 - 2.0/3.0*rhoi_im1%phig_im1;
+    const Vec pn_im1 = 2.0/3.0*en_im1 - 1.0/3.0*rhon_im1%uu_im1%uu_im1 - 2.0/3.0*rhon_im1%phig_im1;
+    const Vec Ti_im1 = pi_im1/(2.0*ni_im1*k_b);
+    const Vec Tn_im1 = pn_im1/(nn_im1*k_b);
 
-    // cout << "RI-EI = " << get_scalar(RI_ii, CEI) << endl;
-    // cout << "collsion1 = " << (0.5*nuin%ni%(3.0*k_b*(Tn-Ti) + m_n*(vv-uu)%(vv-uu)) - nuin%rhoi%vv%(vv-uu))%get_scalar(dt_ii, CEI) << endl;
-    // cout << "heat conduction = " << (Kn%B_i%dinvB_ds_i + dKn_ds)%dTn_ds%get_scalar(dt_ii, CEI) << endl;
-    // cout << "kappa e = " << Ke << endl;
-    // cout << "vv = " << vv <<endl;
-    // cout << "uu = " << uu <<endl;
-    // cout << "Ti = " << Ti <<endl;
-    // cout << "nuin = " << nuin << endl;
-    // cout << "nn = " << nn << endl;
+    const Vec Ke_im1 = kappa_e(ni_im1, nn_im1, Ti_im1);
+    const Vec Ki_im1(size(Ti), arma::fill::zeros);
+    const Vec Kn_im1 = kappa_n(ni_im1, nn_im1, Ti_im1, Tn_im1);
 
-    cout << "EI = " << get_scalar(xn_ii, CEI) << endl;
-    // cout << "-----------------------------oneit" <<endl;
+    // --- ion-neutral drag (alpha = rho_i * nu_in) ----------------------
+    const Vec nuin = nu_in(nn, Ti, Tn);
+    const Vec alpha = rhoi % nuin;
+    const Vec w = vv - uu;
+    RI_ii += scalar_to(-alpha%w, CNV);
+    RI_ii += scalar_to( alpha%w, CNU);
+
+    // --- collisional + frictional heating (writeup eq R_I energy rows) -
+    RI_ii += scalar_to(alpha/(m_i+m_n) % (3.0*k_b*(Tn-Ti) + m_n*w%w) - alpha%vv%w, CEI);
+    RI_ii += scalar_to(alpha/(m_i+m_n) % (3.0*k_b*(Ti-Tn) + m_i*w%w) + alpha%uu%w, CEN);
+
+    // --- conservative field-aligned heat conduction (writeup eq 4.4):
+    //   C = (B/ds) [ K_{i+1/2}/B_{i+1/2} (T_{i+1}-T_i)/ds
+    //              - K_{i-1/2}/B_{i-1/2} (T_i-T_{i-1})/ds ]
+    // Face conductivities by arithmetic average.
+    const Vec Kt_iph = 0.5 * ((Ke + Ki) + (Ke_ip1 + Ki_ip1));
+    const Vec Kt_imh = 0.5 * ((Ke + Ki) + (Ke_im1 + Ki_im1));
+    const Vec Kn_iph = 0.5 * (Kn + Kn_ip1);
+    const Vec Kn_imh = 0.5 * (Kn + Kn_im1);
+
+    const Vec q_i_iph = Kt_iph / B_iph % (Ti_ip1 - Ti)     / ds_i;
+    const Vec q_i_imh = Kt_imh / B_imh % (Ti     - Ti_im1) / ds_i;
+    const Vec q_n_iph = Kn_iph / B_iph % (Tn_ip1 - Tn)     / ds_i;
+    const Vec q_n_imh = Kn_imh / B_imh % (Tn     - Tn_im1) / ds_i;
+
+    const Vec C_i = B_i % (q_i_iph - q_i_imh) / ds_i;
+    const Vec C_n = B_i % (q_n_iph - q_n_imh) / ds_i;
+    RI_ii += scalar_to(C_i, CEI);
+    RI_ii += scalar_to(C_n, CEN);
+
     return RI_ii;
 }
 
@@ -384,6 +386,12 @@ Vec advance_Euler_ii(const Vec& xn_ii, const Vec& dt_i) {
     do {
         RI_np1_k_ii = RI_np1_kp1_ii;
         xnp1_ii = xn_ii + dt_ii%(RE_n_ii + RI_np1_k_ii);
+        // Picard iteration on R_I (writeup §3.7) diverges whenever
+        // dt * |dR_I/du| > 1 — i.e., when ion-neutral drag (alpha*dt ~ 60 at
+        // Model C7 conditions) or heat conduction makes R_I stiff. A true
+        // implicit solve (Newton with the R_I Jacobian) is required to enable
+        // this branch. Until then, leave R_I at zero so the step is pure
+        // explicit Euler.
         // RI_np1_kp1_ii = rhs_implicit_ii(xnp1_ii);
         RI_np1_kp1_ii.zeros(arma::size(xn_ii));
         error = (RI_np1_kp1_ii - RI_np1_k_ii)%(RI_np1_kp1_ii - RI_np1_k_ii);

@@ -55,6 +55,68 @@ docs/                    Al Shidi 2019 paper + Keheng's writeup
 CMakeLists.txt           Build config
 ```
 
+## Naming conventions
+
+### Current (what the code uses today)
+
+**Grid-location suffix** — encodes how long the vector is and where on the grid it lives. This is the part of the convention that already works well; keep it.
+
+| Suffix | Length | Meaning |
+| --- | --- | --- |
+| `_i`   | `ns` | one scalar per cell, cell-centered |
+| `_ii`  | `ns·num_of_eq` | packed state — all 6 equations stacked per cell |
+| `_iph` | `ns` | scalar at the i+1/2 (right) face |
+| `_imh` | `ns` | scalar at the i-1/2 (left) face |
+| `_iiph` / `_iimh` | `ns·num_of_eq` | packed face state |
+| `_ip1` / `_im1` / `_ip2` / `_im2` | matches input | shifted neighbour (output of `ip1`/`im1`/…) |
+
+**Conserved-variable indices** (used with `get_scalar` / `scalar_to`): `CNI`=ρ_i, `CNN`=ρ_n, `CNV`=ρ_i V, `CNU`=ρ_n U, `CEI`=e_i, `CEN`=e_n. **Primitive** counterparts: `PNI`, `PNN`, `PV`, `PU`, `PPI`, `PPN`.
+
+**Local variables inside solver bodies:** `rhoi`, `rhon` (densities); `rhov`, `rhou` (momenta — *not* densities, despite the `rho` prefix); `vv`, `uu` (writeup `V`, `U`); `ei`, `en` (energies); `pi`, `pn` (pressures); `Ti`, `Tn`; `ni`, `nn`; `phig` (φ_g); `nuin` (ν_in); `alpha` (α = ρ_i ν_in); `Ke`, `Ki`, `Kn` (κ_e, κ_i, κ_n); `Kt_iph` (κ_e+κ_i at right face); `RE_*` / `RI_*` (R_E, R_I residuals from writeup).
+
+**Function prefixes:** `cal_*` (compute a derived quantity), `rhs_*` (right-hand side of conservation law), `advance_*` (time integrator), `find_*` / `get_*` (accessor).
+
+**Known clashes / friction:**
+- The global float `pi` (π) shadows local `pi` (ion pressure) in every function that uses both. Currently survives only because `arma::datum::pi` is used where π is actually needed.
+- `CNV` / `CNU` start with `N` ("number density") but hold *momenta*. Carried over from the [Al Shidi 2019] state-vector layout.
+- `PV` / `PU` break the `P + N/P + species` pattern of `PNI` / `PNN` / `PPI` / `PPN`.
+- `vv`, `uu` double letters; `e_` (elementary charge) trailing underscore; `gammamono` runs two words together; `num_of_elem` is mixed snake/abbrev.
+
+### Proposed (not yet applied — keep until the user signs off)
+
+Goal: a C++ symbol should be readable straight off the writeup's symbol. One axis (grid location) on the suffix, one axis (physical quantity) on the body.
+
+| Concept (writeup) | Current | Proposed |
+| --- | --- | --- |
+| ion velocity `V` | `vv` | `V` |
+| neutral velocity `U` | `uu` | `U` |
+| ion pressure `p_i` | `pi` (shadows π) | `p_i` (and rename the global π constant or drop it for `arma::datum::pi`) |
+| neutral pressure `p_n` | `pn` | `p_n` |
+| ion momentum `ρ_i V` | `rhov` | `rhoV_i` |
+| neutral momentum `ρ_n U` | `rhou` | `rhoU_n` |
+| ion / neutral density `ρ_i, ρ_n` | `rhoi`, `rhon` | `rho_i`, `rho_n` |
+| ion / neutral energy `e_i, e_n` | `ei`, `en` | `e_i`, `e_n` |
+| ion / neutral temperature | `Ti`, `Tn` | `T_i`, `T_n` |
+| ion / neutral number density | `ni`, `nn` | `n_i`, `n_n` |
+| index for ρ_i (cons) | `CNI` | `IRHO_I` |
+| index for ρ_i V (cons) | `CNV` (misleading `N`) | `IMOM_I` |
+| index for e_i (cons) | `CEI` | `IE_I` |
+| index for V (prim) | `PV` | `IV` (prim-only — namespaced or in separate header) |
+| index for p_i (prim) | `PPI` | `IP_I` |
+| κ_e+κ_i at face | `Kt_iph` | `Kei_iph` |
+| ratio of specific heats | `gammamono` | `gamma_mono` |
+| ion-neutral collision freq | `nuin` | `nu_in` (already used in function names) |
+| elementary charge | `e_` | `q_e` |
+| state-vector length | `num_of_elem` | `n_state` |
+| gravitational potential | `phig` | `phi_g` |
+
+**Principles:**
+1. Suffix carries grid location only (`_i`, `_ii`, `_iph`, `_imh`). Don't repurpose it.
+2. Body matches writeup symbol with `_i` / `_n` standing in for ion/neutral subscripts — `ρ_i V` → `rhoV_i`, `p_i` → `p_i`, `e_n` → `e_n`. The species marker stays on the right, so it pairs cleanly with the grid suffix: `rho_i_iph` (ion density at the i+1/2 face) reads as "ρ_i at iph."
+3. No double-letter names (`vv`, `uu`).
+4. Index constants get a consistent `I*` prefix (uppercase macro-style) and drop the `C`/`P` muddle: `IRHO_I`, `IMOM_I`, `IE_I`. Keep conserved and primitive index sets in separate headers/namespaces so the same `IV` can't mean two things.
+5. No silent shadows of global constants. If `pi` is the float π, the local pressure cannot also be `pi`.
+
 ## Build
 
 ### With CMake (preferred)
@@ -146,14 +208,21 @@ Currently 15 test cases / 294 individual checks; all passing.
 
 ## Known issues (worth attending to before more physics is added)
 
-- [chromosphere.cpp:340-342, 349-350](chromosphere.cpp#L340) — debug `cout`s
-  in `rhs_implicit_ii` will spam stdout once the implicit branch is re-enabled.
-- [chromosphere.cpp:388](chromosphere.cpp#L388) — implicit RHS is zeroed inside
-  the fix-point loop, so `advance_Euler_ii` is effectively explicit-only.
-  Re-enable by switching to `RI_np1_kp1_ii = rhs_implicit_ii(xnp1_ii);`.
-- `cal_S_ii` (writeup pressure-expansion source) and `rhs_implicit_ii`
-  *both* add a `p · B · ∂(1/B)/∂s` term to `CNV`/`CNU`, with different
-  coefficients. They are likely double-counting once the implicit branch is on.
+- The writeup's "semi-implicit" Picard iteration (writeup §3.7) is unstable
+  for the implicit terms actually present here. At Model C7 conditions the
+  drag is stiff (`α·dt ≈ 60` on the first step), and Picard iteration of the
+  form `u^{n+1,k+1} = u^n + dt·(R_E + R_I(u^{n+1,k}))` only converges when
+  `dt·|R_I'| < 1`. The body of `rhs_implicit_ii` is correct (drag,
+  collisional + frictional heating, and conservative field-aligned heat
+  conduction, writeup §4.3–4.4), but the call site in
+  [chromosphere.cpp:393](chromosphere.cpp#L393) keeps the residual zeroed —
+  the step is pure explicit Euler until a real implicit solve (Newton on the
+  `R_I` Jacobian) replaces the Picard iteration.
+- `dinvB_ds_i` is allocated and used (writeup pressure-area term in
+  `cal_S_ii`), but never populated for a non-uniform `B`. `model_c7_ic`
+  sets `B ≡ 1` and `dinvB_ds_i ≡ 0`, so the geometric expansion source is
+  latent. Populating `dinvB_ds_i` from the actual `B(s)` is the next step
+  before stratified or expanding flux-tube runs.
 
 ## References
 

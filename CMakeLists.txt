@@ -18,9 +18,12 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 add_compile_definitions(ARMA_DONT_USE_LAPACK ARMA_DONT_USE_BLAS)
 
 add_library(chromosphere STATIC
-    chromosphere.cpp
-    chromo_init.cpp
-    util/chromo_util.cpp
+    src/grid.cpp
+    src/state.cpp
+    src/flux.cpp
+    src/rhs.cpp
+    src/integrators.cpp
+    scenarios/model_c7.cpp
 )
 target_include_directories(chromosphere PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

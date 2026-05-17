@@ -12,13 +12,14 @@
 //   - Helper invariants (ip1/im1 shift, get_scalar/scalar_to inverse, minmod limiter)
 //   - CFL condition satisfied by cal_dt_i
 //   - Mass exactly preserved by one explicit step on a uniform state (no source terms)
-//   - Uniform, motionless, gravity-free state is a fixed point of advance_Euler_ii
+//   - Uniform, motionless, gravity-free state is a fixed point of advance_Euler_state
 
 #include "../chromosphere.hpp"
+#include "../physics.hpp"
+
 #include <armadillo>
 #include <cmath>
 #include <iostream>
-#include <string>
 
 using namespace chromosphere;
 
@@ -72,51 +73,39 @@ static const char* g_current = "";
 // Set up an ns-cell uniform state with unit cell length, uniform B=1, no gravity.
 // Inner/outer ghost cells are pinned to the interior values so all boundary
 // fluxes match interior fluxes (true fixed point of the explicit scheme).
-static Vec setup_uniform(uword n_cells, float ni_val, float nn_val,
+static Vec setup_uniform(Grid& grid, arma::uword n_cells,
+                         float ni_val, float nn_val,
                          float Ti_val, float Tn_val) {
-    chromo_init(n_cells, 0.25f);
+    grid.init(n_cells, 0.25f);
 
-    ds_i.fill(1.0f);
-    B_imh.fill(1.0f);
-    B_iph.fill(1.0f);
-    B_i.fill(1.0f);
-    dinvB_ds_i.zeros();
-    gPotential_imh.zeros();
-    gPotential_iph.zeros();
-
-    // Broadcast 1D quantities into the (ns*num_of_eq) layout
-    B_iimh.zeros(num_of_elem);
-    B_iiph.zeros(num_of_elem);
-    B_ii.zeros(num_of_elem);
-    ds_ii.zeros(num_of_elem);
-    dinvB_ds_ii.zeros(num_of_elem);
-    for (uword k = 0; k < num_of_eq; ++k) {
-        B_iimh      += scalar_to(B_imh,      k);
-        B_iiph      += scalar_to(B_iph,      k);
-        B_ii        += scalar_to(B_i,        k);
-        ds_ii       += scalar_to(ds_i,       k);
-        dinvB_ds_ii += scalar_to(dinvB_ds_i, k);
-    }
+    grid.ds_i.fill(1.0f);
+    grid.B_imh.fill(1.0f);
+    grid.B_iph.fill(1.0f);
+    grid.B_i.fill(1.0f);
+    grid.dinvB_ds_i.zeros();
+    grid.phi_g_imh.zeros();
+    grid.phi_g_iph.zeros();
+    grid.broadcast();
 
     // Primitive state, then convert to conserved.
-    Vec prim(num_of_elem, fill::zeros);
-    for (uword i = 0; i < n_cells; ++i) {
-        prim(sub2ind(size(n_cells, num_of_eq), i, PNI)) = ni_val * m_i;
-        prim(sub2ind(size(n_cells, num_of_eq), i, PNN)) = nn_val * m_n;
-        prim(sub2ind(size(n_cells, num_of_eq), i, PV))  = 0.0f;
-        prim(sub2ind(size(n_cells, num_of_eq), i, PU))  = 0.0f;
-        prim(sub2ind(size(n_cells, num_of_eq), i, PPI)) = ni_val * 2.0f * k_b * Ti_val; // writeup eq 38
-        prim(sub2ind(size(n_cells, num_of_eq), i, PPN)) = nn_val * k_b * Tn_val;
+    Vec prim(grid.n_state, arma::fill::zeros);
+    for (arma::uword i = 0; i < n_cells; ++i) {
+        prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::RHO_I)) = ni_val * grid.m_i;
+        prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::RHO_N)) = nn_val * grid.m_n;
+        prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::V))     = 0.0f;
+        prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::U))     = 0.0f;
+        prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::P_I))   = ni_val * 2.0f * grid.k_b * Ti_val; // writeup eq 38
+        prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::P_N))   = nn_val * grid.k_b * Tn_val;
     }
-    Vec cons = prim2cons(prim);
+    Vec cons = prim2cons(grid, prim);
 
     // Pin inner/outer ghosts to the (uniform) interior values.
-    for (uword k = 0; k < num_of_eq; ++k) {
-        const float val = cons(sub2ind(size(n_cells, num_of_eq), 0, k));
-        inner_boundary0_i(k) = val;
-        inner_boundary1_i(k) = val;
-        outer_boundary0_i(k) = val;
-        outer_boundary1_i(k) = val;
+    for (arma::uword k = 0; k < num_of_eq; ++k) {
+        const float val = cons(arma::sub2ind(arma::size(n_cells, num_of_eq), 0, k));
+        grid.inner_boundary0_i(k) = val;
+        grid.inner_boundary1_i(k) = val;
+        grid.outer_boundary0_i(k) = val;
+        grid.outer_boundary1_i(k) = val;
     }
     return cons;
 }
@@ -127,49 +116,48 @@ static Vec setup_uniform(uword n_cells, float ni_val, float nn_val,
 // =========================================================================
 
 static void test_scalar_to_get_scalar_inverse() {
-    chromo_init(8, 0.25f);
-    Vec v(ns);
-    for (uword i = 0; i < ns; ++i) v(i) = (float)i * 1.5f + 0.3f;
+    Grid grid;
+    grid.init(8, 0.25f);
+    Vec v(grid.ns);
+    for (arma::uword i = 0; i < grid.ns; ++i) v(i) = (float)i * 1.5f + 0.3f;
 
-    for (uword k = 0; k < num_of_eq; ++k) {
-        Vec back = get_scalar(scalar_to(v, k), k);
-        for (uword i = 0; i < ns; ++i) EXPECT_NEAR(back(i), v(i), 1e-6);
+    for (arma::uword k = 0; k < num_of_eq; ++k) {
+        Vec back = get_scalar(grid, scalar_to(grid, v, k), k);
+        for (arma::uword i = 0; i < grid.ns; ++i) EXPECT_NEAR(back(i), v(i), 1e-6);
     }
 }
 
 static void test_ip1_im1_interior_shift() {
-    chromo_init(10, 0.25f);
-    inner_boundary0_i.zeros(num_of_eq);
-    outer_boundary0_i.zeros(num_of_eq);
+    Grid grid;
+    grid.init(10, 0.25f);
+    grid.inner_boundary0_i.zeros(num_of_eq);
+    grid.outer_boundary0_i.zeros(num_of_eq);
 
-    Vec xn(num_of_elem, fill::zeros);
-    for (uword i = 0; i < ns; ++i)
-        xn(sub2ind(size(ns, num_of_eq), i, CNI)) = (float)(i + 1) * 10.0f;
+    Vec xn(grid.n_state, arma::fill::zeros);
+    for (arma::uword i = 0; i < grid.ns; ++i)
+        xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_I)) = (float)(i + 1) * 10.0f;
 
-    const Vec xp = ip1(xn);
-    const Vec xm = im1(xn);
+    const Vec xp = ip1(grid, xn);
+    const Vec xm = im1(grid, xn);
 
-    // ip1 shifts values from i+1 down into slot i (interior only)
-    for (uword i = 0; i < ns - 1; ++i)
-        EXPECT_NEAR(xp(sub2ind(size(ns, num_of_eq), i, CNI)),
-                    xn(sub2ind(size(ns, num_of_eq), i + 1, CNI)), 1e-6);
+    for (arma::uword i = 0; i < grid.ns - 1; ++i)
+        EXPECT_NEAR(xp(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_I)),
+                    xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i + 1, cons::RHO_I)), 1e-6);
 
-    // im1 shifts values from i-1 up into slot i (interior only)
-    for (uword i = 1; i < ns; ++i)
-        EXPECT_NEAR(xm(sub2ind(size(ns, num_of_eq), i, CNI)),
-                    xn(sub2ind(size(ns, num_of_eq), i - 1, CNI)), 1e-6);
+    for (arma::uword i = 1; i < grid.ns; ++i)
+        EXPECT_NEAR(xm(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_I)),
+                    xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i - 1, cons::RHO_I)), 1e-6);
 }
 
 static void test_flux_lim_is_minmod() {
-    // Code labels it ospre in docstring, but the implementation is minmod:
-    //   φ(r) = max(0, min(1, r))   (writeup eq 15)
+    // φ(r) = max(0, min(1, r))   (writeup eq 15)
     Vec r(6);
-    r(0) = -1.0f;  // negative -> 0
-    r(1) =  0.0f;  // zero     -> 0
-    r(2) =  0.5f;  // 0 < r < 1 -> r
-    r(3) =  1.0f;  // r == 1    -> 1
-    r(4) =  2.0f;  // r  > 1    -> 1
-    r(5) =  std::numeric_limits<float>::quiet_NaN(); // NaN -> 0 (sentinel)
+    r(0) = -1.0f;
+    r(1) =  0.0f;
+    r(2) =  0.5f;
+    r(3) =  1.0f;
+    r(4) =  2.0f;
+    r(5) =  std::numeric_limits<float>::quiet_NaN();
     Vec out = flux_lim(r);
     EXPECT_NEAR(out(0), 0.0f, 1e-6);
     EXPECT_NEAR(out(1), 0.0f, 1e-6);
@@ -180,10 +168,11 @@ static void test_flux_lim_is_minmod() {
 }
 
 static void test_cons_prim_roundtrip() {
-    Vec cons = setup_uniform(8, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
-    Vec prim  = cons2prim(cons);
-    Vec cons2 = prim2cons(prim);
-    for (uword j = 0; j < cons.n_elem; ++j) EXPECT_REL(cons2(j), cons(j), 1e-4);
+    Grid grid;
+    Vec cons = setup_uniform(grid, 8, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    Vec prim  = cons2prim(grid, cons);
+    Vec cons2 = prim2cons(grid, prim);
+    for (arma::uword j = 0; j < cons.n_elem; ++j) EXPECT_REL(cons2(j), cons(j), 1e-4);
 }
 
 
@@ -192,53 +181,47 @@ static void test_cons_prim_roundtrip() {
 // =========================================================================
 
 static void test_pressure_relation_eq38() {
-    // p_i = 2 n_i k_b T_i (electron quasi-neutrality folds Te=Ti, ne=ni).
-    // p_n = n_n k_b T_n. Recover from conserved state via cons2prim
-    // and check directly.
     const float Ti = 6500.0f, Tn = 6500.0f;
-    const float ni = 2.0e17f,  nn = 1.0e19f;
-    Vec cons = setup_uniform(4, ni, nn, Ti, Tn);
-    Vec prim = cons2prim(cons);
-    const float p_i = prim(sub2ind(size(ns, num_of_eq), 0, PPI));
-    const float p_n = prim(sub2ind(size(ns, num_of_eq), 0, PPN));
-    EXPECT_REL(p_i, 2.0f * ni * k_b * Ti, 1e-4);
-    EXPECT_REL(p_n, 1.0f * nn * k_b * Tn, 1e-4);
+    const float ni = 2.0e17f, nn = 1.0e19f;
+    Grid grid;
+    Vec cons = setup_uniform(grid, 4, ni, nn, Ti, Tn);
+    Vec prim = cons2prim(grid, cons);
+    const float p_i = prim(arma::sub2ind(arma::size(grid.ns, num_of_eq), 0, prim::P_I));
+    const float p_n = prim(arma::sub2ind(arma::size(grid.ns, num_of_eq), 0, prim::P_N));
+    EXPECT_REL(p_i, 2.0f * ni * grid.k_b * Ti, 1e-4);
+    EXPECT_REL(p_n, 1.0f * nn * grid.k_b * Tn, 1e-4);
 }
 
 static void test_spectral_radius_uniform_at_rest() {
-    // For motionless state, spectral radius = max(c_s,i, c_s,n)
-    // c_s,i = sqrt(γ p_i / ρ_i) = sqrt(2 γ k_b T_i / m_i)    (writeup eq 64/65)
-    // c_s,n = sqrt(γ p_n / ρ_n) = sqrt(  γ k_b T_n / m_n)
     const float Ti = 6500.0f, Tn = 6500.0f;
-    const float ni = 2.0e17f,  nn = 1.0e19f;
-    Vec cons = setup_uniform(4, ni, nn, Ti, Tn);
+    const float ni = 2.0e17f, nn = 1.0e19f;
+    Grid grid;
+    Vec cons = setup_uniform(grid, 4, ni, nn, Ti, Tn);
 
-    Vec spc = find_spectral_radius_ii(cons);
-    const double csi = std::sqrt(2.0 * (double)gammamono * (double)k_b * Ti / (double)m_i);
-    const double csn = std::sqrt(      (double)gammamono * (double)k_b * Tn / (double)m_n);
+    Vec spc = cal_spectral_radius_state(grid, cons);
+    const double csi = std::sqrt(2.0 * (double)grid.gamma_mono * (double)grid.k_b * Ti / (double)grid.m_i);
+    const double csn = std::sqrt(      (double)grid.gamma_mono * (double)grid.k_b * Tn / (double)grid.m_n);
     const double expected = std::max(csi, csn);
 
-    for (uword i = 0; i < ns; ++i)
-        EXPECT_REL(spc(sub2ind(size(ns, num_of_eq), i, 0)), expected, 1e-3);
+    for (arma::uword i = 0; i < grid.ns; ++i)
+        EXPECT_REL(spc(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, 0)), expected, 1e-3);
 }
 
 static void test_nu_in_collision_formula() {
-    // Code: ν_in = (2 a₀)² n_n √(8π k_b (T_i+T_n) / m_i)        (writeup eq 57, target-density form)
-    chromo_init(1, 0.25f);
+    Grid grid;
+    grid.init(1, 0.25f);
     const float nn_val = 1.0e19f, Ti = 6500.0f, Tn = 6500.0f;
     Vec nn_v(1), Ti_v(1), Tn_v(1);
     nn_v(0) = nn_val; Ti_v(0) = Ti; Tn_v(0) = Tn;
-    const Vec nuin = nu_in(nn_v, Ti_v, Tn_v);
+    const Vec nuin = nu_in(grid, nn_v, Ti_v, Tn_v);
 
     const double a0 = 53e-12;
     const double expected = (2.0 * a0) * (2.0 * a0) * (double)nn_val
-        * std::sqrt(8.0 * (double)pi * (double)k_b * ((double)Ti + (double)Tn) / (double)m_i);
+        * std::sqrt(8.0 * (double)arma::datum::pi * (double)grid.k_b * ((double)Ti + (double)Tn) / (double)grid.m_i);
     EXPECT_REL(nuin(0), expected, 1e-3);
 }
 
 static void test_kappa_e_eq53() {
-    // κ_e = 9.2048e-12 · n_e · T_e^(5/2) / (n_e + 3.5609e-12 · n_n · T_e²)
-    chromo_init(1, 0.25f);
     const float ne_val = 2.0e17f, nn_val = 1.0e19f, Te = 6500.0f;
     Vec ne_v(1), nn_v(1), Te_v(1);
     ne_v(0) = ne_val; nn_v(0) = nn_val; Te_v(0) = Te;
@@ -248,13 +231,10 @@ static void test_kappa_e_eq53() {
     const double den = (double)ne_val + 3.5609e-12 * (double)nn_val * (double)Te * (double)Te;
     EXPECT_REL(ke(0), num / den, 1e-3);
 
-    // Sanity: writeup eq 54 gives ~0.031 W/(m·K) at chromosphere conditions
     EXPECT_TRUE(ke(0) > 0.02f && ke(0) < 0.05f);
 }
 
 static void test_kappa_n_eq59() {
-    // κ_n = 0.0342006 · n_n · T_n / (1.20613 · n_i · √(T_n+T_i) + 1.70573 · n_n · √T_n)
-    chromo_init(1, 0.25f);
     const float ni_val = 2.0e17f, nn_val = 1.0e19f, Ti = 6500.0f, Tn = 6500.0f;
     Vec ni_v(1), nn_v(1), Ti_v(1), Tn_v(1);
     ni_v(0) = ni_val; nn_v(0) = nn_val; Ti_v(0) = Ti; Tn_v(0) = Tn;
@@ -265,15 +245,12 @@ static void test_kappa_n_eq59() {
                      + 1.70573 * (double)nn_val * std::sqrt((double)Tn);
     EXPECT_REL(kn(0), num / den, 1e-3);
 
-    // Neutral conductivity dominates in chromosphere (writeup §3.2): κ_n ~ O(1) W/(m·K)
     EXPECT_TRUE(kn(0) > 0.5f && kn(0) < 2.0f);
 }
 
 static void test_kappa_n_dominates_in_chromosphere() {
-    // Writeup §3.2: at T ~ 6500K, n_n >> n_e, neutral heat conduction dominates electron.
-    chromo_init(1, 0.25f);
     const float Te = 6500.0f, Ti = 6500.0f, Tn = 6500.0f;
-    const float ne = 2.0e17f, nn = 1.0e19f; // Model-C7-ish bottom-of-chromosphere
+    const float ne = 2.0e17f, nn = 1.0e19f;
     Vec ne_v(1); ne_v(0) = ne;
     Vec nn_v(1); nn_v(0) = nn;
     Vec Te_v(1); Te_v(0) = Te;
@@ -290,65 +267,62 @@ static void test_kappa_n_dominates_in_chromosphere() {
 // =========================================================================
 
 static void test_cal_dt_respects_cfl() {
-    Vec cons = setup_uniform(10, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
-    Vec dt = cal_dt_i(cons);
-    Vec maxv = get_max_v_i(cons);
-    const float expected_dt = CFL * arma::min(ds_i) / arma::max(maxv);
-    // cal_dt_i returns a uniform vector = min over all cells
+    Grid grid;
+    Vec cons = setup_uniform(grid, 10, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    Vec dt   = cal_dt_i(grid, cons);
+    Vec maxv = cal_max_v_i(grid, cons);
+    const float expected_dt = grid.CFL * arma::min(grid.ds_i) / arma::max(maxv);
     EXPECT_REL(dt(0), expected_dt, 1e-3);
-    // CFL constraint must hold pointwise: dt * max_v / ds <= CFL
-    for (uword i = 0; i < ns; ++i)
-        EXPECT_TRUE(dt(i) * maxv(i) / ds_i(i) <= CFL + 1e-6f);
+    for (arma::uword i = 0; i < grid.ns; ++i)
+        EXPECT_TRUE(dt(i) * maxv(i) / grid.ds_i(i) <= grid.CFL + 1e-6f);
 }
 
-static void test_get_max_v_matches_spectral_radius() {
-    Vec cons = setup_uniform(5, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
-    Vec spc = find_spectral_radius_ii(cons);
-    Vec mv  = get_max_v_i(cons);
-    for (uword i = 0; i < ns; ++i)
-        EXPECT_NEAR(mv(i), spc(sub2ind(size(ns, num_of_eq), i, 0)), 1e-6);
+static void test_cal_max_v_matches_spectral_radius() {
+    Grid grid;
+    Vec cons = setup_uniform(grid, 5, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    Vec spc = cal_spectral_radius_state(grid, cons);
+    Vec mv  = cal_max_v_i(grid, cons);
+    for (arma::uword i = 0; i < grid.ns; ++i)
+        EXPECT_NEAR(mv(i), spc(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, 0)), 1e-6);
 }
 
 static void test_uniform_state_is_fixed_point() {
-    // Uniform, motionless, no gravity, B uniform → exact fixed point of explicit step.
-    // With dinvB_ds=0 the source term cal_S_ii vanishes; with uniform L=R reconstructions
-    // the Rusanov flux is identical across all faces.
     const float Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
-    Vec cons  = setup_uniform(16, ni, nn, Ti, Tn);
+    Grid grid;
+    Vec cons  = setup_uniform(grid, 16, ni, nn, Ti, Tn);
     Vec cons0 = cons;
-    Vec dt    = cal_dt_i(cons);
-    Vec cons1 = advance_Euler_ii(cons, dt);
+    Vec dt    = cal_dt_i(grid, cons);
+    Vec cons1 = advance_Euler_state(grid, cons, dt);
 
-    for (uword j = 0; j < cons.n_elem; ++j)
+    for (arma::uword j = 0; j < cons.n_elem; ++j)
         EXPECT_REL(cons1(j), cons0(j), 1e-3);
 }
 
 static void test_mass_conservation_on_uniform_state() {
-    // Total ion and neutral mass preserved exactly across one explicit step
-    // on the uniform fixed-point setup.
     const float ni = 2.0e17f, nn = 1.0e19f;
-    Vec cons = setup_uniform(16, ni, nn, 6500.0f, 6500.0f);
-    Vec dt   = cal_dt_i(cons);
+    Grid grid;
+    Vec cons = setup_uniform(grid, 16, ni, nn, 6500.0f, 6500.0f);
+    Vec dt   = cal_dt_i(grid, cons);
 
-    const double mi0 = arma::sum(get_scalar(cons, CNI));
-    const double mn0 = arma::sum(get_scalar(cons, CNN));
+    const double mi0 = arma::sum(get_scalar(grid, cons, cons::RHO_I));
+    const double mn0 = arma::sum(get_scalar(grid, cons, cons::RHO_N));
 
-    Vec cons1 = advance_Euler_ii(cons, dt);
+    Vec cons1 = advance_Euler_state(grid, cons, dt);
 
-    const double mi1 = arma::sum(get_scalar(cons1, CNI));
-    const double mn1 = arma::sum(get_scalar(cons1, CNN));
+    const double mi1 = arma::sum(get_scalar(grid, cons1, cons::RHO_I));
+    const double mn1 = arma::sum(get_scalar(grid, cons1, cons::RHO_N));
     EXPECT_REL(mi1, mi0, 1e-4);
     EXPECT_REL(mn1, mn0, 1e-4);
 }
 
 static void test_rk4_uniform_fixed_point() {
-    // RK4 must also leave the uniform state untouched.
     const float Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
-    Vec cons  = setup_uniform(8, ni, nn, Ti, Tn);
+    Grid grid;
+    Vec cons  = setup_uniform(grid, 8, ni, nn, Ti, Tn);
     Vec cons0 = cons;
-    Vec dt    = cal_dt_i(cons);
-    Vec cons1 = advance_RK4(cons, dt);
-    for (uword j = 0; j < cons.n_elem; ++j)
+    Vec dt    = cal_dt_i(grid, cons);
+    Vec cons1 = advance_RK4(grid, cons, dt);
+    for (arma::uword j = 0; j < cons.n_elem; ++j)
         EXPECT_REL(cons1(j), cons0(j), 1e-3);
 }
 
@@ -360,13 +334,11 @@ static void test_rk4_uniform_fixed_point() {
 int main() {
     std::cout << "===== Chromosphere test suite =====\n\n";
 
-    // Helper invariants
     RUN(test_scalar_to_get_scalar_inverse);
     RUN(test_ip1_im1_interior_shift);
     RUN(test_flux_lim_is_minmod);
     RUN(test_cons_prim_roundtrip);
 
-    // Physics vs. writeup
     RUN(test_pressure_relation_eq38);
     RUN(test_spectral_radius_uniform_at_rest);
     RUN(test_nu_in_collision_formula);
@@ -374,9 +346,8 @@ int main() {
     RUN(test_kappa_n_eq59);
     RUN(test_kappa_n_dominates_in_chromosphere);
 
-    // Numerics
     RUN(test_cal_dt_respects_cfl);
-    RUN(test_get_max_v_matches_spectral_radius);
+    RUN(test_cal_max_v_matches_spectral_radius);
     RUN(test_uniform_state_is_fixed_point);
     RUN(test_mass_conservation_on_uniform_state);
     RUN(test_rk4_uniform_fixed_point);

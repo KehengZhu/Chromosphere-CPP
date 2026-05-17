@@ -26,96 +26,109 @@ Electrons are folded into the ion equations via quasi-neutrality (`n_e = n_i`,
 **Numerical scheme:** TVD-MUSCL with minmod limiter, Rusanov / local
 Lax–Friedrichs flux, 2nd-order time accuracy via a predictor-corrector
 reconstruction (writeup §2.6–2.8). Semi-implicit Euler driver
-([chromosphere.cpp:369](chromosphere.cpp#L369)); the implicit branch is
-currently disabled at [chromosphere.cpp:388](chromosphere.cpp#L388). RK4 is
-also available ([advance_RK4](chromosphere.cpp#L398)) for the explicit-only path.
+([src/integrators.cpp:38](src/integrators.cpp#L38)); the implicit branch is
+currently disabled at [src/integrators.cpp:57](src/integrators.cpp#L57). RK4 is
+also available ([advance_RK4](src/integrators.cpp#L67)) for the explicit-only path.
 
 The 6 conserved variables per cell (writeup eq 61):
 
 | Index | Symbol | Meaning |
 | --- | --- | --- |
-| `CNI` | `ρ_i` | ion mass density |
-| `CNN` | `ρ_n` | neutral mass density |
-| `CNV` | `ρ_i V` | ion momentum density |
-| `CNU` | `ρ_n U` | neutral momentum density |
-| `CEI` | `e_i` | ion total energy (thermal + kinetic + gravitational, including electron contribution) |
-| `CEN` | `e_n` | neutral total energy |
+| `cons::RHO_I` | `ρ_i` | ion mass density |
+| `cons::RHO_N` | `ρ_n` | neutral mass density |
+| `cons::MOM_I` | `ρ_i V` | ion momentum density |
+| `cons::MOM_N` | `ρ_n U` | neutral momentum density |
+| `cons::E_I`   | `e_i` | ion total energy (thermal + kinetic + gravitational, including electron contribution) |
+| `cons::E_N`   | `e_n` | neutral total energy |
 
 ## File layout
 
 ```
-chromosphere.{hpp,cpp}   Solver core (flux, MUSCL, Rusanov, time integrators)
-chromo_init.cpp          Constants, Model C7 IC, outer-BC update
+chromosphere.hpp         Public API: Grid struct, cons::/prim:: indices, function decls
+physics.hpp              Inline collision frequency (nu_in) and heat conductivities (kappa_e, kappa_n)
 chromo_main.cpp          Main entry point
-util/chromo_util.cpp     Helpers (cons2prim, ip1/im1, get_scalar, ...)
-include/armadillo        Vendored header-only Armadillo
-fortran/                 Legacy Fortran main + SWMF couplers (not built)
+src/
+  grid.cpp               Grid::init, Grid::broadcast
+  state.cpp              cons2prim, prim2cons, get_scalar, scalar_to, ip1/im1/ip2/im2, flux_lim
+  flux.cpp               cal_flux_state, cal_spectral_radius_state, cal_source_state
+  rhs.cpp                rhs_explicit_state (MUSCL+Rusanov), rhs_implicit_state
+  integrators.cpp        advance_Euler_state, advance_RK4, cal_dt_i, cal_max_v_i, print_xn
+scenarios/
+  model_c7.{hpp,cpp}     Model C7 IC, BC update, cubic-spline interpolation, MODEL_C7 table
 tests/chromo_tests.cpp   Test suite (physics + numerics)
+include/armadillo        Vendored header-only Armadillo
+util/                    Plotting helpers (plotting.ipynb, plotting.m)
+fortran/                 Legacy Fortran main + SWMF couplers (not built)
 docs/                    Al Shidi 2019 paper + Keheng's writeup
 CMakeLists.txt           Build config
 ```
 
+All solver state lives in `chromosphere::Grid` — physical constants, cell-centered
+arrays, ghost-buffer storage, and the broadcast `_state` caches. Solver functions
+take `const Grid&` (or `Grid&` for time integrators, which write the `dt_state`
+scratch buffer). Tests construct a `Grid` per test; no global mutable state.
+
 ## Naming conventions
-
-### Current (what the code uses today)
-
-**Grid-location suffix** — encodes how long the vector is and where on the grid it lives. This is the part of the convention that already works well; keep it.
-
-| Suffix | Length | Meaning |
-| --- | --- | --- |
-| `_i`   | `ns` | one scalar per cell, cell-centered |
-| `_ii`  | `ns·num_of_eq` | packed state — all 6 equations stacked per cell |
-| `_iph` | `ns` | scalar at the i+1/2 (right) face |
-| `_imh` | `ns` | scalar at the i-1/2 (left) face |
-| `_iiph` / `_iimh` | `ns·num_of_eq` | packed face state |
-| `_ip1` / `_im1` / `_ip2` / `_im2` | matches input | shifted neighbour (output of `ip1`/`im1`/…) |
-
-**Conserved-variable indices** (used with `get_scalar` / `scalar_to`): `CNI`=ρ_i, `CNN`=ρ_n, `CNV`=ρ_i V, `CNU`=ρ_n U, `CEI`=e_i, `CEN`=e_n. **Primitive** counterparts: `PNI`, `PNN`, `PV`, `PU`, `PPI`, `PPN`.
-
-**Local variables inside solver bodies:** `rhoi`, `rhon` (densities); `rhov`, `rhou` (momenta — *not* densities, despite the `rho` prefix); `vv`, `uu` (writeup `V`, `U`); `ei`, `en` (energies); `pi`, `pn` (pressures); `Ti`, `Tn`; `ni`, `nn`; `phig` (φ_g); `nuin` (ν_in); `alpha` (α = ρ_i ν_in); `Ke`, `Ki`, `Kn` (κ_e, κ_i, κ_n); `Kt_iph` (κ_e+κ_i at right face); `RE_*` / `RI_*` (R_E, R_I residuals from writeup).
-
-**Function prefixes:** `cal_*` (compute a derived quantity), `rhs_*` (right-hand side of conservation law), `advance_*` (time integrator), `find_*` / `get_*` (accessor).
-
-**Known clashes / friction:**
-- The global float `pi` (π) shadows local `pi` (ion pressure) in every function that uses both. Currently survives only because `arma::datum::pi` is used where π is actually needed.
-- `CNV` / `CNU` start with `N` ("number density") but hold *momenta*. Carried over from the [Al Shidi 2019] state-vector layout.
-- `PV` / `PU` break the `P + N/P + species` pattern of `PNI` / `PNN` / `PPI` / `PPN`.
-- `vv`, `uu` double letters; `e_` (elementary charge) trailing underscore; `gammamono` runs two words together; `num_of_elem` is mixed snake/abbrev.
-
-### Proposed (not yet applied — keep until the user signs off)
 
 Goal: a C++ symbol should be readable straight off the writeup's symbol. One axis (grid location) on the suffix, one axis (physical quantity) on the body.
 
-| Concept (writeup) | Current | Proposed |
-| --- | --- | --- |
-| ion velocity `V` | `vv` | `V` |
-| neutral velocity `U` | `uu` | `U` |
-| ion pressure `p_i` | `pi` (shadows π) | `p_i` (and rename the global π constant or drop it for `arma::datum::pi`) |
-| neutral pressure `p_n` | `pn` | `p_n` |
-| ion momentum `ρ_i V` | `rhov` | `rhoV_i` |
-| neutral momentum `ρ_n U` | `rhou` | `rhoU_n` |
-| ion / neutral density `ρ_i, ρ_n` | `rhoi`, `rhon` | `rho_i`, `rho_n` |
-| ion / neutral energy `e_i, e_n` | `ei`, `en` | `e_i`, `e_n` |
-| ion / neutral temperature | `Ti`, `Tn` | `T_i`, `T_n` |
-| ion / neutral number density | `ni`, `nn` | `n_i`, `n_n` |
-| index for ρ_i (cons) | `CNI` | `IRHO_I` |
-| index for ρ_i V (cons) | `CNV` (misleading `N`) | `IMOM_I` |
-| index for e_i (cons) | `CEI` | `IE_I` |
-| index for V (prim) | `PV` | `IV` (prim-only — namespaced or in separate header) |
-| index for p_i (prim) | `PPI` | `IP_I` |
-| κ_e+κ_i at face | `Kt_iph` | `Kei_iph` |
-| ratio of specific heats | `gammamono` | `gamma_mono` |
-| ion-neutral collision freq | `nuin` | `nu_in` (already used in function names) |
-| elementary charge | `e_` | `q_e` |
-| state-vector length | `num_of_elem` | `n_state` |
-| gravitational potential | `phig` | `phi_g` |
+### Grid-location suffix
 
-**Principles:**
-1. Suffix carries grid location only (`_i`, `_ii`, `_iph`, `_imh`). Don't repurpose it.
-2. Body matches writeup symbol with `_i` / `_n` standing in for ion/neutral subscripts — `ρ_i V` → `rhoV_i`, `p_i` → `p_i`, `e_n` → `e_n`. The species marker stays on the right, so it pairs cleanly with the grid suffix: `rho_i_iph` (ion density at the i+1/2 face) reads as "ρ_i at iph."
-3. No double-letter names (`vv`, `uu`).
-4. Index constants get a consistent `I*` prefix (uppercase macro-style) and drop the `C`/`P` muddle: `IRHO_I`, `IMOM_I`, `IE_I`. Keep conserved and primitive index sets in separate headers/namespaces so the same `IV` can't mean two things.
-5. No silent shadows of global constants. If `pi` is the float π, the local pressure cannot also be `pi`.
+| Suffix | Length | Meaning |
+| --- | --- | --- |
+| `_i`     | `ns` | one scalar per cell, cell-centered |
+| `_state` | `ns·num_of_eq` | packed state — all 6 equations stacked per cell |
+| `_iph`   | `ns` | scalar at the i+1/2 (right) face |
+| `_imh`   | `ns` | scalar at the i-1/2 (left) face |
+| `_state_iph` / `_state_imh` | `ns·num_of_eq` | packed face state |
+| `_ip1` / `_im1` / `_ip2` / `_im2` | matches input | shifted neighbour (output of `ip1`/`im1`/…) |
+
+The suffix carries grid location only — packed-vs-scalar is spelled out as `_state` instead of doubling the `i`, so `xn_state` and `xn_i` are no longer one keystroke apart.
+
+### Variable bodies — match the writeup symbol
+
+| Concept (writeup) | C++ |
+| --- | --- |
+| ion velocity `V` | `V` |
+| neutral velocity `U` | `U` |
+| ion / neutral density `ρ_i, ρ_n` | `rho_i`, `rho_n` |
+| ion / neutral momentum `ρ_i V, ρ_n U` | `rhoV_i`, `rhoU_n` |
+| ion / neutral energy `e_i, e_n` | `e_i`, `e_n` |
+| ion / neutral pressure `p_i, p_n` | `p_i`, `p_n` |
+| ion / neutral temperature `T_i, T_n` | `T_i`, `T_n` |
+| ion / neutral number density `n_i, n_n` | `n_i`, `n_n` |
+| gravitational potential `φ_g` | `phi_g` |
+| ion-neutral collision freq `ν_in` | `nu_in` |
+| α = ρ_i ν_in | `alpha` |
+| κ_e+κ_i at face | `Kei_iph` |
+| ratio of specific heats | `gamma_mono` |
+| elementary charge | `q_e` |
+| state-vector length `ns·num_of_eq` | `n_state` |
+
+The species marker stays on the right so it pairs cleanly with the grid suffix: `rho_i_iph` reads as "ρ_i at i+1/2". π is not a global — use `arma::datum::pi` directly to avoid shadowing local `p_i`.
+
+### Index constants — namespaced
+
+Conserved- and primitive-variable indices live in separate namespaces, so the same short name (`V`, `P_I`, …) can't silently collide at index 0.
+
+| Variable | Conserved | Primitive |
+| --- | --- | --- |
+| `ρ_i` | `cons::RHO_I` | `prim::RHO_I` |
+| `ρ_n` | `cons::RHO_N` | `prim::RHO_N` |
+| ion mom / vel | `cons::MOM_I` (= `ρ_i V`) | `prim::V` |
+| neutral mom / vel | `cons::MOM_N` (= `ρ_n U`) | `prim::U` |
+| ion energy / pressure | `cons::E_I` | `prim::P_I` |
+| neutral energy / pressure | `cons::E_N` | `prim::P_N` |
+
+### Function names — one verb per role
+
+| Role | Verb | Examples |
+| --- | --- | --- |
+| compute a derived physical or numerical quantity | `cal_*` | `cal_flux_state`, `cal_source_state`, `cal_spectral_radius_state`, `cal_max_v_i`, `cal_dt_i` |
+| RHS of a conservation law | `rhs_*` | `rhs_explicit_state`, `rhs_implicit_state` |
+| time integrator | `advance_*` | `advance_Euler_state`, `advance_RK4` |
+| pure accessor / packer | `get_*` / `scalar_to` | `get_scalar`, `scalar_to` |
+| index shift | bare name | `ip1`, `im1`, `ip2`, `im2` |
 
 ## Build
 
@@ -140,13 +153,13 @@ To regenerate the build after editing `CMakeLists.txt`: re-run `cmake ..` from
 If `cmake` is not installed, the build is two short commands:
 
 ```sh
-clang++ -std=c++14 -O2 -Iinclude -DARMA_DONT_USE_LAPACK -DARMA_DONT_USE_BLAS \
-    chromosphere.cpp chromo_init.cpp util/chromo_util.cpp chromo_main.cpp \
-    -o chromo_main
+SOLVER_SRCS="src/grid.cpp src/state.cpp src/flux.cpp src/rhs.cpp src/integrators.cpp scenarios/model_c7.cpp"
 
-clang++ -std=c++14 -O2 -Iinclude -DARMA_DONT_USE_LAPACK -DARMA_DONT_USE_BLAS \
-    chromosphere.cpp chromo_init.cpp util/chromo_util.cpp tests/chromo_tests.cpp \
-    -o chromo_tests
+clang++ -std=c++14 -O2 -I. -Iinclude -DARMA_DONT_USE_LAPACK -DARMA_DONT_USE_BLAS \
+    $SOLVER_SRCS chromo_main.cpp -o chromo_main
+
+clang++ -std=c++14 -O2 -I. -Iinclude -DARMA_DONT_USE_LAPACK -DARMA_DONT_USE_BLAS \
+    $SOLVER_SRCS tests/chromo_tests.cpp -o chromo_tests
 ```
 
 The `ARMA_DONT_USE_LAPACK`/`ARMA_DONT_USE_BLAS` defines keep Armadillo
@@ -198,9 +211,9 @@ layers:
 
 **Numerical correctness**
 - `cal_dt_i` produces `dt = CFL · ds / max_v` and the CFL bound is satisfied
-- `get_max_v_i` matches `find_spectral_radius_ii`
+- `cal_max_v_i` matches `cal_spectral_radius_state`
 - A uniform, motionless, gravity-free, `B`-uniform state is an *exact* fixed
-  point of `advance_Euler_ii` and `advance_RK4`
+  point of `advance_Euler_state` and `advance_RK4`
 - Total ion and neutral mass are preserved across one explicit step on that
   fixed-point state
 
@@ -212,14 +225,14 @@ Currently 15 test cases / 294 individual checks; all passing.
   for the implicit terms actually present here. At Model C7 conditions the
   drag is stiff (`α·dt ≈ 60` on the first step), and Picard iteration of the
   form `u^{n+1,k+1} = u^n + dt·(R_E + R_I(u^{n+1,k}))` only converges when
-  `dt·|R_I'| < 1`. The body of `rhs_implicit_ii` is correct (drag,
+  `dt·|R_I'| < 1`. The body of `rhs_implicit_state` is correct (drag,
   collisional + frictional heating, and conservative field-aligned heat
   conduction, writeup §4.3–4.4), but the call site in
-  [chromosphere.cpp:393](chromosphere.cpp#L393) keeps the residual zeroed —
+  [src/integrators.cpp:57](src/integrators.cpp#L57) keeps the residual zeroed —
   the step is pure explicit Euler until a real implicit solve (Newton on the
   `R_I` Jacobian) replaces the Picard iteration.
 - `dinvB_ds_i` is allocated and used (writeup pressure-area term in
-  `cal_S_ii`), but never populated for a non-uniform `B`. `model_c7_ic`
+  `cal_source_state`), but never populated for a non-uniform `B`. `model_c7_ic`
   sets `B ≡ 1` and `dinvB_ds_i ≡ 0`, so the geometric expansion source is
   latent. Populating `dinvB_ds_i` from the actual `B(s)` is the next step
   before stratified or expanding flux-tube runs.

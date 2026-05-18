@@ -165,6 +165,11 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state);
 /// solve per species (writeup §3.7). Mutates grid.dt_state.
 Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
 
+/// Pure-explicit forward-Euler step — only the MUSCL+Rusanov R_E predictor of
+/// advance_Euler_state, with the implicit drag / temperature / conduction
+/// stages skipped (equivalent to R_I ≡ 0). Mutates grid.dt_state.
+Vec advance_Euler_explicit_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
+
 /// Explicit RK4. Mutates grid.dt_state.
 Vec advance_RK4(Grid& grid, const Vec& xn_state, const Vec& dt_i);
 

@@ -353,6 +353,14 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     return prim2cons(grid, prim);
 }
 
+// Pure-explicit step: identical to the first half of advance_Euler_state with
+// the implicit drag / temperature / conduction stages omitted. Useful for
+// comparison runs that need R_I ≡ 0.
+Vec advance_Euler_explicit_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
+    broadcast_dt(grid, dt_i);
+    return xn_state + grid.dt_state % rhs_explicit_state(grid, xn_state);
+}
+
 Vec advance_RK4(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     broadcast_dt(grid, dt_i);
     const Vec k1 = grid.dt_state % rhs_explicit_state(grid, xn_state);

@@ -16,6 +16,7 @@
 
 #include "../chromosphere.hpp"
 #include "../physics.hpp"
+#include "../scenarios/model_c7.hpp"
 
 #include <armadillo>
 #include <cmath>
@@ -326,6 +327,57 @@ static void test_rk4_uniform_fixed_point() {
         EXPECT_REL(cons1(j), cons0(j), 1e-3);
 }
 
+// Stability of advance_Euler_state under the Model C7 IC + BC driver. Runs
+// the same loop chromo_main.cpp executes, just for a fixed step budget, and
+// checks every step that all conserved variables remain finite, densities
+// stay positive, and ion/neutral temperatures stay within a generous band
+// of the chromospheric values (no runaway heating/cooling).
+static void test_advance_euler_stable_under_model_c7() {
+    Grid grid;
+    grid.init(100, 0.25f);
+    Vec xn = model_c7_ic(grid);
+
+    const arma::uword max_steps = 500;
+    for (arma::uword step = 0; step < max_steps; ++step) {
+        Vec dt = cal_dt_i(grid, xn);
+        EXPECT_TRUE(std::isfinite(dt(0)) && dt(0) > 0.0f);
+        if (!(std::isfinite(dt(0)) && dt(0) > 0.0f)) return;
+
+        model_c7_update_bc(grid, xn);
+        xn = advance_Euler_state(grid, xn, dt);
+
+        // Spot-check finiteness on every step (bail early on first failure).
+        bool finite_ok = xn.is_finite();
+        EXPECT_TRUE(finite_ok);
+        if (!finite_ok) return;
+
+        // Positivity of densities every step.
+        Vec rho_i = get_scalar(grid, xn, cons::RHO_I);
+        Vec rho_n = get_scalar(grid, xn, cons::RHO_N);
+        bool rho_pos = arma::min(rho_i) > 0.0f && arma::min(rho_n) > 0.0f;
+        EXPECT_TRUE(rho_pos);
+        if (!rho_pos) return;
+    }
+
+    // Final-state sanity: temperatures bounded, energies positive.
+    Vec prim   = cons2prim(grid, xn);
+    Vec rho_i  = get_scalar(grid, prim, prim::RHO_I);
+    Vec rho_n  = get_scalar(grid, prim, prim::RHO_N);
+    Vec p_i    = get_scalar(grid, prim, prim::P_I);
+    Vec p_n    = get_scalar(grid, prim, prim::P_N);
+    Vec n_i    = rho_i / grid.m_i;
+    Vec n_n    = rho_n / grid.m_n;
+    Vec T_i    = p_i / (2.0f * n_i * grid.k_b);
+    Vec T_n    = p_n / (n_n * grid.k_b);
+
+    EXPECT_TRUE(arma::min(p_i) > 0.0f);
+    EXPECT_TRUE(arma::min(p_n) > 0.0f);
+    // C7 interior is 6.2e3..6.7e3 K; outer ghost holds T_e at 2x. Allow
+    // [1e3, 5e4] K as a generous "no thermal runaway" band.
+    EXPECT_TRUE(arma::min(T_i) > 1.0e3f && arma::max(T_i) < 5.0e4f);
+    EXPECT_TRUE(arma::min(T_n) > 1.0e3f && arma::max(T_n) < 5.0e4f);
+}
+
 
 // =========================================================================
 // Driver
@@ -351,6 +403,7 @@ int main() {
     RUN(test_uniform_state_is_fixed_point);
     RUN(test_mass_conservation_on_uniform_state);
     RUN(test_rk4_uniform_fixed_point);
+    RUN(test_advance_euler_stable_under_model_c7);
 
     std::cout << "\n===== Summary =====\n";
     std::cout << "Passed: " << g_pass << "\n";

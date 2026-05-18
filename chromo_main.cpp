@@ -2,11 +2,20 @@
 #include "scenarios/model_c7.hpp"
 
 #include <armadillo>
+#include <cstring>
 #include <fstream>
 #include <iostream>
+#include <string>
 
-int main() {
+int main(int argc, char** argv) {
     using namespace chromosphere;
+
+    // Usage: chromo_main [output_path] [mode]
+    //   output_path: defaults to "output.txt"
+    //   mode:        "full" (semi-implicit, default) or "explicit" (R_I ≡ 0)
+    const std::string out_path = (argc > 1) ? argv[1] : "output.txt";
+    const std::string mode     = (argc > 2) ? argv[2] : "full";
+    const bool explicit_only   = (mode == "explicit");
 
     const arma::uword n_cells = 100;
     const float       cfl     = 0.25f;
@@ -18,43 +27,62 @@ int main() {
     const float c_s_target = 2.0e4f; // m/s, ion sound speed scale (writeup §4)
     const float total_time = 10.0f * arma::sum(grid.ds_i) / c_s_target;
 
-    std::ofstream logf("output.log");
-    logf << "Total time = " << total_time << std::endl;
-    std::cout << "Total time = " << total_time << std::endl;
+    std::ofstream logf("output.log", std::ios::app);
+    logf << "[" << out_path << " mode=" << mode << "] Total time = " << total_time << std::endl;
+    std::cout << "[" << mode << "] Total time = " << total_time << std::endl;
 
-    float time = 0.0f;
-    int   step = 0;
+    // Multi-snapshot output. Format:
+    //   line 1: "ns num_of_eq"
+    //   line 2: ns cumulative cell heights in km (offset by 1003 km to match
+    //           the C7 base; ds_i is in m, hence the 1e-3 conversion)
+    //   then, repeated: a "# t = T step = S" marker followed by ns lines of
+    //   num_of_eq space-separated conserved-variable values.
+    std::ofstream fout(out_path);
+    fout << grid.ns << " " << num_of_eq << '\n';
+    {
+        float cum_km = 0.0f;
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            cum_km += grid.ds_i(i) * 1.0e-3f;
+            fout << "  " << (cum_km + 1.003e3f);
+        }
+        fout << '\n';
+    }
+
+    auto write_frame = [&](float t_now, int step_now) {
+        fout << "# t = " << t_now << " step = " << step_now << '\n';
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            for (arma::uword k = 0; k < num_of_eq; ++k) {
+                fout << "  " << xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, k));
+            }
+            fout << '\n';
+        }
+    };
+
+    const int frame_stride = 50;
+    float     time         = 0.0f;
+    int       step         = 0;
+    write_frame(time, step);
+
     while (time < total_time && step < 10000) {
         Vec dt = cal_dt_i(grid, xn);
         const float dt_avg = arma::mean(dt);
 
         if (step % 100 == 0) {
-            std::cout << "step = " << step
+            std::cout << "[" << mode << "] step = " << step
                       << "  dt = " << dt_avg
                       << "  time = " << time << std::endl;
         }
 
         model_c7_update_bc(grid, xn);
-        xn = advance_Euler_state(grid, xn, dt);
+        xn = explicit_only ? advance_Euler_explicit_state(grid, xn, dt)
+                           : advance_Euler_state(grid, xn, dt);
         time += dt_avg;
         ++step;
-    }
 
-    // Output: line 1 = cumulative cell heights (km, offset by 1.003e3 to match Fortran);
-    // remaining lines = num_of_eq conserved variables per cell.
-    std::ofstream fout("output.txt");
-    float cum = 0.0f;
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        cum += grid.ds_i(i);
-        fout << "  " << (cum + 1.003e3f);
+        if (step % frame_stride == 0) write_frame(time, step);
     }
-    fout << '\n';
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        for (arma::uword k = 0; k < num_of_eq; ++k) {
-            fout << "  " << xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, k));
-        }
-        fout << '\n';
-    }
-    std::cout << "END! step=" << step << " time=" << time << std::endl;
+    if (step % frame_stride != 0) write_frame(time, step);
+
+    std::cout << "[" << mode << "] END! step=" << step << " time=" << time << std::endl;
     return 0;
 }

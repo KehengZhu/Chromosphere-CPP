@@ -200,18 +200,25 @@ Vec rhs_implicit_state(const Grid& grid, const Vec& xn_state) {
         alpha / (grid.m_i + grid.m_n) % (3.0 * grid.k_b * (T_i - T_n) + grid.m_i * w % w) + alpha % U % w,
         cons::E_N);
 
-    // ---- conservative field-aligned heat conduction (writeup eq 4.4) ---
-    //   C = (B/ds) [ K_{i+1/2}/B_{i+1/2} (T_{i+1}-T_i)/ds
-    //              - K_{i-1/2}/B_{i-1/2} (T_i-T_{i-1})/ds ]
+    // ---- conservative field-aligned heat conduction (writeup §4.4) ----
+    //   C = (B_i/Δs_i) [ K_{i+1/2}/B_{i+1/2} · (T_{i+1}-T_i)/Δs_{i+1/2}
+    //                  - K_{i-1/2}/B_{i-1/2} · (T_i-T_{i-1})/Δs_{i-1/2} ]
+    // Face spacings use Neumann BC at both ends (mirror Δs_i across the
+    // outermost/innermost interior cell).
+    const Vec ds_i_ip1 = ip1(grid, grid.ds_i, SLICE);
+    const Vec ds_i_im1 = im1(grid, grid.ds_i, SLICE);
+    const Vec ds_iph   = 0.5 * (grid.ds_i + ds_i_ip1);
+    const Vec ds_imh   = 0.5 * (ds_i_im1 + grid.ds_i);
+
     const Vec Kei_iph = 0.5 * ((Ke + Ki) + (Ke_ip1 + Ki_ip1));
     const Vec Kei_imh = 0.5 * ((Ke + Ki) + (Ke_im1 + Ki_im1));
     const Vec Kn_iph  = 0.5 * (Kn + Kn_ip1);
     const Vec Kn_imh  = 0.5 * (Kn + Kn_im1);
 
-    const Vec q_i_iph = Kei_iph / grid.B_iph % (T_i_ip1 - T_i)     / grid.ds_i;
-    const Vec q_i_imh = Kei_imh / grid.B_imh % (T_i     - T_i_im1) / grid.ds_i;
-    const Vec q_n_iph = Kn_iph  / grid.B_iph % (T_n_ip1 - T_n)     / grid.ds_i;
-    const Vec q_n_imh = Kn_imh  / grid.B_imh % (T_n     - T_n_im1) / grid.ds_i;
+    const Vec q_i_iph = Kei_iph / grid.B_iph % (T_i_ip1 - T_i)     / ds_iph;
+    const Vec q_i_imh = Kei_imh / grid.B_imh % (T_i     - T_i_im1) / ds_imh;
+    const Vec q_n_iph = Kn_iph  / grid.B_iph % (T_n_ip1 - T_n)     / ds_iph;
+    const Vec q_n_imh = Kn_imh  / grid.B_imh % (T_n     - T_n_im1) / ds_imh;
 
     const Vec C_i = grid.B_i % (q_i_iph - q_i_imh) / grid.ds_i;
     const Vec C_n = grid.B_i % (q_n_iph - q_n_imh) / grid.ds_i;

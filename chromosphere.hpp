@@ -159,8 +159,10 @@ Vec cal_max_v_i(const Grid& grid, const Vec& xn_state);
 /// Uniform CFL-limited timestep.
 Vec cal_dt_i(const Grid& grid, const Vec& xn_state);
 
-/// Semi-implicit Euler (currently pure explicit — see writeup §3.7 / Known issues).
-/// Mutates grid.dt_state.
+/// Semi-implicit (backward-Euler) integrator. Explicit MUSCL+Rusanov step
+/// for R_E, then point-implicit drag + frictional heating, point-implicit
+/// ion–neutral temperature equilibration, and a tridiagonal heat-conduction
+/// solve per species (writeup §3.7). Mutates grid.dt_state.
 Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
 
 /// Explicit RK4. Mutates grid.dt_state.

@@ -1,28 +1,45 @@
 #include "chromosphere.hpp"
-#include "scenarios/model_c7.hpp"
+#include "scenarios/scenario.hpp"
 
 #include <armadillo>
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 int main(int argc, char** argv) {
     using namespace chromosphere;
 
-    // Usage: chromo_main [output_path] [mode]
-    //   output_path: defaults to "output.txt"
-    //   mode:        "full" (semi-implicit, default) or "explicit" (R_I ≡ 0)
-    const std::string out_path = (argc > 1) ? argv[1] : "output.txt";
-    const std::string mode     = (argc > 2) ? argv[2] : "full";
-    const bool explicit_only   = (mode == "explicit");
+    // Usage: chromo_main [output_path] [mode] [ionization] [scenario] [data_path]
+    //   output_path:  defaults to "output.txt"
+    //   mode:         "full" (semi-implicit, default) or "explicit" (R_I ≡ 0)
+    //   ionization:   "ionization" (default — Stage E enabled) or "no-ionization"
+    //   scenario:     "model_c7" (default) | "pfss_field_line" | "analytic_canopy"
+    //   data_path:    required for tabulated scenarios (e.g. pfss_field_line);
+    //                 ignored otherwise
+    const std::string out_path      = (argc > 1) ? argv[1] : "output.txt";
+    const std::string mode          = (argc > 2) ? argv[2] : "full";
+    const std::string ioniz_arg     = (argc > 3) ? argv[3] : "ionization";
+    const std::string scenario_name = (argc > 4) ? argv[4] : "model_c7";
+    const std::string data_path     = (argc > 5) ? argv[5] : "";
+    const bool explicit_only        = (mode == "explicit");
+    const bool ionization_on        = (ioniz_arg != "no-ionization");
 
-    const arma::uword n_cells = 100;
-    const float       cfl     = 0.25f;
+    const float cfl = 0.25f;
+
+    Scenario sc;
+    try {
+        sc = make_scenario(scenario_name, data_path);
+    } catch (const std::exception& e) {
+        std::cerr << "scenario error: " << e.what() << std::endl;
+        return 1;
+    }
 
     Grid grid;
-    grid.init(n_cells, cfl);
-    Vec xn = model_c7_ic(grid);
+    grid.init(sc.peek_ns(), cfl);
+    grid.enable_ionization = ionization_on;
+    Vec xn = sc.ic(grid);
 
     const float c_s_target = 2.0e4f; // m/s, ion sound speed scale (writeup §4)
     const float total_time = 10.0f * arma::sum(grid.ds_i) / c_s_target;
@@ -73,7 +90,7 @@ int main(int argc, char** argv) {
                       << "  time = " << time << std::endl;
         }
 
-        model_c7_update_bc(grid, xn);
+        sc.update_bc(grid, xn);
         xn = explicit_only ? advance_Euler_explicit_state(grid, xn, dt)
                            : advance_Euler_state(grid, xn, dt);
         time += dt_avg;

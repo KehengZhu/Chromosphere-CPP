@@ -13,6 +13,10 @@ This a stream-aligned chromosphere model in C++. The model uses Armadillo, a hig
 
 ## Table of Contents
 
+- [Scenarios](#scenarios)
+  - [model_c7](#scenario-model_c7)
+  - [analytic_canopy](#scenario-analytic_canopy)
+  - [pfss_field_line](#scenario-pfss_field_line)
 - [Chromosphere Namespace](#chromosphere-namespace)
   - [Constants](#constants)
   - [Variables](#variables)
@@ -21,6 +25,95 @@ This a stream-aligned chromosphere model in C++. The model uses Armadillo, a hig
 - [Other Utilities](#other-utilities)
 - [Fortran Interfaces](#fortran-interfaces)
 - [ModChromosphereCPP](#ModChromosphereCPP)
+
+## Scenarios
+
+A *scenario* fixes the field-line geometry, initial conditions, and boundary update rule for a 1.5D run. Scenarios are dispatched by name in [chromo_main.cpp](../chromo_main.cpp), and each one populates the shared `Grid` (cells, B-field profile, φ_g, ghost cells) and returns the initial conserved-variable state vector. The dispatcher lives in [scenarios/scenario.cpp](../scenarios/scenario.cpp):
+
+```cpp
+auto sc = make_scenario(name, data_path);   // name = "model_c7" | "analytic_canopy" | "pfss_field_line"
+Grid grid;
+grid.init(sc.peek_ns(), cfl);
+grid.enable_ionization = true;              // Stage E on
+Vec xn = sc.ic(grid);                       // initial conserved state
+// per step:
+sc.update_bc(grid, xn);
+xn = advance_Euler_state(grid, xn, dt);
+```
+
+Run a scenario from the CLI:
+
+```bash
+# default (model_c7 with ionization on)
+build/chromo_main output.txt full ionization model_c7
+
+# analytic canopy
+build/chromo_main out_canopy.txt full ionization analytic_canopy
+
+# PFSS field line from a generated data file
+build/chromo_main out_pfss.txt full ionization pfss_field_line scenarios/data/pfss_qs_20190801.dat
+```
+
+All three scenarios share the same upper-BC pattern: **Dirichlet on (n_e, n_n, T_n) pinned to the IC's top value, with T_e doubled at the outer ghost as a thermal "corona mimic"**. Velocities are halved each step ([scenarios/model_c7.cpp:223](../scenarios/model_c7.cpp#L223), [scenarios/pfss_field_line.cpp:101](../scenarios/pfss_field_line.cpp#L101)), acting as a soft outflow / partial-reflection impedance.
+
+### Scenario `model_c7`
+
+Source: [scenarios/model_c7.cpp](../scenarios/model_c7.cpp).
+
+Reference quiet-sun atmosphere from Avrett & Loeser (2008, *ApJS* 175, 229), tabulated at 15 heights from 1003 km to 1989 km above τ_500 = 1. Provides:
+
+- **Initial condition**: cubic-spline interpolation of (n_e, n_n, T) onto a uniform 100-cell grid, V = U = 0.
+- **Magnetic field**: `B = 1 T` (uniform placeholder) and `∂(1/B)/∂s = 0`. Real flux-tube geometry is delegated to the `analytic_canopy` and `pfss_field_line` scenarios.
+- **Gravity**: φ_g(s) = g · h(s) with g = 274 m/s², populated from the cell-face heights. This breaks hydrostatic equilibrium of C7 (which was built for NLTE radiative balance, not HSE under ideal-gas EOS), so the atmosphere relaxes — Phase 2 of the project plan accepts this as the "quiet-sun relaxation" experiment.
+- **Upper BC**: T_e doubled (~13,350 K), T_n doubled, n_e and n_n at outer ghost ≈ C7 top values → f_outer ≈ 0.58 (only 58% ionized — *not* a fully-ionized coronal BC).
+
+### Scenario `analytic_canopy`
+
+Source: [scenarios/analytic_canopy.cpp](../scenarios/analytic_canopy.cpp), [scenarios/analytic_canopy.hpp](../scenarios/analytic_canopy.hpp).
+
+Same thermodynamic IC as `model_c7`, but overlays the consensus exponential-canopy magnetic-field recipe (Bellot Rubio & Orozco Suárez 2019; Martínez-Sykora et al. 2019):
+
+```
+B(z) = B_∞ + (B_0 - B_∞) · exp(-(z - z_base) / H_B)
+```
+
+Defaults:
+- `B_0   = 1.0e-2 T = 100 G` (footpoint network concentration)
+- `B_inf = 1.5e-3 T =  15 G` (canopy-merged value)
+- `H_B   = 300 km` (chromospheric magnetic scale height)
+
+`∂(1/B)/∂s` is then non-zero, so the flux source term in [src/flux.cpp:74](../src/flux.cpp#L74) becomes active — this is the **only** physics difference from `model_c7`. By flux conservation the tube cross-section grows as `A(z) ∝ 1/B(z)`, expanding by a factor ~6.7 across the chromospheric domain.
+
+Visualization: [util/visualize_canopy.py](visualize_canopy.py) renders the 3D "trumpet" flux tube + B(z) + A(z) + 4-panel time evolution (f, T_i, V, n_n).
+
+### Scenario `pfss_field_line`
+
+Source: [scenarios/pfss_field_line.cpp](../scenarios/pfss_field_line.cpp), [scenarios/data_file_parser.cpp](../scenarios/data_file_parser.cpp).
+
+Reads a tabulated `[META]`/`[CELLS]`/`[GHOSTS]` ASCII file produced by [util/extract_field_line.py](extract_field_line.py) from a GONG synoptic magnetogram via PFSS extrapolation. The Python pipeline (one-time setup with [util/setup_venv.sh](setup_venv.sh) and [util/fetch_magnetogram.sh](fetch_magnetogram.sh)):
+
+1. Loads the magnetogram, solves PFSS with `sunkit-magex` (or `pfsspy`) at the chosen `rss` and `nrho`.
+2. Picks a "network" footpoint inside a lat/lon window with |B_LOS| in a configurable band (default 50–150 G).
+3. Probes topology (open vs. closed) and the PFSS-smoothed footpoint |B|.
+4. Builds a uniform-in-s chromospheric grid up to `top_height_km` (default 986 km — same span as C7), interpolates C7 (n_e, n_n, T) onto the heights, and writes the data file.
+
+**Honest caveat baked into the docstring**: PFSS resolves r in [1, 2.5] R⊙. Our ~1 Mm chromospheric domain is < 0.3% of that — inside the first PFSS radial cell. So **PFSS gives only the footpoint |B| value and the topology**; it does *not* resolve B(s) inside the chromosphere. For canopy-expansion physics use `analytic_canopy` instead. Closed loops are simulated only on one footpoint side (the other footpoint and the loop apex are absorbed into the corona-mimic outer BC).
+
+Generate a data file from the canonical GONG synoptic (CR 2220):
+
+```bash
+bash util/setup_venv.sh                                    # one-time
+bash util/fetch_magnetogram.sh                             # one-time
+source .venv/bin/activate
+python util/extract_field_line.py \
+    --magnetogram util/data/mrzqs190801t0014c2220_229.fits \
+    --output     scenarios/data/pfss_qs_20190801.dat \
+    --ns 100 --top-height-km 986
+```
+
+Visualizations:
+- [util/visualize_pfss_3d.py](visualize_pfss_3d.py) renders a global sphere (Noraz Fig 1-style local box + global PFSS view) with `pfss_3d_global.png`, `pfss_3d_local.png`, `pfss_3d_rotate.mp4`.
+- [util/visualize_pfss_lines_evolution.py](visualize_pfss_lines_evolution.py) compares 2–3 field lines side-by-side (geometry + BC table + per-line evolution).
 
 ## Chromosphere Namespace
 

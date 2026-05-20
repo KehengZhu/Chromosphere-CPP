@@ -17,6 +17,7 @@ void Grid::init(arma::uword ns_in, float CFL_in) {
     mu_0       = 4.0f * static_cast<float>(arma::datum::pi) * 1.0e-7f;
     k_b        = 1.380649e-23f;
     q_e        = 1.602176634e-19f;
+    chi_H_J    = 2.179872361e-18f;
 
     ds_i.zeros(ns);
     B_imh.zeros(ns); B_iph.zeros(ns); B_i.zeros(ns);

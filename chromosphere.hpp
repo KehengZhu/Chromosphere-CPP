@@ -71,6 +71,13 @@ struct Grid {
     float mu_0       = 4.0f * static_cast<float>(arma::datum::pi) * 1.0e-7f;
     float k_b        = 1.380649e-23f;
     float q_e        = 1.602176634e-19f;
+    float chi_H_J    = 2.179872361e-18f;     // hydrogen ionization potential, 13.6 eV in J
+
+    // --- runtime toggles ---------------------------------------------------
+    // Enable Stage E (hydrogen ionization / recombination) in advance_Euler_state.
+    // Default off so the existing test suite remains a clean regression baseline;
+    // flip to true to activate the writeup §5.3 ionization stage.
+    bool enable_ionization = false;
 
     // --- cell-centered & face arrays (length ns) --------------------------
     Vec ds_i;
@@ -161,9 +168,16 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state);
 
 /// Semi-implicit (backward-Euler) integrator. Explicit MUSCL+Rusanov step
 /// for R_E, then point-implicit drag + frictional heating, point-implicit
-/// ion–neutral temperature equilibration, and a tridiagonal heat-conduction
-/// solve per species (writeup §3.7). Mutates grid.dt_state.
+/// ion–neutral temperature equilibration, a tridiagonal heat-conduction
+/// solve per species, and (if grid.enable_ionization) the point-implicit
+/// ionization Stage E (writeup §3.7, §5.3). Mutates grid.dt_state.
 Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
+
+/// Stage E: backward-Euler ionization / recombination on a single cell, scalar
+/// quadratic solve in ionization fraction f = ρ_i / (ρ_i + ρ_n). Operates on
+/// primitive state in place; intended for the operator-split integrator but
+/// exposed for direct testing. (writeup §5.3.)
+void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt);
 
 /// Pure-explicit forward-Euler step — only the MUSCL+Rusanov R_E predictor of
 /// advance_Euler_state, with the implicit drag / temperature / conduction

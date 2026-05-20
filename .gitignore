@@ -4,3 +4,15 @@ build/
 .DS_Store
 668746597ab9c90ccebae1a0/
 __pycache__/
+.venv/
+util/data/
+scenarios/data/*.dat
+
+# Generated simulation outputs and per-run logs.
+out_*.txt
+out_*.log
+output.log
+output.txt
+output_*.txt
+output_*.log
+*.out

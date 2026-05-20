@@ -336,8 +336,133 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
 }
 
 // ----------------------------------------------------------------------------
-// Backward-Euler integrator (writeup §3.7): explicit MUSCL step for R_E,
-// then three stiff sub-steps that solve R_I exactly inside one Δt.
+// Stage E (writeup §5.3): point-implicit hydrogen ionization / recombination.
+// The local ODE for f ≡ ρ_i / (ρ_i + ρ_n) under quasi-neutrality is
+//   df/dt = n_tot [ f(1-f) S_i(T_e) − f² α_r(T_e) ],
+// which backward Euler at lagged T_e reduces to the cell-local quadratic
+//   A (f^{n+1})² + B f^{n+1} − f^n = 0,
+//   A ≡ Δt n_tot (S_i + α_r),   B ≡ 1 − Δt n_tot S_i.
+// The positive root gives f^{n+1}; integrated ionizations / recombinations
+// then drive the conservative mass / momentum / energy updates of §3.4.
+// Mutates V, U, p_i, p_n, ρ_i, ρ_n in place.
+// ----------------------------------------------------------------------------
+void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
+    const Vec rho_i = get_scalar(grid, prim_state, prim::RHO_I);
+    const Vec rho_n = get_scalar(grid, prim_state, prim::RHO_N);
+    const Vec V     = get_scalar(grid, prim_state, prim::V);
+    const Vec U     = get_scalar(grid, prim_state, prim::U);
+    const Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
+    const Vec p_n   = get_scalar(grid, prim_state, prim::P_N);
+
+    const float m = grid.m_i;  // m_i = m_n for hydrogen
+    const Vec n_i = rho_i / m;
+    const Vec n_n = rho_n / m;
+    const Vec T_i = p_i / (2.0 * n_i * grid.k_b);   // T_e = T_i under quasi-neutrality
+    const Vec T_n = p_n / (n_n * grid.k_b);
+
+    // Rate coefficients at lagged T_e.
+    const Vec S = ionization_rate_S(grid, T_i);
+    const Vec a = recombination_rate_alpha(grid, T_i);
+
+    // Backward-Euler quadratic A f² + B f - f^old = 0.
+    const Vec rho_tot = rho_i + rho_n;
+    const Vec n_tot   = rho_tot / m;
+    const Vec f_old   = rho_i / rho_tot;
+    const Vec Acoef = dt * n_tot % (S + a);
+    const Vec Bcoef = 1.0 - dt * n_tot % S;
+
+    Vec f_new(grid.ns);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        // Degenerate A → 0 (no rate activity): linear fallback f = f_old / B.
+        if (Acoef(i) < 1e-30f) {
+            const float B_i = Bcoef(i);
+            f_new(i) = (B_i > 0.0f) ? (f_old(i) / B_i) : f_old(i);
+        } else {
+            const float B_i = Bcoef(i);
+            const float disc = B_i * B_i + 4.0f * Acoef(i) * f_old(i);
+            // disc ≥ 0 always when f_old, A ≥ 0; guard against rounding.
+            const float sqrt_disc = std::sqrt(std::max(disc, 0.0f));
+            f_new(i) = (-B_i + sqrt_disc) / (2.0f * Acoef(i));
+        }
+        if (f_new(i) < 0.0f) f_new(i) = 0.0f;
+        if (f_new(i) > 1.0f) f_new(i) = 1.0f;
+    }
+
+    // Integrated ionization / recombination counts (per m³) over Δt. Evaluated
+    // at post-step densities and lagged T_e (writeup §5.3, plan §3.4 issue d).
+    const Vec rho_i_new = f_new % rho_tot;
+    const Vec rho_n_new = (1.0 - f_new) % rho_tot;
+    const Vec n_i_new   = rho_i_new / m;
+    const Vec n_n_new   = rho_n_new / m;
+    const Vec Gamma_ion = dt * n_i_new % n_n_new % S;
+    const Vec Gamma_rec = dt * n_i_new % n_i_new % a;
+
+    // Momentum bookkeeping (lagged velocities).
+    const Vec rhoV_i_old = rho_i % V;
+    const Vec rhoU_n_old = rho_n % U;
+    const Vec dmom       = m * (Gamma_ion % U - Gamma_rec % V);
+    const Vec rhoV_i_new = rhoV_i_old + dmom;
+    const Vec rhoU_n_new = rhoU_n_old - dmom;
+    const Vec V_new = rhoV_i_new / rho_i_new;
+    const Vec U_new = rhoU_n_new / rho_n_new;
+
+    // Energy bookkeeping (writeup §5.3, eqs. stageE-ei / stageE-en). We update
+    // in *thermal* form: convert pressures to thermal energy ε = (3/2) p, apply
+    // the source-driven Δε, then rebuild pressures from the new ε and KE.
+    const Vec eps_i_old = 1.5 * p_i;
+    const Vec eps_n_old = 1.5 * p_n;
+    const Vec KE_i_old  = 0.5 * rho_i % V % V;
+    const Vec KE_n_old  = 0.5 * rho_n % U % U;
+    const Vec KE_i_new  = 0.5 * rho_i_new % V_new % V_new;
+    const Vec KE_n_new  = 0.5 * rho_n_new % U_new % U_new;
+
+    const Vec th_inherit = 1.5 * grid.k_b * T_n;   // per-particle thermal carried by new ion
+    const Vec th_leave   = 1.5 * grid.k_b * T_i;   // per-particle thermal leaving with recomb. neutral
+    const Vec KE_inherit = 0.5 * m * U % U;        // per-particle KE inherited by new ion (from neutral)
+    const Vec KE_leave   = 0.5 * m * V % V;        // per-particle KE leaving ion fluid
+
+    // Δ(total energy_i) = Q^{e_i}_ion · Δt  (writeup §2.3 boxed)
+    //                   = Γ_ion^Δ (3/2 k_B T_n + ½ m U²)
+    //                   − Γ_rec^Δ (3/2 k_B T_i + ½ m V²)
+    //                   − Γ_ion^Δ χ_H
+    const Vec dE_i = Gamma_ion % (th_inherit + KE_inherit)
+                   - Gamma_rec % (th_leave   + KE_leave)
+                   - Gamma_ion * grid.chi_H_J;
+    const Vec dE_n = -Gamma_ion % (th_inherit + KE_inherit)
+                   +  Gamma_rec % (th_leave   + KE_leave);
+
+    // Thermal-energy update: Δε = (Q_ion · Δt) − ΔKE. The boxed Q^{e_i}_ion
+    // accounts only for thermal+KE flux between species (Meier & Shumlak 2012);
+    // gravity contributes Δρ_s · φ_g to each species' conserved energy through
+    // the mass conservation, which is "tracked silently" via ρ_new φ_g in
+    // prim2cons() and does *not* enter the thermal update.
+    const Vec eps_i_new = eps_i_old + dE_i - (KE_i_new - KE_i_old);
+    const Vec eps_n_new = eps_n_old + dE_n - (KE_n_new - KE_n_old);
+
+    // Floor pressures at a small positive value if χ_H drain exceeded the
+    // available ion thermal energy. This is a non-conservative regularization
+    // (writeup §5.3); the lost energy is the radiative-heating term that a
+    // future PR will supply.
+    const float p_floor = 1.0e-15f;
+    Vec p_i_new = (2.0f / 3.0f) * eps_i_new;
+    Vec p_n_new = (2.0f / 3.0f) * eps_n_new;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        if (p_i_new(i) < p_floor) p_i_new(i) = p_floor;
+        if (p_n_new(i) < p_floor) p_n_new(i) = p_floor;
+    }
+
+    prim_state.zeros();
+    prim_state += scalar_to(grid, rho_i_new, prim::RHO_I);
+    prim_state += scalar_to(grid, rho_n_new, prim::RHO_N);
+    prim_state += scalar_to(grid, V_new,     prim::V);
+    prim_state += scalar_to(grid, U_new,     prim::U);
+    prim_state += scalar_to(grid, p_i_new,   prim::P_I);
+    prim_state += scalar_to(grid, p_n_new,   prim::P_N);
+}
+
+// ----------------------------------------------------------------------------
+// Backward-Euler integrator (writeup §3.7, §5.3): explicit MUSCL step for R_E,
+// then four stiff sub-steps (B→C→D→E) that solve R_I exactly inside one Δt.
 // ----------------------------------------------------------------------------
 Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     broadcast_dt(grid, dt_i);
@@ -349,6 +474,9 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     apply_drag_stage(grid, prim, dt);
     apply_temperature_stage(grid, prim, dt);
     apply_conduction_stage(grid, prim, dt);
+    if (grid.enable_ionization) {
+        apply_ionization_stage(grid, prim, dt);
+    }
 
     return prim2cons(grid, prim);
 }

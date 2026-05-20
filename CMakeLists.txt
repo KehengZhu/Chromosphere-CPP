@@ -23,7 +23,11 @@ add_library(chromosphere STATIC
     src/flux.cpp
     src/rhs.cpp
     src/integrators.cpp
+    scenarios/scenario.cpp
     scenarios/model_c7.cpp
+    scenarios/analytic_canopy.cpp
+    scenarios/data_file_parser.cpp
+    scenarios/pfss_field_line.cpp
 )
 target_include_directories(chromosphere PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

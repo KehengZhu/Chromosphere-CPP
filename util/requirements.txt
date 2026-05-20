@@ -1,0 +1,10 @@
+# Python deps for the field-line extraction pipeline.
+# Pinned loosely: any recent compatible release should work; tighten if needed.
+numpy>=1.26,<3
+scipy>=1.11,<2
+astropy>=6,<8
+sunpy>=5,<7
+# sunkit-magex is the post-2024 renaming of pfsspy. Either should work; the
+# script imports defensively. Install at least one of them.
+sunkit-magex>=1.0; python_version >= "3.10"
+pfsspy>=1.2; python_version >= "3.10"

@@ -7,9 +7,10 @@
  *
  * File format: see scenarios/data_file_parser.hpp.
  *
- * Boundary update follows the model_c7 convention: outer ghost densities and
- * temperatures stay pinned to the values written in the file's [GHOSTS]
- * section; outer velocities are halved each call to damp outflow.
+ * Boundary update delegates to `apply_open_bcs` (scenario.hpp): reflecting
+ * wall at the inner face, zero-gradient outflow at the outer face. The
+ * [GHOSTS] section of the data file is therefore only used to seed the
+ * pre-step ghost state in `pfss_ic`; the first `update_bc` call replaces it.
  */
 
 #pragma once
@@ -26,7 +27,8 @@ arma::uword pfss_peek_ns(const std::string& data_path);
 /// Populate the Grid from the file and return the initial conserved state.
 Vec pfss_ic(Grid& grid, const std::string& data_path);
 
-/// Refresh outer ghost cells (halve velocity, keep n/T pinned).
+/// Refresh ghost cells via `apply_open_bcs`: inner reflecting wall, outer
+/// zero-gradient outflow.
 void pfss_update_bc(Grid& grid, const Vec& xn);
 
 } // namespace chromosphere

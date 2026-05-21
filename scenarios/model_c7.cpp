@@ -1,6 +1,16 @@
 #include "model_c7.hpp"
+#include "scenario.hpp"
 
 namespace chromosphere {
+
+// Photospheric inner-ghost reservoir values for model_c7. kInnerRhoNPinned
+// and kInnerTnPinned are captured from the C7 base in model_c7_ic.
+//   * ρ_n, T_n       → Dirichlet (set from IC's C7 base)
+//   * n_i, T_i, V, U → Neumann (zero gradient from cell 0)
+namespace {
+float kInnerRhoNPinned = 0.0f;
+float kInnerTnPinned   = 0.0f;
+}
 
 // Natural cubic spline interpolation, port of interp1 in ModChromosphereTest.f90
 static Vec interp1_spline(const Vec& xData, const Vec& yData, const Vec& xVal) {
@@ -171,6 +181,9 @@ Vec model_c7_ic(Grid& grid) {
     // Inner ghost cells replicate the innermost extended cell. φ_g taken as
     // the lower face of cell 0 (which is 0 by gauge choice), matching the
     // im1 path in rhs.cpp:178 and integrators.cpp:189.
+    //
+    // The (n_n, T) snapshot here is what model_c7_update_bc later uses as
+    // the Dirichlet-pinned photospheric reservoir state for the inner ghost.
     {
         const float n_e = ne_E(0);
         const float n_n = nn_E(0);
@@ -183,6 +196,9 @@ Vec model_c7_ic(Grid& grid) {
         grid.inner_boundary0_i(cons::E_I)   = 1.5f * grid.k_b * n_e * 2.0f * T + n_e * grid.m_i * phi_g_inner;
         grid.inner_boundary0_i(cons::E_N)   = 1.5f * grid.k_b * n_n * T       + n_n * grid.m_n * phi_g_inner;
         grid.inner_boundary1_i = grid.inner_boundary0_i;
+
+        kInnerRhoNPinned = n_n * grid.m_n;
+        kInnerTnPinned   = T;
     }
 
     grid.broadcast();
@@ -190,40 +206,92 @@ Vec model_c7_ic(Grid& grid) {
 }
 
 void model_c7_update_bc(Grid& grid, const Vec& xn) {
-    Vec rho_i  = get_scalar(grid, xn, cons::RHO_I);
-    Vec rho_n  = get_scalar(grid, xn, cons::RHO_N);
-    Vec rhoV_i = get_scalar(grid, xn, cons::MOM_I);
-    Vec rhoU_n = get_scalar(grid, xn, cons::MOM_N);
-    const float V_ns = rhoV_i(grid.ns - 1) / rho_i(grid.ns - 1);
-    const float U_ns = rhoU_n(grid.ns - 1) / rho_n(grid.ns - 1);
+    // Start from the shared open BC (Neumann outer ghosts on every variable,
+    // reflecting-wall inner ghosts). We then overwrite (a) the outer ghost
+    // velocities with the V/2, V/4 damping cascade and (b) the inner ghosts
+    // with the photospheric reservoir BC.
+    apply_open_bcs(grid, xn);
 
-    // Pull the pinned (n, T) state from the current outer-ghost storage, but
-    // rebuild the energy with the halved velocity. Densities & temperatures
-    // stay frozen at Model C7 values.
-    auto refresh = [&](Vec& ob, float v_target, float u_target) {
-        const float n_i_B = ob(cons::RHO_I) / grid.m_i;
-        const float n_n_B = ob(cons::RHO_N) / grid.m_n;
-        const float V_B_old = ob(cons::MOM_I) / (grid.m_i * n_i_B);
-        const float U_B_old = ob(cons::MOM_N) / (grid.m_n * n_n_B);
-        // Match the convention used in model_c7_ic for outer-ghost energies:
-        // the ghost cell's φ_g is the upper face of the last interior cell.
-        const float phi_g = grid.phi_g_iph(grid.ns - 1);
-        const float T_i_B = (2.0f/3.0f * ob(cons::E_I) - 1.0f/3.0f * grid.m_i * n_i_B * V_B_old * V_B_old
-                            - 2.0f/3.0f * grid.m_i * n_i_B * phi_g) / (2.0f * n_i_B * grid.k_b);
-        const float T_n_B = (2.0f/3.0f * ob(cons::E_N) - 1.0f/3.0f * grid.m_n * n_n_B * U_B_old * U_B_old
-                            - 2.0f/3.0f * grid.m_n * n_n_B * phi_g) / (n_n_B * grid.k_b);
-        ob(cons::MOM_I) = grid.m_i * n_i_B * v_target;
-        ob(cons::MOM_N) = grid.m_n * n_n_B * u_target;
-        ob(cons::E_I)   = 1.5f * grid.k_b * n_i_B * 2.0f * T_i_B
-                        + 0.5f * grid.m_i * n_i_B * v_target * v_target + grid.m_i * n_i_B * phi_g;
-        ob(cons::E_N)   = 1.5f * grid.k_b * n_n_B * T_n_B
-                        + 0.5f * grid.m_n * n_n_B * u_target * u_target + grid.m_n * n_n_B * phi_g;
-    };
+    // --- Outer face: damped-velocity outflow + (T, 2T) cascade -------------
+    // Keep ρ_i, ρ_n Neumann (already set by apply_open_bcs). Replace V, U
+    // with a halving cascade (V/2 at ghost 0, V/4 at ghost 1) to reintroduce
+    // a velocity jump across face ns-½ so the Rusanov flux's −½λ(U_R−U_L)
+    // term provides outflow dissipation. Replace T_i and T_n with a (T, 2T)
+    // cascade — the second ghost holds 2× the interior T to mimic the sharp
+    // chromosphere→corona transition-region temperature rise.
+    {
+        const float phi_g_out = grid.phi_g_iph(grid.ns - 1);
+        auto pack_outer = [&](Vec& ob, float vel_scale, float T_scale) {
+            const float rho_i = ob(cons::RHO_I);
+            const float rho_n = ob(cons::RHO_N);
+            const float n_i   = rho_i / grid.m_i;
+            const float n_n   = rho_n / grid.m_n;
+            const float V_old = ob(cons::MOM_I) / rho_i;
+            const float U_old = ob(cons::MOM_N) / rho_n;
+            // Back out T_i, T_n from the energy packed by apply_open_bcs,
+            // which used V_old, U_old and phi_g_out.
+            const float T_i_in = (ob(cons::E_I) - 0.5f * rho_i * V_old * V_old
+                                  - rho_i * phi_g_out)
+                                 / (3.0f * grid.k_b * n_i);
+            const float T_n_in = (ob(cons::E_N) - 0.5f * rho_n * U_old * U_old
+                                  - rho_n * phi_g_out)
+                                 / (1.5f * grid.k_b * n_n);
+            const float V_new = vel_scale * V_old;
+            const float U_new = vel_scale * U_old;
+            const float T_i   = T_scale * T_i_in;
+            const float T_n   = T_scale * T_n_in;
+            ob(cons::MOM_I) = rho_i * V_new;
+            ob(cons::MOM_N) = rho_n * U_new;
+            ob(cons::E_I)   = 1.5f * grid.k_b * n_i * 2.0f * T_i
+                              + 0.5f * rho_i * V_new * V_new + rho_i * phi_g_out;
+            ob(cons::E_N)   = 1.5f * grid.k_b * n_n * T_n
+                              + 0.5f * rho_n * U_new * U_new + rho_n * phi_g_out;
+        };
+        pack_outer(grid.outer_boundary0_i, 0.5f,  1.0f);
+        pack_outer(grid.outer_boundary1_i, 0.25f, 2.0f);
+    }
 
-    const float v0 = 0.5f * V_ns;
-    const float u0 = 0.5f * U_ns;
-    refresh(grid.outer_boundary0_i, v0,        u0);
-    refresh(grid.outer_boundary1_i, 0.5f * v0, 0.5f * u0);
+    // Inner photospheric BC:
+    //   ρ_n, T_n         Dirichlet at the C7 base snapshot (kInnerRhoNPinned,
+    //                    kInnerTnPinned).
+    //   n_i, T_i, V, U   Neumann from cell 0 (zero-gradient).
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    const float rho_i_0 = xn(arma::sub2ind(sz, 0, cons::RHO_I));
+    const float rho_n_0 = xn(arma::sub2ind(sz, 0, cons::RHO_N));
+    const float V_0     = xn(arma::sub2ind(sz, 0, cons::MOM_I)) / rho_i_0;
+    const float U_0     = xn(arma::sub2ind(sz, 0, cons::MOM_N)) / rho_n_0;
+    const float E_i_0   = xn(arma::sub2ind(sz, 0, cons::E_I));
+    // Decode T_i from cell 0 using the same gauge cons2prim does
+    // (state.cpp:107): cell-averaged φ_g for the pressure subtract.
+    const float phi_g_cell_0 = 0.5f * (grid.phi_g_imh(0) + grid.phi_g_iph(0));
+    const float n_i_0   = rho_i_0 / grid.m_i;
+    const float p_i_0   = 2.0f/3.0f * E_i_0 - 1.0f/3.0f * rho_i_0 * V_0 * V_0
+                          - 2.0f/3.0f * rho_i_0 * phi_g_cell_0;
+    const float T_i_0   = p_i_0 / (2.0f * n_i_0 * grid.k_b);
+
+    const float phi_g_inner = grid.phi_g_imh(0);
+    const float rho_n_g     = kInnerRhoNPinned;
+    const float T_n_g       = kInnerTnPinned;
+    const float n_n_g       = rho_n_g / grid.m_n;
+    const float rho_i_g     = rho_i_0;          // n_i Neumann from cell 0
+    const float n_i_g       = rho_i_g / grid.m_i;
+    const float T_i_g       = T_i_0;            // T_i Neumann from cell 0
+
+    Vec& ob0 = grid.inner_boundary0_i;
+    ob0(cons::RHO_I) = rho_i_g;
+    ob0(cons::RHO_N) = rho_n_g;
+    ob0(cons::MOM_I) = rho_i_g * V_0;
+    ob0(cons::MOM_N) = rho_n_g * U_0;
+    ob0(cons::E_I)   = 1.5f * grid.k_b * n_i_g * 2.0f * T_i_g
+                       + 0.5f * rho_i_g * V_0 * V_0 + rho_i_g * phi_g_inner;
+    ob0(cons::E_N)   = 1.5f * grid.k_b * n_n_g * T_n_g
+                       + 0.5f * rho_n_g * U_0 * U_0 + rho_n_g * phi_g_inner;
+    // Both inner ghosts get the same values — first-order Neumann on the
+    // free variables and Dirichlet on the pinned ones. The ip2/im2 stencil
+    // then sees a flat (zero-gradient / constant-Dirichlet) ghost layer.
+    grid.inner_boundary1_i = ob0;
+
+    grid.broadcast();
 }
 
 } // namespace chromosphere

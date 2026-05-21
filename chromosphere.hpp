@@ -79,6 +79,17 @@ struct Grid {
     // flip to true to activate the writeup §5.3 ionization stage.
     bool enable_ionization = false;
 
+    // Effective hydrogen photoionization rate from the ground state [s^-1],
+    // modeling the Lyα-excitation + Balmer-continuum two-step channel
+    // (Carlsson & Stein 2002 establish this as the dominant chromospheric
+    // ionization path; the Lyman continuum itself contributes negligibly).
+    // C&S 2002 report a chromospheric ionization/recombination timescale of
+    // 10^3–10^5 s; we adopt the geometric mean ~10^4 s as a single-rate
+    // closure suitable for the 2-state (ground+continuum) reduction used
+    // here. See Leenaarts et al. 2007 for the "fixed radiative rates"
+    // implementation paradigm in non-equilibrium chromospheric MHD codes.
+    float photoionization_rate = 1.0e-4f;
+
     // --- cell-centered & face arrays (length ns) --------------------------
     Vec ds_i;
     Vec B_i, B_imh, B_iph;

@@ -1,5 +1,6 @@
 #include "pfss_field_line.hpp"
 #include "data_file_parser.hpp"
+#include "scenario.hpp"
 
 namespace chromosphere {
 
@@ -70,38 +71,7 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
 }
 
 void pfss_update_bc(Grid& grid, const Vec& xn) {
-    Vec rho_i  = get_scalar(grid, xn, cons::RHO_I);
-    Vec rho_n  = get_scalar(grid, xn, cons::RHO_N);
-    Vec rhoV_i = get_scalar(grid, xn, cons::MOM_I);
-    Vec rhoU_n = get_scalar(grid, xn, cons::MOM_N);
-    const float V_ns = rhoV_i(grid.ns - 1) / rho_i(grid.ns - 1);
-    const float U_ns = rhoU_n(grid.ns - 1) / rho_n(grid.ns - 1);
-
-    // Pinned (n, T) outer-ghost state with rebuilt energy from the halved
-    // velocity. phi_g is the same in subtract-and-rebuild, so its value
-    // cancels out; we use phi_g_iph[ns-1] to match the IC.
-    auto refresh = [&](Vec& ob, float v_target, float u_target) {
-        const float n_i_B = ob(cons::RHO_I) / grid.m_i;
-        const float n_n_B = ob(cons::RHO_N) / grid.m_n;
-        const float V_B_old = ob(cons::MOM_I) / (grid.m_i * n_i_B);
-        const float U_B_old = ob(cons::MOM_N) / (grid.m_n * n_n_B);
-        const float phi_g = grid.phi_g_iph(grid.ns - 1);
-        const float T_i_B = (2.0f/3.0f * ob(cons::E_I) - 1.0f/3.0f * grid.m_i * n_i_B * V_B_old * V_B_old
-                            - 2.0f/3.0f * grid.m_i * n_i_B * phi_g) / (2.0f * n_i_B * grid.k_b);
-        const float T_n_B = (2.0f/3.0f * ob(cons::E_N) - 1.0f/3.0f * grid.m_n * n_n_B * U_B_old * U_B_old
-                            - 2.0f/3.0f * grid.m_n * n_n_B * phi_g) / (n_n_B * grid.k_b);
-        ob(cons::MOM_I) = grid.m_i * n_i_B * v_target;
-        ob(cons::MOM_N) = grid.m_n * n_n_B * u_target;
-        ob(cons::E_I)   = 1.5f * grid.k_b * n_i_B * 2.0f * T_i_B
-                        + 0.5f * grid.m_i * n_i_B * v_target * v_target + grid.m_i * n_i_B * phi_g;
-        ob(cons::E_N)   = 1.5f * grid.k_b * n_n_B * T_n_B
-                        + 0.5f * grid.m_n * n_n_B * u_target * u_target + grid.m_n * n_n_B * phi_g;
-    };
-
-    const float v0 = 0.5f * V_ns;
-    const float u0 = 0.5f * U_ns;
-    refresh(grid.outer_boundary0_i, v0,        u0);
-    refresh(grid.outer_boundary1_i, 0.5f * v0, 0.5f * u0);
+    apply_open_bcs(grid, xn);
 }
 
 } // namespace chromosphere

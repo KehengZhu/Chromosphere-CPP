@@ -53,4 +53,18 @@ inline Vec recombination_rate_alpha(const Grid& /*grid*/, const Vec& T_e) {
     return 2.7e-19f * arma::pow(arma::clamp(T_e, 1.0f, arma::datum::inf) / 1.0e4f, -0.75f);
 }
 
+/// Effective hydrogen photoionization rate P_phot [s^-1] (per neutral atom).
+/// Single-rate closure for the Lyα + Balmer-continuum two-step channel
+/// (Carlsson & Stein 2002 ApJ 572, 626). For the 2-state reduction adopted
+/// here this is the radiative complement to the collisional Voronov rate:
+///   dn_i/dt |_phot = +P_phot · n_n   (does not deplete electron thermal pool
+///                                     — energy comes from the radiation field,
+///                                     not from local kinetic temperature).
+/// Returned as a uniform Vec so the Stage E call site can stay vectorized;
+/// a height-dependent profile (e.g. Carlsson & Leenaarts 2012 recipe) drops
+/// in by replacing this body.
+inline Vec photoionization_rate_P(const Grid& grid) {
+    return Vec(grid.ns, arma::fill::value(grid.photoionization_rate));
+}
+
 } // namespace chromosphere

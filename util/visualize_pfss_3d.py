@@ -390,7 +390,7 @@ def main():
     ap.add_argument("--b-max", type=float, default=75.0)
     ap.add_argument("--fp-lat-window", type=float, nargs=2, default=[-15.0, 15.0])
     ap.add_argument("--fp-lon-window", type=float, nargs=2, default=[0.0, 360.0])
-    ap.add_argument("--out-dir", default=HERE)
+    ap.add_argument("--out-dir", default=os.path.join(HERE, "visualization"))
     ap.add_argument("--frames", type=int, default=72, help="rotation movie frame count")
     ap.add_argument("--fps", type=int, default=24)
     ap.add_argument("--no-movie", action="store_true")
@@ -399,6 +399,7 @@ def main():
     ap.add_argument("--n-local-seeds", type=int, default=12,
                     help="seeds per side in the local box (so n^2 traces)")
     args = ap.parse_args()
+    os.makedirs(args.out_dir, exist_ok=True)
 
     warnings.filterwarnings("ignore", message=".*WCS.*")
 

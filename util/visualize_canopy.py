@@ -301,12 +301,13 @@ def render_movie(args, xx_sim, frames_sim, fps=15):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim-output", default="out_canopy.txt")
-    ap.add_argument("--out-png", default="util/canopy_geometry_evolution.png")
-    ap.add_argument("--out-mp4", default="util/canopy_evolution.mp4")
+    ap.add_argument("--out-png", default="util/visualization/canopy_geometry_evolution.png")
+    ap.add_argument("--out-mp4", default="util/visualization/canopy_evolution.mp4")
     ap.add_argument("--top-height-km", type=float, default=986.0,
                     help="vertical extent of the flux-tube render (Mm)")
     ap.add_argument("--fps", type=int, default=15)
     args = ap.parse_args()
+    os.makedirs(os.path.dirname(os.path.abspath(args.out_png)), exist_ok=True)
 
     print(f"[viz] reading {args.sim_output}")
     xx, frames = read_frames(args.sim_output)

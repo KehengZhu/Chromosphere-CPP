@@ -6,9 +6,11 @@ build/
 __pycache__/
 .venv/
 util/data/
+util/visualization/
 scenarios/data/*.dat
+outputs/
 
-# Generated simulation outputs and per-run logs.
+# Generated simulation outputs and per-run logs (if written to root).
 out_*.txt
 out_*.log
 output.log

@@ -11,18 +11,21 @@
 int main(int argc, char** argv) {
     using namespace chromosphere;
 
-    // Usage: chromo_main [output_path] [mode] [ionization] [scenario] [data_path]
+    // Usage: chromo_main [output_path] [mode] [ionization] [scenario] [data_path] [time_mult]
     //   output_path:  defaults to "output.txt"
     //   mode:         "full" (semi-implicit, default) or "explicit" (R_I ≡ 0)
     //   ionization:   "ionization" (default — Stage E enabled) or "no-ionization"
     //   scenario:     "model_c7" (default) | "pfss_field_line" | "analytic_canopy"
     //   data_path:    required for tabulated scenarios (e.g. pfss_field_line);
-    //                 ignored otherwise
-    const std::string out_path      = (argc > 1) ? argv[1] : "output.txt";
+    //                 ignored otherwise (pass "-" or "" for scenarios that don't use it)
+    //   time_mult:    multiplier on the default total_time (default 1.0). Step
+    //                 cap scales accordingly so a longer run is not truncated.
+    const std::string out_path      = (argc > 1) ? argv[1] : "outputs/output.txt";
     const std::string mode          = (argc > 2) ? argv[2] : "full";
     const std::string ioniz_arg     = (argc > 3) ? argv[3] : "ionization";
     const std::string scenario_name = (argc > 4) ? argv[4] : "model_c7";
     const std::string data_path     = (argc > 5) ? argv[5] : "";
+    const float       time_mult     = (argc > 6) ? std::stof(argv[6]) : 1.0f;
     const bool explicit_only        = (mode == "explicit");
     const bool ionization_on        = (ioniz_arg != "no-ionization");
 
@@ -42,9 +45,10 @@ int main(int argc, char** argv) {
     Vec xn = sc.ic(grid);
 
     const float c_s_target = 2.0e4f; // m/s, ion sound speed scale (writeup §4)
-    const float total_time = 10.0f * arma::sum(grid.ds_i) / c_s_target;
+    const float total_time = time_mult * 10.0f * arma::sum(grid.ds_i) / c_s_target;
+    const int   step_cap   = static_cast<int>(std::max(10000.0f, 10000.0f * time_mult));
 
-    std::ofstream logf("output.log", std::ios::app);
+    std::ofstream logf("outputs/output.log", std::ios::app);
     logf << "[" << out_path << " mode=" << mode << "] Total time = " << total_time << std::endl;
     std::cout << "[" << mode << "] Total time = " << total_time << std::endl;
 
@@ -80,7 +84,7 @@ int main(int argc, char** argv) {
     int       step         = 0;
     write_frame(time, step);
 
-    while (time < total_time && step < 10000) {
+    while (time < total_time && step < step_cap) {
         Vec dt = cal_dt_i(grid, xn);
         const float dt_avg = arma::mean(dt);
 

@@ -40,7 +40,8 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     full_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "build", "output_full.txt")
     expl_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "..", "build", "output_explicit.txt")
-    out_path  = sys.argv[3] if len(sys.argv) > 3 else os.path.join(here, "model_c7_compare.mp4")
+    out_path  = sys.argv[3] if len(sys.argv) > 3 else os.path.join(here, "visualization", "model_c7_compare.mp4")
+    os.makedirs(os.path.join(here, "visualization"), exist_ok=True)
     fps       = int(sys.argv[4]) if len(sys.argv) > 4 else 15
 
     xx_f, frames_f = read_frames(full_path)

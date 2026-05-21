@@ -64,7 +64,8 @@ def primitives(xn):
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     in_path  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "build", "output.txt")
-    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "model_c7_snapshot.png")
+    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "visualization", "model_c7_snapshot.png")
+    os.makedirs(os.path.join(here, "visualization"), exist_ok=True)
 
     xx, frames = read_frames(in_path)
     t_final, step_final, xn = frames[-1]

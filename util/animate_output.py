@@ -14,7 +14,8 @@ from plot_output import read_frames, primitives
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     in_path  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "build", "output.txt")
-    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "model_c7_evolution.mp4")
+    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "visualization", "model_c7_evolution.mp4")
+    os.makedirs(os.path.join(here, "visualization"), exist_ok=True)
     fps      = int(sys.argv[3]) if len(sys.argv) > 3 else 15
 
     xx, frames = read_frames(in_path)

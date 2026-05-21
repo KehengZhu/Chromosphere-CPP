@@ -45,21 +45,28 @@ The 6 conserved variables per cell (writeup eq 61):
 
 ```
 chromosphere.hpp         Public API: Grid struct, cons::/prim:: indices, function decls
-physics.hpp              Inline collision frequency (nu_in) and heat conductivities (kappa_e, kappa_n)
-chromo_main.cpp          Main entry point
+physics.hpp              Inline collision frequency (nu_in), conductivities (kappa_e, kappa_n),
+                         Stage E ionization/recombination rates (Voronov 1997, Hummer 1994)
+chromo_main.cpp          Main entry point — CLI dispatcher
 src/
   grid.cpp               Grid::init, Grid::broadcast
   state.cpp              cons2prim, prim2cons, get_scalar, scalar_to, ip1/im1/ip2/im2, flux_lim
   flux.cpp               cal_flux_state, cal_spectral_radius_state, cal_source_state
   rhs.cpp                rhs_explicit_state (MUSCL+Rusanov), rhs_implicit_state
-  integrators.cpp        advance_Euler_state, advance_RK4, cal_dt_i, cal_max_v_i, print_xn
+  integrators.cpp        advance_Euler_state, advance_RK4, cal_dt_i, cal_max_v_i, Stage E driver
 scenarios/
-  model_c7.{hpp,cpp}     Model C7 IC, BC update, cubic-spline interpolation, MODEL_C7 table
-tests/chromo_tests.cpp   Test suite (physics + numerics)
+  scenario.{hpp,cpp}     Scenario dispatcher (make_scenario) + shared apply_open_bcs helper
+  model_c7.{hpp,cpp}     Model C7 atmosphere IC + photospheric inner BC
+  analytic_canopy.{hpp,cpp}  Exponential-canopy B(z) overlay on the C7 thermodynamic profile
+  pfss_field_line.{hpp,cpp}  Tabulated PFSS field-line IC (reads scenarios/data/*.dat)
+  data_file_parser.{hpp,cpp} ASCII [META]/[CELLS]/[GHOSTS] parser used by pfss_field_line
+  data/                  Generated field-line .dat files (gitignored except .gitkeep)
+tests/chromo_tests.cpp   Test suite (physics + numerics + scenarios)
 include/armadillo        Vendored header-only Armadillo
-util/                    Plotting helpers (plotting.ipynb, plotting.m)
+util/                    Python visualizations + PFSS extraction pipeline
 fortran/                 Legacy Fortran main + SWMF couplers (not built)
 docs/                    Al Shidi 2019 paper + Keheng's writeup
+outputs/                 Default destination for chromo_main snapshot files (.txt, .log)
 CMakeLists.txt           Build config
 ```
 
@@ -172,13 +179,158 @@ and `sub2ind`, none of which require LAPACK/BLAS.
 ([docs/Keheng_s_chromosphere.pdf](docs/Keheng_s_chromosphere.pdf) Table 1).
 Runs until `t = 10·L/Cs ≈ 474 s` or 10000 steps, whichever comes first.
 
-Outputs:
+### CLI
 
-- `output.log` — total simulation time, header info
-- `output.txt` — line 1: cumulative cell heights (km, offset by 1003);
-  remaining `ns` lines: the 6 conserved variables per cell, space-separated.
+```
+build/chromo_main [output_path] [mode] [ionization] [scenario] [data_path] [time_mult]
+```
 
-Plotting helpers (untouched): `util/plotting.ipynb`, `util/plotting.m`.
+Each argument is positional and optional; defaults are shown in parentheses.
+
+| Arg | Position | Values | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `output_path` | 1 | any path | `outputs/output.txt` | snapshot file (line 1 = `ns num_of_eq`; line 2 = cumulative heights in km; then `# t = T step = S` markers each followed by `ns` rows of conserved variables) |
+| `mode`        | 2 | `full` \| `explicit` | `full` | `full` = semi-implicit driver (Stage A explicit, B drag, C T-equil, D conduction). `explicit` zeroes `R_I` and runs pure explicit Euler |
+| `ionization`  | 3 | `ionization` \| `no-ionization` | `ionization` | toggles Stage E (Voronov 1997 ionization + Hummer 1994 recombination) |
+| `scenario`    | 4 | `model_c7` \| `analytic_canopy` \| `pfss_field_line` | `model_c7` | which IC + BC pair to dispatch (see [Scenarios](#scenarios)) |
+| `data_path`   | 5 | path to `.dat` \| `""` | `""` | required for tabulated scenarios (`pfss_field_line`); ignored otherwise |
+| `time_mult`   | 6 | float | `1.0` | multiplier on the default total simulation time `10·L/Cs`. Step cap scales with this so longer runs aren't truncated |
+
+A companion `outputs/output.log` is appended with the configured `total_time`.
+
+### Examples
+
+```sh
+# Default: Model C7, semi-implicit, ionization ON
+build/chromo_main
+
+# Ionization OFF baseline for comparison
+build/chromo_main outputs/out_c7_off.txt full no-ionization model_c7
+
+# Run 10× longer (useful for relaxation studies)
+build/chromo_main outputs/out_c7_10x.txt full ionization model_c7 "" 10.0
+
+# Pure-explicit run (drops the implicit drag / conduction / T-equilibration stages)
+build/chromo_main outputs/out_c7_explicit.txt explicit ionization model_c7
+
+# Analytic exponential-canopy B(z) overlay on the C7 thermodynamic profile
+build/chromo_main outputs/out_canopy.txt full ionization analytic_canopy
+
+# PFSS field line generated from a GONG synoptic magnetogram
+build/chromo_main outputs/out_pfss.txt full ionization pfss_field_line \
+    scenarios/data/pfss_qs_20190801.dat
+```
+
+To compare ionization on/off side-by-side after a run, point the 8-panel
+animation at the two snapshot files:
+
+```sh
+.venv/bin/python util/animate_ionization_compare.py \
+    outputs/out_c7_10x_on.txt outputs/out_c7_10x_off.txt \
+    util/c7_openbc_8panel_compare.mp4 24
+```
+
+Other ready-made viz scripts in `util/`: `visualize_rho_total.py`,
+`visualize_rho_total_compare.py`, `visualize_canopy.py`, `visualize_pfss_3d.py`,
+`visualize_pfss_lines_evolution.py`, `plot_output.py` (last-frame 8-panel
+snapshot).
+
+## Scenarios
+
+A *scenario* fixes the field-line geometry, initial conditions, and per-step
+boundary update rule. Scenarios share a single `Grid` (cells, B-field profile,
+φ_g, ghost buffers) and a single dispatcher:
+
+```cpp
+auto sc = make_scenario(name, data_path);   // "model_c7" | "analytic_canopy" | "pfss_field_line"
+Grid grid;
+grid.init(sc.peek_ns(), cfl);
+grid.enable_ionization = true;
+Vec xn = sc.ic(grid);                       // initial conserved state
+// per step:
+sc.update_bc(grid, xn);
+xn = advance_Euler_state(grid, xn, dt);
+```
+
+The shared `apply_open_bcs` helper in [scenarios/scenario.cpp](scenarios/scenario.cpp)
+provides the default open-hyperbolic BC (inner reflecting wall + outer pure-Neumann
+outflow); individual scenarios call it then overwrite ghosts that need scenario-specific
+treatment.
+
+### `model_c7`
+
+Source: [scenarios/model_c7.cpp](scenarios/model_c7.cpp).
+
+Quiet-sun atmosphere from Avrett & Loeser (2008, *ApJS* 175, 229), tabulated
+at 15 heights from 1003 km to 1989 km above τ₅₀₀₀ = 1.
+
+- **IC** — cubic-spline interpolation of (n_e, n_n, T) onto a uniform 100-cell
+  grid; V = U = 0.
+- **B-field** — `B ≡ 1 T` uniform, `∂(1/B)/∂s ≡ 0` (geometry overlays live in
+  the other two scenarios).
+- **Gravity** — φ_g(s) = g·(h(s) − h_base) with g = 274 m/s². This breaks
+  ideal-gas HSE of C7 by ~25% (C7 was built for NLTE radiative balance), so
+  the atmosphere relaxes; the resulting transient is the "quiet-sun
+  relaxation" experiment.
+- **Outer BC** — pure Neumann on ρ (via `apply_open_bcs`) with two overlaid
+  cascades. *Velocity*: V_g0 = V/2, V_g1 = V/4 (same for U) — the jump across
+  face ns−½ keeps the Rusanov flux dissipative. *Temperature*: T_g0 = T,
+  T_g1 = 2·T for both species — the sharp T-jump at face ns+½ mimics the
+  chromosphere→corona transition-region temperature rise.
+- **Inner BC** — photospheric reservoir: ρ_n and T_n Dirichlet at the C7 base
+  snapshot; n_i, T_i, V, U Neumann from cell 0 (open lower boundary).
+
+### `analytic_canopy`
+
+Source: [scenarios/analytic_canopy.cpp](scenarios/analytic_canopy.cpp).
+
+Same thermodynamic IC as `model_c7`, but overlays the consensus
+exponential-canopy magnetic-field recipe (Bellot Rubio & Orozco Suárez 2019;
+Martínez-Sykora et al. 2019):
+
+```
+B(z) = B_∞ + (B_0 − B_∞) · exp(−(z − z_base) / H_B)
+```
+
+Defaults: `B_0 = 100 G` (footpoint), `B_∞ = 15 G` (canopy-merged), `H_B = 300 km`.
+
+`∂(1/B)/∂s` is now non-zero, so the flux-tube expansion source term in
+[src/flux.cpp](src/flux.cpp) becomes active — this is the **only** physics
+difference from `model_c7`. By flux conservation the tube cross-section grows
+as `A(z) ∝ 1/B(z)`, expanding by ~6.7× across the chromospheric domain.
+
+Visualization: [util/visualize_canopy.py](util/visualize_canopy.py) renders
+the 3D "trumpet" flux tube + B(z) + A(z) + 4-panel time evolution.
+
+### `pfss_field_line`
+
+Source: [scenarios/pfss_field_line.cpp](scenarios/pfss_field_line.cpp),
+[scenarios/data_file_parser.cpp](scenarios/data_file_parser.cpp).
+
+Reads a tabulated `[META]`/`[CELLS]`/`[GHOSTS]` ASCII file produced by
+[util/extract_field_line.py](util/extract_field_line.py) from a GONG synoptic
+magnetogram via PFSS extrapolation. One-time setup:
+
+```sh
+bash util/setup_venv.sh
+bash util/fetch_magnetogram.sh
+.venv/bin/python util/extract_field_line.py \
+    --magnetogram util/data/mrzqs190801t0014c2220_229.fits \
+    --output     scenarios/data/pfss_qs_20190801.dat \
+    --ns 100 --top-height-km 986
+```
+
+**Honest caveat**: PFSS resolves r ∈ [1, 2.5] R⊙; the ~1 Mm chromospheric
+domain is < 0.3% of that and falls inside the first PFSS radial cell. So
+`pfss_field_line` gives a physically-motivated **footpoint |B|** and the
+field-line **topology** (open / closed, arc length, inclination), but it does
+**not** resolve B(s) inside the chromosphere — for canopy expansion below
+~1 Mm use `analytic_canopy`. Closed loops are simulated only on one footpoint
+side; the apex and far footpoint are absorbed into the outer BC.
+
+Visualizations: [util/visualize_pfss_3d.py](util/visualize_pfss_3d.py) (global
+sphere + local box renders), [util/visualize_pfss_lines_evolution.py](util/visualize_pfss_lines_evolution.py)
+(side-by-side comparison of multiple field lines).
 
 ## Tests
 
@@ -217,7 +369,7 @@ layers:
 - Total ion and neutral mass are preserved across one explicit step on that
   fixed-point state
 
-Currently 15 test cases / 294 individual checks; all passing.
+Currently 34 test cases / 5552 individual checks; all passing.
 
 ## Known issues (worth attending to before more physics is added)
 

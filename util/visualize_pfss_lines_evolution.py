@@ -394,12 +394,13 @@ def main():
     ap.add_argument("--outs", nargs="+", default=[
         "out_lineA.txt", "out_lineB.txt", "out_lineC.txt",
     ])
-    ap.add_argument("--out-png", default="util/pfss_lines_evolution.png")
-    ap.add_argument("--out-mp4", default="util/pfss_lines_evolution.mp4")
+    ap.add_argument("--out-png", default="util/visualization/pfss_lines_evolution.png")
+    ap.add_argument("--out-mp4", default="util/visualization/pfss_lines_evolution.mp4")
     ap.add_argument("--fps", type=int, default=15)
     ap.add_argument("--nrho", type=int, default=60)
     ap.add_argument("--rss",  type=float, default=2.5)
     args = ap.parse_args()
+    os.makedirs(os.path.dirname(os.path.abspath(args.out_png)), exist_ok=True)
 
     assert len(args.dats) == len(args.outs), "dats/outs length mismatch"
     print(f"[viz] loading {len(args.dats)} PFSS data files")

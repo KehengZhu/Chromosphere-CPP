@@ -338,12 +338,19 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
 // ----------------------------------------------------------------------------
 // Stage E (writeup §5.3): point-implicit hydrogen ionization / recombination.
 // The local ODE for f ≡ ρ_i / (ρ_i + ρ_n) under quasi-neutrality is
-//   df/dt = n_tot [ f(1-f) S_i(T_e) − f² α_r(T_e) ],
-// which backward Euler at lagged T_e reduces to the cell-local quadratic
-//   A (f^{n+1})² + B f^{n+1} − f^n = 0,
-//   A ≡ Δt n_tot (S_i + α_r),   B ≡ 1 − Δt n_tot S_i.
+//   df/dt = n_tot [ f(1-f) S_i(T_e) − f² α_r(T_e) ] + (1-f) P_phot,
+// where P_phot [s^-1] is the effective ground-state photoionization rate
+// (Carlsson & Stein 2002 ApJ 572, 626; physics.hpp::photoionization_rate_P).
+// Backward Euler at lagged T_e reduces to the cell-local quadratic
+//   A (f^{n+1})² + B f^{n+1} − C = 0,
+//   A ≡ Δt n_tot (S_i + α_r),
+//   B ≡ 1 − Δt n_tot S_i + Δt P_phot,
+//   C ≡ f^n + Δt P_phot.
 // The positive root gives f^{n+1}; integrated ionizations / recombinations
 // then drive the conservative mass / momentum / energy updates of §3.4.
+// Photoionization contributes to the integrated ion count but does NOT
+// drain χ_H from the electron thermal pool (the energy comes from the
+// absorbed UV photon, not from kinetic temperature).
 // Mutates V, U, p_i, p_n, ρ_i, ρ_n in place.
 // ----------------------------------------------------------------------------
 void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
@@ -363,24 +370,27 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     // Rate coefficients at lagged T_e.
     const Vec S = ionization_rate_S(grid, T_i);
     const Vec a = recombination_rate_alpha(grid, T_i);
+    const Vec P = photoionization_rate_P(grid);
 
-    // Backward-Euler quadratic A f² + B f - f^old = 0.
+    // Backward-Euler quadratic A f² + B f - C = 0.
     const Vec rho_tot = rho_i + rho_n;
     const Vec n_tot   = rho_tot / m;
     const Vec f_old   = rho_i / rho_tot;
     const Vec Acoef = dt * n_tot % (S + a);
-    const Vec Bcoef = 1.0 - dt * n_tot % S;
+    const Vec Bcoef = 1.0 - dt * n_tot % S + dt * P;
+    const Vec Ccoef = f_old + dt * P;
 
     Vec f_new(grid.ns);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        // Degenerate A → 0 (no rate activity): linear fallback f = f_old / B.
+        // Degenerate A → 0 (no collisional rate activity): linear fallback
+        // f = C / B accounts for the photoionization-only limit.
         if (Acoef(i) < 1e-30f) {
             const float B_i = Bcoef(i);
-            f_new(i) = (B_i > 0.0f) ? (f_old(i) / B_i) : f_old(i);
+            f_new(i) = (B_i > 0.0f) ? (Ccoef(i) / B_i) : f_old(i);
         } else {
             const float B_i = Bcoef(i);
-            const float disc = B_i * B_i + 4.0f * Acoef(i) * f_old(i);
-            // disc ≥ 0 always when f_old, A ≥ 0; guard against rounding.
+            const float disc = B_i * B_i + 4.0f * Acoef(i) * Ccoef(i);
+            // disc ≥ 0 always when f_old, A, P ≥ 0; guard against rounding.
             const float sqrt_disc = std::sqrt(std::max(disc, 0.0f));
             f_new(i) = (-B_i + sqrt_disc) / (2.0f * Acoef(i));
         }
@@ -390,12 +400,15 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
 
     // Integrated ionization / recombination counts (per m³) over Δt. Evaluated
     // at post-step densities and lagged T_e (writeup §5.3, plan §3.4 issue d).
+    // Photoionization adds a (1-f)·P branch that bypasses the n_e·n_n product.
     const Vec rho_i_new = f_new % rho_tot;
     const Vec rho_n_new = (1.0 - f_new) % rho_tot;
     const Vec n_i_new   = rho_i_new / m;
     const Vec n_n_new   = rho_n_new / m;
-    const Vec Gamma_ion = dt * n_i_new % n_n_new % S;
-    const Vec Gamma_rec = dt * n_i_new % n_i_new % a;
+    const Vec Gamma_coll = dt * n_i_new % n_n_new % S;       // collisional only — drains χ_H
+    const Vec Gamma_phot = dt * n_n_new % P;                 // photoionization — no χ_H drain
+    const Vec Gamma_ion  = Gamma_coll + Gamma_phot;          // total ionizations (mass/mom/KE budget)
+    const Vec Gamma_rec  = dt * n_i_new % n_i_new % a;
 
     // Momentum bookkeeping (lagged velocities).
     const Vec rhoV_i_old = rho_i % V;
@@ -421,13 +434,18 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     const Vec KE_inherit = 0.5 * m * U % U;        // per-particle KE inherited by new ion (from neutral)
     const Vec KE_leave   = 0.5 * m * V % V;        // per-particle KE leaving ion fluid
 
-    // Δ(total energy_i) = Q^{e_i}_ion · Δt  (writeup §2.3 boxed)
-    //                   = Γ_ion^Δ (3/2 k_B T_n + ½ m U²)
-    //                   − Γ_rec^Δ (3/2 k_B T_i + ½ m V²)
-    //                   − Γ_ion^Δ χ_H
-    const Vec dE_i = Gamma_ion % (th_inherit + KE_inherit)
-                   - Gamma_rec % (th_leave   + KE_leave)
-                   - Gamma_ion * grid.chi_H_J;
+    // Δ(total energy_i) = Q^{e_i}_ion · Δt  (writeup §2.3 boxed; updated for
+    // photoionization)
+    //                   = Γ_ion^Δ  (3/2 k_B T_n + ½ m U²)
+    //                   − Γ_rec^Δ  (3/2 k_B T_i + ½ m V²)
+    //                   − Γ_coll^Δ χ_H
+    // Only the collisional ionization branch drains χ_H from the electron
+    // thermal pool; photoionizations are powered by absorbed UV photons, so
+    // their χ_H is supplied by the (unmodeled) radiation field rather than
+    // by the local plasma. Thermal/KE inheritance applies to all new ions.
+    const Vec dE_i = Gamma_ion  % (th_inherit + KE_inherit)
+                   - Gamma_rec  % (th_leave   + KE_leave)
+                   - Gamma_coll * grid.chi_H_J;
     const Vec dE_n = -Gamma_ion % (th_inherit + KE_inherit)
                    +  Gamma_rec % (th_leave   + KE_leave);
 

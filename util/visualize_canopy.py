@@ -32,13 +32,13 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 import matplotlib.gridspec as gridspec
 from matplotlib import colormaps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from plot_output import read_frames, primitives
+from _anim_parallel import save_frames_parallel
 
 
 # Match scenarios/analytic_canopy.cpp:
@@ -223,6 +223,63 @@ def render_combined(args, xx_sim, frames_sim):
     plt.close(fig)
 
 
+def _render_canopy_frame(k, tmpdir, xx_sim, f_k, Ti_k, v_k, nn_k,
+                         f_0, Ti_0, Bz_G, z_km, A_rel, t_k, nT, ylims_bot):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(2, 4, figsize=(15, 7))
+    fig.suptitle(
+        f"Analytic-canopy scenario  |  t = {t_k:6.2f} s   step {k}/{nT-1}",
+        fontsize=12,
+    )
+
+    # Top row — static geometry + t=0 reference
+    axes[0, 0].plot(Bz_G, z_km, "C3-", lw=1.8)
+    axes[0, 0].set_xlabel("|B| (G)"); axes[0, 0].set_ylabel("z above base (km)")
+    axes[0, 0].set_title("B(z)"); axes[0, 0].grid(True, alpha=0.3)
+
+    axes[0, 1].plot(A_rel, z_km, "C2-", lw=1.8)
+    axes[0, 1].set_xlabel("A(z)/A_0"); axes[0, 1].set_title("Cross-section")
+    axes[0, 1].grid(True, alpha=0.3)
+
+    axes[0, 2].plot(xx_sim, f_0, "k:", lw=1.4, label="t=0")
+    axes[0, 2].plot(xx_sim, f_k, color="C3", lw=1.4)
+    axes[0, 2].set_xlabel("height s (km)"); axes[0, 2].set_ylabel("f")
+    axes[0, 2].set_title("ionization fraction f")
+    axes[0, 2].grid(True, alpha=0.3); axes[0, 2].legend(loc="best", fontsize=9)
+
+    axes[0, 3].plot(xx_sim, Ti_0, "k:", lw=1.4, label="t=0")
+    axes[0, 3].plot(xx_sim, Ti_k, color="C3", lw=1.4)
+    axes[0, 3].set_xlabel("height s (km)"); axes[0, 3].set_ylabel(r"$T_i$ (K)")
+    axes[0, 3].set_title("ion temperature")
+    axes[0, 3].grid(True, alpha=0.3); axes[0, 3].legend(loc="best", fontsize=9)
+
+    # Bottom row — animated quantities
+    bot_panels = [
+        (f_k,  "ionization fraction f", False),
+        (Ti_k, r"$T_i$ (K)",            False),
+        (v_k,  r"$V$ (m/s)",            False),
+        (nn_k, r"$n_n$ (m$^{-3}$)",     True),
+    ]
+    for j, (arr, label, logy) in enumerate(bot_panels):
+        ax = axes[1, j]
+        ax.set_xlim(xx_sim.min(), xx_sim.max())
+        ax.set_ylim(*ylims_bot[j])
+        if logy:
+            ax.set_yscale("log")
+        if label == r"$V$ (m/s)":
+            ax.axhline(0, color="0.7", lw=0.5)
+        ax.set_xlabel("height s (km)"); ax.set_ylabel(label); ax.set_title(label)
+        ax.grid(True, alpha=0.3)
+        ax.plot(xx_sim, arr, color="C3", lw=1.4)
+
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.savefig(os.path.join(tmpdir, f"frame_{k:06d}.png"), dpi=120)
+    plt.close(fig)
+
+
 def render_movie(args, xx_sim, frames_sim, fps=15):
     prims = [primitives(fr[2]) for fr in frames_sim]
     t_arr = np.array([fr[0] for fr in frames_sim])
@@ -232,70 +289,30 @@ def render_movie(args, xx_sim, frames_sim, fps=15):
     Ti = np.stack([p[6] for p in prims])
     f  = ni / (ni + nn)
 
-    fig, axes = plt.subplots(2, 4, figsize=(15, 7))
-    suptitle = fig.suptitle("", fontsize=12)
-    # Top row: domain-level fields (B(z), A(z), f and T evolution as background)
-    z_m = np.linspace(0.0, args.top_height_km * 1000.0, 200)
-    z_km = z_m / 1.0e3
-    Bz_G = B_canopy(z_m) * 1.0e4
+    z_m   = np.linspace(0.0, args.top_height_km * 1000.0, 200)
+    z_km  = z_m / 1.0e3
+    Bz_G  = B_canopy(z_m) * 1.0e4
     A_rel = B0_T / B_canopy(z_m)
 
-    axes[0, 0].plot(Bz_G, z_km, "C3-", lw=1.8); axes[0, 0].set_xlabel("|B| (G)"); axes[0, 0].set_ylabel("z above base (km)"); axes[0, 0].set_title("B(z)")
-    axes[0, 0].grid(True, alpha=0.3)
-    axes[0, 1].plot(A_rel, z_km, "C2-", lw=1.8); axes[0, 1].set_xlabel("A(z)/A_0"); axes[0, 1].set_title("Cross-section")
-    axes[0, 1].grid(True, alpha=0.3)
-
-    # f(s, t=0) and T(s, t=0) as static reference
-    axes[0, 2].plot(xx_sim, f[0], "k:", lw=1.4, label="t=0")
-    axes[0, 2].set_xlabel("height s (km)"); axes[0, 2].set_ylabel("f"); axes[0, 2].set_title("ionization fraction f")
-    axes[0, 2].grid(True, alpha=0.3); axes[0, 2].legend(loc="best", fontsize=9)
-    axes[0, 3].plot(xx_sim, Ti[0], "k:", lw=1.4, label="t=0")
-    axes[0, 3].set_xlabel("height s (km)"); axes[0, 3].set_ylabel(r"$T_i$ (K)"); axes[0, 3].set_title("ion temperature")
-    axes[0, 3].grid(True, alpha=0.3); axes[0, 3].legend(loc="best", fontsize=9)
-
-    # Bottom row: animated quantities (will be updated)
-    panel_data = [("f", f, "ionization fraction f", False),
-                  ("Ti", Ti, r"$T_i$ (K)", False),
-                  ("V",  v,  r"$V$ (m/s)",  False),
-                  ("nn", nn, r"$n_n$ (m$^{-3}$)", True)]
-    lines = []
-    for j, (key, arr, label, logy) in enumerate(panel_data):
-        ax = axes[1, j]
-        ax.set_xlim(xx_sim.min(), xx_sim.max())
-        if logy:
+    def ylim(arr, log=False):
+        if log:
             a = arr[arr > 0]
-            ax.set_ylim(a.min() / 1.5, a.max() * 1.5)
-            ax.set_yscale("log")
-        else:
-            lo, hi = float(arr.min()), float(arr.max())
-            pad = 0.06 * (hi - lo if hi > lo else max(abs(hi), 1.0))
-            ax.set_ylim(lo - pad, hi + pad)
-        if key == "V":
-            ax.axhline(0, color="0.7", lw=0.5)
-        ax.set_xlabel("height s (km)"); ax.set_ylabel(label); ax.set_title(label)
-        ax.grid(True, alpha=0.3)
-        (ln,) = ax.plot(xx_sim, arr[0], color="C3", lw=1.4)
-        lines.append((ln, arr))
+            return float(a.min()) / 1.5, float(a.max()) * 1.5
+        lo, hi = float(arr.min()), float(arr.max())
+        pad = 0.06 * (hi - lo if hi > lo else max(abs(hi), 1.0))
+        return lo - pad, hi + pad
 
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    ylims_bot = [ylim(f), ylim(Ti), ylim(v), ylim(nn, log=True)]
 
-    def update(k):
-        for (ln, arr) in lines:
-            ln.set_ydata(arr[k])
-        suptitle.set_text(
-            f"Analytic-canopy scenario  |  t = {t_arr[k]:6.2f} s   step {k}/{len(t_arr)-1}"
-        )
-        return [ln for ln, _ in lines] + [suptitle]
-
-    writer = animation.FFMpegWriter(
-        fps=fps, codec="libx264",
-        extra_args=["-pix_fmt", "yuv420p",
-                    "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"],
+    nT = len(t_arr)
+    save_frames_parallel(
+        _render_canopy_frame,
+        [(k, xx_sim, f[k], Ti[k], v[k], nn[k],
+          f[0], Ti[0], Bz_G, z_km, A_rel, t_arr[k], nT, ylims_bot)
+         for k in range(nT)],
+        args.out_mp4, fps,
     )
-    anim = animation.FuncAnimation(fig, update, frames=len(t_arr), interval=1000.0/fps, blit=False)
-    anim.save(args.out_mp4, writer=writer, dpi=120)
-    print(f"[viz] wrote {args.out_mp4}  ({len(t_arr)} frames @ {fps} fps)")
-    plt.close(fig)
+    print(f"[viz] wrote {args.out_mp4}  ({nT} frames @ {fps} fps)")
 
 
 def main():

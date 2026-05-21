@@ -28,13 +28,13 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 import matplotlib.gridspec as gridspec
 from matplotlib import colormaps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from plot_output import read_frames, primitives
+from _anim_parallel import save_frames_parallel
 from extract_field_line import _import_pfsspy, load_magnetogram
 from visualize_pfss_3d import make_tracer, trace_seeds, R_SUN_M
 
@@ -286,101 +286,105 @@ def render_combined(out_png, dats, frames_per_line, fp_meta, full_traces, openne
     plt.close(fig)
 
 
+def _render_pfss_lines_frame(k, tmpdir, t_k, nF, xx_all, sliced_arrays,
+                              ylims, fp_meta, colors, field_specs):
+    """Render one frame; sliced_arrays[p] is a 1-D array for panel p."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    n_lines = len(xx_all)
+    fig, axes = plt.subplots(4, n_lines, figsize=(4.6 * n_lines, 10.5))
+    if n_lines == 1:
+        axes = [[axes[r]] for r in range(4)]
+    fig.suptitle(
+        f"PFSS field-line chromospheric evolution  |  t = {t_k:6.2f} s   ({k+1}/{nF})",
+        fontsize=13,
+    )
+
+    for j, (key, label, logy) in enumerate(field_specs):
+        for i in range(n_lines):
+            panel_idx = j * n_lines + i
+            ax = axes[j][i]
+            ax.set_xlim(xx_all[i].min(), xx_all[i].max())
+            ax.set_ylim(*ylims[panel_idx])
+            if logy:
+                ax.set_yscale("log")
+            ax.grid(True, alpha=0.3)
+            if j == 0:
+                ax.set_title(
+                    f"line {chr(ord('A')+i)}  |  "
+                    f"lon={fp_meta[i]['fp_lon']:.1f}°, lat={fp_meta[i]['fp_lat']:.1f}°  "
+                    f"|B_LOS|={fp_meta[i]['fp_B_LOS']:+.1f} G",
+                    fontsize=10, color=colors[i],
+                )
+            if i == 0:
+                ax.set_ylabel(label)
+            if j == 3:
+                ax.set_xlabel("height s (km)")
+            ax.plot(xx_all[i], sliced_arrays[panel_idx], color=colors[i], lw=1.5)
+            if key == "V":
+                ax.axhline(0, color="0.6", lw=0.5)
+
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.savefig(os.path.join(tmpdir, f"frame_{k:06d}.png"), dpi=120)
+    plt.close(fig)
+
+
 def render_movie(out_mp4, dats, frames_per_line, fp_meta, fps=15):
-    """Animation: 3 columns × 4 rows of fields, one column per line."""
+    """Animation: n_lines columns × 4 rows of fields, one column per line."""
     n_lines = len(dats)
-    colors = ["C0", "C2", "C3"]
+    colors  = ["C0", "C2", "C3"]
     field_specs = [
-        ("f",  "ionization fraction f",     False),
-        ("Ti", r"$T_i$ (K)",                False),
-        ("V",  r"$V$ (m/s)",                False),
-        ("nn", r"$n_n$ (m$^{-3}$)",          True),
+        ("f",  "ionization fraction f",  False),
+        ("Ti", r"$T_i$ (K)",             False),
+        ("V",  r"$V$ (m/s)",             False),
+        ("nn", r"$n_n$ (m$^{-3}$)",      True),
     ]
 
-    # Common time grid driven by line 0; sample nearest frame for B and C.
     xx0, frames0 = frames_per_line[0]
     t0 = np.array([fr[0] for fr in frames0])
+    nF = len(t0)
 
-    # Cache prims and times per line.
-    prims_all = []
-    t_all = []
+    # Pre-compute stacked field arrays and time axes per line.
+    stacked = []   # stacked[i] = {key: (nT, ns) array} for line i
+    t_all  = []
     xx_all = []
     for xx, frames in frames_per_line:
-        prims_all.append([primitives(fr[2]) for fr in frames])
+        prims = [primitives(fr[2]) for fr in frames]
+        ni = np.stack([p[0] for p in prims])
+        nn = np.stack([p[1] for p in prims])
+        v  = np.stack([p[2] for p in prims])
+        Ti = np.stack([p[6] for p in prims])
+        stacked.append({"f": ni / (ni + nn), "Ti": Ti, "V": v, "nn": nn})
         t_all.append(np.array([fr[0] for fr in frames]))
         xx_all.append(xx)
 
-    # Compute global ylims per (field, line) so each panel's axis is stable.
-    panel_data = []  # list of length 4*n_lines, each item is (line_i, fld_key, full_array)
+    # Build flat ylims list (row-major: row 0 all lines, row 1 all lines, ...)
     ylims = []
-    for j, (key, _, _) in enumerate(field_specs):
+    for key, _, logy in field_specs:
         for i in range(n_lines):
-            ni = np.stack([p[0] for p in prims_all[i]], axis=0)
-            nn = np.stack([p[1] for p in prims_all[i]], axis=0)
-            v  = np.stack([p[2] for p in prims_all[i]], axis=0)
-            Ti = np.stack([p[6] for p in prims_all[i]], axis=0)
-            f  = ni / (ni + nn)
-            arr = {"f": f, "Ti": Ti, "V": v, "nn": nn}[key]
-            panel_data.append((i, key, arr))
-            if key == "nn":
+            arr = stacked[i][key]
+            if logy:
                 a = arr[arr > 0]
-                ylims.append((a.min() / 1.5, a.max() * 1.5))
+                ylims.append((float(a.min()) / 1.5, float(a.max()) * 1.5))
             else:
                 lo, hi = float(arr.min()), float(arr.max())
                 pad = 0.06 * (hi - lo if hi > lo else max(abs(hi), 1.0))
                 ylims.append((lo - pad, hi + pad))
 
-    fig, axes = plt.subplots(4, n_lines, figsize=(4.6 * n_lines, 10.5))
-    if n_lines == 1:
-        axes = np.array([[ax] for ax in axes])
-    suptitle = fig.suptitle("", fontsize=13)
-    lines = []
-    for j, (key, label, logy) in enumerate(field_specs):
-        for i in range(n_lines):
-            ax = axes[j, i]
-            ax.set_xlim(xx_all[i].min(), xx_all[i].max())
-            lo, hi = ylims[j * n_lines + i]
-            ax.set_ylim(lo, hi)
-            if logy:
-                ax.set_yscale("log")
-            ax.grid(True, alpha=0.3)
-            if j == 0:
-                ax.set_title(f"line {chr(ord('A')+i)}  |  lon={fp_meta[i]['fp_lon']:.1f}°, lat={fp_meta[i]['fp_lat']:.1f}°  |B_LOS|={fp_meta[i]['fp_B_LOS']:+.1f} G",
-                             fontsize=10, color=colors[i])
-            if i == 0:
-                ax.set_ylabel(label)
-            if j == 3:
-                ax.set_xlabel("height s (km)")
-            arr = panel_data[j * n_lines + i][2]
-            (ln,) = ax.plot(xx_all[i], arr[0], color=colors[i], lw=1.5)
-            if key == "V":
-                ax.axhline(0, color="0.6", lw=0.5)
-            lines.append(ln)
-
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
-
-    def update(k):
+    # Build per-frame args: pre-slice to 1-D arrays so IPC sends minimal data.
+    frame_args = []
+    for k in range(nF):
         tn = t0[k]
-        for j in range(4):
-            for i in range(n_lines):
-                idx = int(np.argmin(np.abs(t_all[i] - tn)))
-                arr = panel_data[j * n_lines + i][2]
-                lines[j * n_lines + i].set_ydata(arr[idx])
-        suptitle.set_text(
-            f"PFSS field-line chromospheric evolution  |  t = {tn:6.2f} s   ({k+1}/{len(t0)})"
-        )
-        return lines + [suptitle]
+        idx = [int(np.argmin(np.abs(t_all[i] - tn))) for i in range(n_lines)]
+        sliced = [stacked[p % n_lines][fld][idx[p % n_lines]]
+                  for p, (fld, _, _) in enumerate(
+                      f for f in field_specs for _ in range(n_lines))]
+        frame_args.append((k, t0[k], nF, xx_all, sliced, ylims, fp_meta, colors, field_specs))
 
-    # libx264 needs even pixel dimensions; pad with the scale filter just in case.
-    writer = animation.FFMpegWriter(
-        fps=fps, codec="libx264",
-        extra_args=["-pix_fmt", "yuv420p",
-                    "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"],
-    )
-    anim = animation.FuncAnimation(fig, update, frames=len(t0), interval=1000.0/fps, blit=False)
-    anim.save(out_mp4, writer=writer, dpi=120)
-    print(f"[viz] wrote {out_mp4}  ({len(t0)} frames @ {fps} fps)")
-    plt.close(fig)
+    save_frames_parallel(_render_pfss_lines_frame, frame_args, out_mp4, fps)
+    print(f"[viz] wrote {out_mp4}  ({nF} frames @ {fps} fps)")
 
 
 def main():

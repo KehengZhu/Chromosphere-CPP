@@ -19,12 +19,12 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 from matplotlib import colormaps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from plot_output import read_frames
+from _anim_parallel import save_frames_parallel
 
 CNI, CNN = 0, 1   # conserved-variable indices for ρ_i, ρ_n (see plot_output.py:20)
 
@@ -109,10 +109,10 @@ def render_png(out_png, xx, t, rho, ds_m_estimate):
     print(f"[viz] wrote {out_png}  (column-mass drift {drift:+.3f}%)")
 
 
-def render_mp4(out_mp4, xx, t, rho, fps=24):
-    pos = rho > 0
-    vmin = float(rho[pos].min()) * 0.8
-    vmax = float(rho.max()) * 1.2
+def _render_rho_frame(k, tmpdir, xx, rho_k, rho_0, t_k, nT, vmin, vmax):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(11, 5))
     ax.set_xlim(xx.min(), xx.max())
@@ -121,27 +121,26 @@ def render_mp4(out_mp4, xx, t, rho, fps=24):
     ax.set_xlabel("height s (km)")
     ax.set_ylabel(r"$\rho_i + \rho_n$  (kg/m$^3$)")
     ax.grid(True, alpha=0.3)
-    (ln_now,) = ax.plot(xx, rho[0], lw=2.0, color="C3", label="ρ_tot(s, t)")
-    (ln_init,) = ax.plot(xx, rho[0], lw=1.2, color="k", ls=":", alpha=0.7, label="ρ_tot(s, t=0)")
+    ax.plot(xx, rho_0, lw=1.2, color="k", ls=":", alpha=0.7, label="ρ_tot(s, t=0)")
+    ax.plot(xx, rho_k, lw=2.0, color="C3", label="ρ_tot(s, t)")
     ax.legend(loc="upper right", fontsize=9)
-    title = ax.set_title("")
-
+    ax.set_title(rf"$\rho_\mathrm{{tot}}(s)$  |  t = {t_k:7.2f} s   ({k+1}/{nT})")
     fig.tight_layout()
-
-    def update(k):
-        ln_now.set_ydata(rho[k])
-        title.set_text(rf"$\rho_\mathrm{{tot}}(s)$  |  t = {t[k]:7.2f} s   ({k+1}/{len(t)})")
-        return ln_now, title
-
-    writer = animation.FFMpegWriter(
-        fps=fps, codec="libx264",
-        extra_args=["-pix_fmt", "yuv420p",
-                    "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"],
-    )
-    anim = animation.FuncAnimation(fig, update, frames=len(t), interval=1000.0 / fps, blit=False)
-    anim.save(out_mp4, writer=writer, dpi=120)
+    fig.savefig(os.path.join(tmpdir, f"frame_{k:06d}.png"), dpi=120)
     plt.close(fig)
-    print(f"[viz] wrote {out_mp4}  ({len(t)} frames @ {fps} fps = {len(t)/fps:.1f} s)")
+
+
+def render_mp4(out_mp4, xx, t, rho, fps=24):
+    pos = rho > 0
+    vmin = float(rho[pos].min()) * 0.8
+    vmax = float(rho.max()) * 1.2
+    nT = len(t)
+    save_frames_parallel(
+        _render_rho_frame,
+        [(k, xx, rho[k], rho[0], t[k], nT, vmin, vmax) for k in range(nT)],
+        out_mp4, fps,
+    )
+    print(f"[viz] wrote {out_mp4}  ({nT} frames @ {fps} fps = {nT/fps:.1f} s)")
 
 
 def main():

@@ -19,12 +19,12 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 from matplotlib import colormaps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from plot_output import read_frames
+from _anim_parallel import save_frames_parallel
 
 CNI, CNN = 0, 1
 
@@ -127,43 +127,43 @@ def render_png(out_png, xx, tA, rA, tB, rB, labelA, labelB):
     return rB_at_A
 
 
-def render_mp4(out_mp4, xx, tA, rA, tB, rB, labelA, labelB, fps=24):
-    # Drive frames on A's timeline; pick nearest B frame.
-    idxBforA = np.array([int(np.argmin(np.abs(tB - t))) for t in tA])
-
-    pos_min = float(min(rA[rA > 0].min(), rB[rB > 0].min())) * 0.8
-    pos_max = float(max(rA.max(), rB.max())) * 1.2
+def _render_rho_compare_frame(k, tmpdir, xx, rA_k, rB_k, rA_0, t_A, labelA, labelB, nT, vmin, vmax):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(11, 5.5))
     ax.set_xlim(xx.min(), xx.max())
-    ax.set_ylim(pos_min, pos_max)
+    ax.set_ylim(vmin, vmax)
     ax.set_yscale("log")
     ax.set_xlabel("height s (km)")
     ax.set_ylabel(r"$\rho_i + \rho_n$  (kg/m$^3$)")
     ax.grid(True, alpha=0.3)
-    (ln_A,)    = ax.plot(xx, rA[0], lw=2.0, color="C0", label=labelA)
-    (ln_B,)    = ax.plot(xx, rB[0], lw=2.0, color="C3", ls="--", label=labelB)
-    (ln_init,) = ax.plot(xx, rA[0], lw=1.0, color="k", ls=":", alpha=0.6, label="t = 0 reference (both)")
+    ax.plot(xx, rA_0, lw=1.0, color="k", ls=":", alpha=0.6, label="t = 0 reference (both)")
+    ax.plot(xx, rA_k, lw=2.0, color="C0", label=labelA)
+    ax.plot(xx, rB_k, lw=2.0, color="C3", ls="--", label=labelB)
     ax.legend(loc="upper right", fontsize=9)
-    title = ax.set_title("")
-    fig.tight_layout()
-
-    def update(k):
-        ln_A.set_ydata(rA[k])
-        ln_B.set_ydata(rB[idxBforA[k]])
-        title.set_text(rf"$\rho_\mathrm{{tot}}(s)$  |  t = {tA[k]:7.2f} s   "
-                       f"({k+1}/{len(tA)})    [{labelA} solid, {labelB} dashed]")
-        return ln_A, ln_B, title
-
-    writer = animation.FFMpegWriter(
-        fps=fps, codec="libx264",
-        extra_args=["-pix_fmt", "yuv420p",
-                    "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"],
+    ax.set_title(
+        rf"$\rho_\mathrm{{tot}}(s)$  |  t = {t_A:7.2f} s   "
+        f"({k+1}/{nT})    [{labelA} solid, {labelB} dashed]"
     )
-    anim = animation.FuncAnimation(fig, update, frames=len(tA), interval=1000.0 / fps, blit=False)
-    anim.save(out_mp4, writer=writer, dpi=120)
+    fig.tight_layout()
+    fig.savefig(os.path.join(tmpdir, f"frame_{k:06d}.png"), dpi=120)
     plt.close(fig)
-    print(f"[viz] wrote {out_mp4}  ({len(tA)} frames @ {fps} fps = {len(tA)/fps:.1f} s)")
+
+
+def render_mp4(out_mp4, xx, tA, rA, tB, rB, labelA, labelB, fps=24):
+    idxBforA = np.array([int(np.argmin(np.abs(tB - t))) for t in tA])
+    vmin = float(min(rA[rA > 0].min(), rB[rB > 0].min())) * 0.8
+    vmax = float(max(rA.max(), rB.max())) * 1.2
+    nT = len(tA)
+    save_frames_parallel(
+        _render_rho_compare_frame,
+        [(k, xx, rA[k], rB[idxBforA[k]], rA[0], tA[k], labelA, labelB, nT, vmin, vmax)
+         for k in range(nT)],
+        out_mp4, fps,
+    )
+    print(f"[viz] wrote {out_mp4}  ({nT} frames @ {fps} fps = {nT/fps:.1f} s)")
 
 
 def main():

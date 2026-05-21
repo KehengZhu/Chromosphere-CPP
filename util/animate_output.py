@@ -1,30 +1,67 @@
 #!/usr/bin/env python3
-"""Render an MP4 of the time evolution from build/output.txt."""
+"""Render an MP4 of the time evolution from chromo_main output.txt."""
 import os
 import sys
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 from plot_output import read_frames, primitives
+from _anim_parallel import save_frames_parallel
+
+
+# (row, col, prims_index, panel_title, log_yscale)
+_PANELS = [
+    (0, 0, 1, r"$n_n$ (m$^{-3}$)", True),
+    (0, 1, 3, r"$u$ (m/s)",        False),
+    (0, 2, 5, r"$P_n$ (Pa)",       True),
+    (0, 3, 7, r"$T_n$ (K)",        False),
+    (1, 0, 0, r"$n_i$ (m$^{-3}$)", True),
+    (1, 1, 2, r"$v$ (m/s)",        False),
+    (1, 2, 4, r"$P_i$ (Pa)",       True),
+    (1, 3, 6, r"$T_i$ (K)",        False),
+]
+
+
+def _render_frame(k, tmpdir, xx, prims_k, t, step, nF, ylims):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(2, 4, figsize=(15, 7))
+    fig.suptitle(
+        f"Chromosphere — Model C7  |  t = {t:6.2f} s, step {step:5d}  ({k+1}/{nF})"
+    )
+    for row, col, idx, title, log in _PANELS:
+        ax = axes[row, col]
+        ax.plot(xx, prims_k[idx], lw=1.2)
+        ax.set_title(title)
+        ax.set_xlim(xx.min(), xx.max())
+        ax.set_ylim(*ylims[title])
+        if log:
+            ax.set_yscale("log")
+        ax.grid(True, alpha=0.3)
+    for ax in axes[1, :]:
+        ax.set_xlabel("height (km)")
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.savefig(os.path.join(tmpdir, f"frame_{k:06d}.png"), dpi=120)
+    plt.close(fig)
 
 
 def main():
-    here = os.path.dirname(os.path.abspath(__file__))
-    in_path  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "build", "output.txt")
-    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "visualization", "model_c7_evolution.mp4")
-    os.makedirs(os.path.join(here, "visualization"), exist_ok=True)
+    in_path  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "build", "output.txt")
+    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "visualization", "model_c7_evolution.mp4")
     fps      = int(sys.argv[3]) if len(sys.argv) > 3 else 15
+    os.makedirs(os.path.join(HERE, "visualization"), exist_ok=True)
 
     xx, frames = read_frames(in_path)
     nF = len(frames)
     print(f"read {nF} frames, ns = {xx.size}, t in [{frames[0][0]:.1f}, {frames[-1][0]:.1f}] s")
 
-    # Pre-compute primitives for every frame so axis limits are stable across the run.
     prims = [primitives(fr[2]) for fr in frames]
-    # Stack each field across frames, then pick global min/max with a 5% margin.
+
     def lim(arr_list, log=False):
         a = np.concatenate(arr_list)
         if log:
@@ -35,57 +72,14 @@ def main():
         pad = 0.05 * (hi - lo if hi > lo else max(abs(hi), 1.0))
         return lo - pad, hi + pad
 
-    nn_all = [p[1] for p in prims]
-    u_all  = [p[3] for p in prims]
-    pn_all = [p[5] for p in prims]
-    Tn_all = [p[7] for p in prims]
-    ni_all = [p[0] for p in prims]
-    v_all  = [p[2] for p in prims]
-    pi_all = [p[4] for p in prims]
-    Ti_all = [p[6] for p in prims]
+    ylims = {title: lim([p[idx] for p in prims], log=log)
+             for _, _, idx, title, log in _PANELS}
 
-    fig, axes = plt.subplots(2, 4, figsize=(15, 7))
-    title = fig.suptitle("")
-
-    panel_specs = [
-        (axes[0, 0], nn_all, r"$n_n$ (m$^{-3}$)", "log"),
-        (axes[0, 1], u_all,  r"$u$ (m/s)",        None),
-        (axes[0, 2], pn_all, r"$P_n$ (Pa)",       "log"),
-        (axes[0, 3], Tn_all, r"$T_n$ (K)",        None),
-        (axes[1, 0], ni_all, r"$n_i$ (m$^{-3}$)", "log"),
-        (axes[1, 1], v_all,  r"$v$ (m/s)",        None),
-        (axes[1, 2], pi_all, r"$P_i$ (Pa)",       "log"),
-        (axes[1, 3], Ti_all, r"$T_i$ (K)",        None),
-    ]
-    lines = []
-    for ax, series, ttl, ys in panel_specs:
-        (ln,) = ax.plot(xx, series[0], lw=1.2)
-        ax.set_title(ttl)
-        ax.set_xlim(xx.min(), xx.max())
-        ax.set_ylim(*lim(series, log=(ys == "log")))
-        if ys:
-            ax.set_yscale(ys)
-        ax.grid(True, alpha=0.3)
-        lines.append(ln)
-    for ax in axes[1, :]:
-        ax.set_xlabel("height (km)")
-
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
-
-    def update(k):
-        t, step, _ = frames[k]
-        ni, nn, v, u, p_i, p_n, Ti, Tn = prims[k]
-        for ln, y in zip(lines, [nn, u, p_n, Tn, ni, v, p_i, Ti]):
-            ln.set_ydata(y)
-        title.set_text(f"Chromosphere — Model C7  |  t = {t:6.2f} s, step {step:5d}  ({k+1}/{nF})")
-        return [*lines, title]
-
-    anim = animation.FuncAnimation(fig, update, frames=nF, interval=1000.0/fps, blit=False)
-
-    writer = animation.FFMpegWriter(fps=fps, codec="libx264",
-                                    extra_args=["-pix_fmt", "yuv420p"])
-    anim.save(out_path, writer=writer, dpi=120)
-    print(f"wrote {out_path}  ({nF} frames @ {fps} fps = {nF/fps:.1f} s)")
+    save_frames_parallel(
+        _render_frame,
+        [(k, xx, prims[k], frames[k][0], frames[k][1], nF, ylims) for k in range(nF)],
+        out_path, fps,
+    )
 
 
 if __name__ == "__main__":

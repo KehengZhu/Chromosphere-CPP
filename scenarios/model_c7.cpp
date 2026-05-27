@@ -1,4 +1,5 @@
 #include "model_c7.hpp"
+#include "physics.hpp"
 #include "scenario.hpp"
 
 namespace chromosphere {
@@ -199,6 +200,42 @@ Vec model_c7_ic(Grid& grid) {
 
         kInnerRhoNPinned = n_n * grid.m_n;
         kInnerTnPinned   = T;
+    }
+
+    // Height-dependent photoionization rate, calibrated so that C7's
+    // tabulated (n_e, n_n, T) is a fixed point of the Stage E f-equation
+    // 0 = S_i(T)·n_e·n_n + P_phot·n_n − α_r(T)·n_e². Solving for P_phot
+    // gives P_phot(s) = α_r·n_e²/n_n − S_i·n_e.
+    //
+    // We cap the result at P_max = 1e-2 s^-1 (the upper end of the
+    // Carlsson & Stein 2002 chromospheric ionization-timescale range).
+    // Without the cap, the top-of-domain calibration (~2.5e-2 s^-1 at
+    // h≈1989 km, set by C7's f≈0.58 there) is unstable under any bulk
+    // motion that drops n_n away from the C7 value: with P frozen at the
+    // IC and n_n dropping, the photoionization source still injects ions
+    // at the calibrated rate while the recombination sink α_r·n_e²
+    // collapses, driving f→1 in a few acoustic times and crashing the
+    // run. Capping sacrifices exact-C7 fixed-point behavior in the upper
+    // ~30% of cells (where C7 needs unrealistically large P to match its
+    // observed f) but keeps the calibration physically meaningful and
+    // stable everywhere else. The lower/mid chromosphere remains a
+    // Stage E fixed point of C7 by construction.
+    {
+        Vec T_cell(grid.ns), ne_cell(grid.ns), nn_cell(grid.ns);
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            T_cell(i)  = T_E(i);
+            ne_cell(i) = ne_E(i);
+            nn_cell(i) = nn_E(i);
+        }
+        const Vec S = ionization_rate_S(grid, T_cell);
+        const Vec a = recombination_rate_alpha(grid, T_cell);
+        Vec P = a % ne_cell % ne_cell / nn_cell - S % ne_cell;
+        const float P_max = 1.0e-2f;
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            if (P(i) < 0.0f)    P(i) = 0.0f;
+            if (P(i) > P_max)   P(i) = P_max;
+        }
+        grid.photoionization_rate_i = P;
     }
 
     grid.broadcast();

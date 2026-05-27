@@ -79,6 +79,12 @@ struct Grid {
     // flip to true to activate the writeup §5.3 ionization stage.
     bool enable_ionization = false;
 
+    // Enable optically-thick chromospheric radiative cooling (CL2012 recipe,
+    // writeup §2.4) as Stage R in the operator-split integrator. Default off
+    // so the existing test suite remains a clean regression baseline; flip
+    // to true to activate.
+    bool enable_radiative_cooling = false;
+
     // Effective hydrogen photoionization rate from the ground state [s^-1],
     // modeling the Lyα-excitation + Balmer-continuum two-step channel
     // (Carlsson & Stein 2002 establish this as the dominant chromospheric
@@ -88,7 +94,17 @@ struct Grid {
     // closure suitable for the 2-state (ground+continuum) reduction used
     // here. See Leenaarts et al. 2007 for the "fixed radiative rates"
     // implementation paradigm in non-equilibrium chromospheric MHD codes.
+    //
+    // The scalar `photoionization_rate` is the uniform fallback used when
+    // the cell-centered `photoionization_rate_i` array is empty (i.e. no
+    // height-dependent calibration has been performed by the scenario IC).
+    // Scenarios that want a height-dependent profile (e.g. model_c7_ic,
+    // which calibrates against C7's tabulated f to make C7 a fixed point
+    // of the Stage E quadratic) populate `photoionization_rate_i` of
+    // length `ns`; the Stage E driver picks that up automatically via
+    // `physics.hpp::photoionization_rate_P(grid)`.
     float photoionization_rate = 1.0e-4f;
+    Vec   photoionization_rate_i;
 
     // --- cell-centered & face arrays (length ns) --------------------------
     Vec ds_i;
@@ -189,6 +205,12 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
 /// primitive state in place; intended for the operator-split integrator but
 /// exposed for direct testing. (writeup §5.3.)
 void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt);
+
+/// Stage R (writeup §2.4): backward-Euler optically-thick chromospheric
+/// radiative cooling on the folded ion+electron thermal pressure. Carlsson
+/// & Leenaarts 2012 recipe summed over H I + Ca II + Mg II; tables in
+/// physics.hpp::cl2012. Activated by Grid::enable_radiative_cooling.
+void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt);
 
 /// Pure-explicit forward-Euler step — only the MUSCL+Rusanov R_E predictor of
 /// advance_Euler_state, with the implicit drag / temperature / conduction

@@ -60,11 +60,147 @@ inline Vec recombination_rate_alpha(const Grid& /*grid*/, const Vec& T_e) {
 ///   dn_i/dt |_phot = +P_phot · n_n   (does not deplete electron thermal pool
 ///                                     — energy comes from the radiation field,
 ///                                     not from local kinetic temperature).
-/// Returned as a uniform Vec so the Stage E call site can stay vectorized;
-/// a height-dependent profile (e.g. Carlsson & Leenaarts 2012 recipe) drops
-/// in by replacing this body.
+/// Returns `grid.photoionization_rate_i` if the scenario IC populated a
+/// per-cell profile (e.g. model_c7_ic calibrates a height-dependent P_phot
+/// to make C7's tabulated (n_e, n_n, T) a fixed point of the Stage E
+/// quadratic); otherwise falls back to the uniform scalar
+/// `grid.photoionization_rate`.
 inline Vec photoionization_rate_P(const Grid& grid) {
+    if (grid.photoionization_rate_i.n_elem == grid.ns) {
+        return grid.photoionization_rate_i;
+    }
     return Vec(grid.ns, arma::fill::value(grid.photoionization_rate));
+}
+
+// ============================================================================
+// Optically-thick chromospheric radiative cooling
+//   Carlsson & Leenaarts 2012 A&A 539 A39, Eq. 1:
+//     Q_X = -L_X(T) E_X(tau or m_c) (N_X*/N_X)(T) A_X (N_H/rho) n_e rho
+//   for X in {H I, Ca II, Mg II}. Tables digitized from CL2012 Figs 3-11
+//   (see writeup §6 Tables 1-3). Returns Q_rad in W/m^3, positive for
+//   net cooling — caller subtracts to add to e_i.
+// ============================================================================
+
+namespace cl2012 {
+
+// Table 1: log10 L_X(T) [erg s^-1 per e- per X-particle], T in kK.
+// Below the first T entry, L_X is held at the first value (a large negative
+// log -> effectively zero), then linear-interpolated. CL2012 Figs 3-5.
+constexpr int N_L = 13;
+static constexpr float L_T_kK[N_L]   = { 4.f,  5.f, 6.f,  7.f,  8.f, 10.f, 12.f, 15.f, 20.f, 25.f, 30.f, 40.f, 50.f};
+static constexpr float L_logL_H[N_L] = {-30.f, -25.0f,-24.5f,-24.0f,-23.6f,-22.8f,-22.2f,-21.85f,-21.75f,-21.85f,-22.0f,-22.4f,-22.8f};
+static constexpr float L_logL_Ca[N_L]= {-22.5f,-21.3f,-20.5f,-19.9f,-19.5f,-18.9f,-18.6f,-18.35f,-18.15f,-18.05f,-18.0f,-18.0f,-18.0f};
+static constexpr float L_logL_Mg[N_L]= {-23.0f,-21.7f,-20.5f,-19.7f,-19.2f,-18.7f,-18.4f,-18.2f, -18.05f,-18.0f, -18.0f,-18.0f,-18.0f};
+
+// Table 2a: E_H(log10 tau_Lya), Fig 6.
+constexpr int N_EH = 11;
+static constexpr float EH_logTau[N_EH] = {-2.f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f, 4.5f, 5.0f, 6.0f};
+static constexpr float EH_E[N_EH]      = { 1.0f,1.00f,0.99f,0.95f,0.85f,0.70f,0.55f,0.40f,0.25f,0.15f,0.03f};
+
+// Table 2b: E_Ca(log10 m_c [g/cm^2]), Fig 7.
+constexpr int N_ECa = 11;
+static constexpr float ECa_logMc[N_ECa] = {-8.f, -7.0f, -6.5f, -6.0f, -5.5f, -5.0f, -4.5f, -4.0f, -3.5f, -3.0f, -2.0f};
+static constexpr float ECa_E[N_ECa]     = { 1.0f, 0.99f, 0.97f, 0.90f, 0.75f, 0.58f, 0.43f, 0.30f, 0.20f, 0.12f, 0.02f};
+
+// Table 2c: E_Mg(log10 m_c [g/cm^2]), Fig 8.
+constexpr int N_EMg = 10;
+static constexpr float EMg_logMc[N_EMg] = {-8.f, -6.0f, -5.5f, -5.0f, -4.5f, -4.0f, -3.5f, -3.0f, -2.5f, -2.0f};
+static constexpr float EMg_E[N_EMg]     = { 1.0f, 1.00f, 0.97f, 0.85f, 0.65f, 0.45f, 0.30f, 0.18f, 0.10f, 0.04f};
+
+// Table 3: N(X*)/N(X) (T in kK), Figs 9-11 red curves.
+constexpr int N_F = 11;
+static constexpr float F_T_kK[N_F] = { 5.f, 8.f, 10.f, 12.f, 14.f, 15.f, 16.f, 18.f, 20.f, 25.f, 30.f};
+static constexpr float F_HI[N_F]   = { 1.0f, 0.99f, 0.85f, 0.42f, 0.17f, 0.10f, 0.07f, 0.04f, 0.025f,0.010f,0.005f};
+static constexpr float F_Ca[N_F]   = { 1.0f, 0.97f, 0.90f, 0.75f, 0.55f, 0.42f, 0.30f, 0.15f, 0.08f, 0.025f,0.010f};
+static constexpr float F_Mg[N_F]   = { 0.95f,0.95f, 0.90f, 0.75f, 0.55f, 0.42f, 0.28f, 0.10f, 0.05f, 0.010f,0.005f};
+
+// Asplund et al. 2009 abundances and N_H/rho [g^-1].
+constexpr float A_H        = 1.0f;
+constexpr float A_Ca       = 2.19e-6f;   // 10^(6.34-12)
+constexpr float A_Mg       = 3.98e-5f;   // 10^(7.60-12)
+constexpr float NH_over_rho_cgs = 4.407e23f; // per gram
+
+/// 1-D linear interpolation: piecewise linear, constant extrapolation.
+inline float lin_interp(float x, const float* xs, const float* ys, int n) {
+    if (x <= xs[0])   return ys[0];
+    if (x >= xs[n-1]) return ys[n-1];
+    int k = 0;
+    while (k < n-1 && xs[k+1] < x) ++k;
+    const float t = (x - xs[k]) / (xs[k+1] - xs[k]);
+    return ys[k] + t * (ys[k+1] - ys[k]);
+}
+
+/// Vectorized look-up wrapper. Returns one Vec same size as q.
+inline Vec lookup_vec(const Vec& q, const float* xs, const float* ys, int n) {
+    Vec out(q.n_elem);
+    for (arma::uword i = 0; i < q.n_elem; ++i) out[i] = lin_interp(q[i], xs, ys, n);
+    return out;
+}
+
+} // namespace cl2012
+
+/// Optically-thick chromospheric radiative cooling Q_rad [W/m^3].
+/// Positive = net cooling (caller subtracts from energy row).
+/// CL2012 Eq. 1; tables in namespace cl2012 above.
+/// `s_up_is_outer` matches the grid convention: index 0 = inner (photosphere),
+/// index ns-1 = outer (TR). Column integrals are accumulated downward from
+/// the TR (top of column = zero column mass).
+inline Vec radiative_loss_thick(const Grid& grid,
+                                const Vec& n_i, const Vec& n_n,
+                                const Vec& T_e) {
+    using namespace cl2012;
+    const arma::uword ns = grid.ns;
+
+    // ---- column integrals (CGS) ----
+    // m_c [g/cm^2] = 0.1 * integral_{s}^{s_top} rho_SI ds_SI (SI -> cgs surface)
+    // N_HI [/cm^2] = 1e-4 * integral n_n[/m^3] ds[m]
+    const Vec rho = (n_i * grid.m_i + n_n * grid.m_n);   // SI kg/m^3
+    Vec m_c(ns, arma::fill::zeros);                       // g/cm^2
+    Vec N_HI(ns, arma::fill::zeros);                      // /cm^2
+    // Top cell: half-cell column above the midpoint.
+    m_c[ns-1]  = 0.5f * rho[ns-1]    * grid.ds_i[ns-1] * 0.1f;
+    N_HI[ns-1] = 0.5f * n_n[ns-1]    * grid.ds_i[ns-1] * 1.0e-4f;
+    for (int i = static_cast<int>(ns) - 2; i >= 0; --i) {
+        // Trapezoid: mean density times cell-center separation.
+        const float ds_face   = 0.5f * (grid.ds_i[i] + grid.ds_i[i+1]);
+        const float rho_dl    = 0.5f * (rho[i] + rho[i+1]) * ds_face;
+        const float nn_dl     = 0.5f * (n_n[i] + n_n[i+1]) * ds_face;
+        m_c[i]  = m_c[i+1]  + rho_dl * 0.1f;
+        N_HI[i] = N_HI[i+1] + nn_dl  * 1.0e-4f;
+    }
+
+    // ---- log coordinates for table lookup ----
+    const Vec T_kK    = T_e / 1000.0f;
+    const Vec log_mc  = arma::log10(arma::clamp(m_c,  1.0e-12f, 1.0e6f));
+    const Vec tau_Lya = 4.0e-14f * N_HI;
+    const Vec log_tau = arma::log10(arma::clamp(tau_Lya, 1.0e-6f, 1.0e10f));
+
+    // ---- per-species factors ----
+    constexpr float LN10 = 2.302585092994046f;
+    const Vec L_H   = arma::exp(LN10 * lookup_vec(T_kK, L_T_kK, L_logL_H,  N_L));
+    const Vec L_Ca  = arma::exp(LN10 * lookup_vec(T_kK, L_T_kK, L_logL_Ca, N_L));
+    const Vec L_Mg  = arma::exp(LN10 * lookup_vec(T_kK, L_T_kK, L_logL_Mg, N_L));
+
+    const Vec E_H_  = lookup_vec(log_tau, EH_logTau,  EH_E,  N_EH);
+    const Vec E_Ca_ = lookup_vec(log_mc,  ECa_logMc, ECa_E, N_ECa);
+    const Vec E_Mg_ = lookup_vec(log_mc,  EMg_logMc, EMg_E, N_EMg);
+
+    const Vec f_HI  = lookup_vec(T_kK, F_T_kK, F_HI, N_F);
+    const Vec f_Ca  = lookup_vec(T_kK, F_T_kK, F_Ca, N_F);
+    const Vec f_Mg  = lookup_vec(T_kK, F_T_kK, F_Mg, N_F);
+
+    // ---- assemble Q_X [erg/cm^3/s] ----
+    // n_e_cgs = n_i [SI /m^3] * 1e-6 ; rho_cgs = rho [kg/m^3] * 1e-3
+    const Vec n_e_cgs = 1.0e-6f * n_i;
+    const Vec rho_cgs = 1.0e-3f * rho;
+    const Vec NH_n_e_rho_cgs = NH_over_rho_cgs * n_e_cgs % rho_cgs;  // = N_H * n_e [/cm^6]
+
+    const Vec Q_H  = L_H  % E_H_  % f_HI % NH_n_e_rho_cgs * A_H;
+    const Vec Q_Ca = L_Ca % E_Ca_ % f_Ca % NH_n_e_rho_cgs * A_Ca;
+    const Vec Q_Mg = L_Mg % E_Mg_ % f_Mg % NH_n_e_rho_cgs * A_Mg;
+
+    // cgs (erg/cm^3/s) -> SI (W/m^3): factor 0.1
+    return 0.1f * (Q_H + Q_Ca + Q_Mg);
 }
 
 } // namespace chromosphere

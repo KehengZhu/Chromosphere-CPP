@@ -489,6 +489,58 @@ static void test_stage_e_photoionization_drives_low_T_equilibrium() {
 // the energy comes from absorbed photons, not from local kinetic temperature.
 // Set T_e low enough that S_i ≈ 0 (collisional ionizations are negligible)
 // and verify Δ(e_i + e_n) ≈ 0 over the step, even though Γ_phot is large.
+// `model_c7_ic` populates `grid.photoionization_rate_i` with a height-
+// dependent P_phot(s) calibrated so that C7's tabulated (n_e, n_n, T) is a
+// fixed point of the f-equation
+//   0 = S_i(T)·n_e·n_n + P_phot·n_n − α_r(T)·n_e².
+// Verify: (a) the array is populated with ns entries (i.e. it overrides
+// the scalar fallback in `photoionization_rate_P`), (b) values are
+// non-negative, (c) running Stage E in isolation on the C7 IC leaves f
+// essentially unchanged in every cell (the fixed-point check).
+static void test_model_c7_photoionization_makes_c7_a_stage_e_fixed_point() {
+    Grid grid;
+    grid.init(100, 0.25f);
+    Vec xn = model_c7_ic(grid);
+
+    // (a) per-cell rate populated with ns entries.
+    EXPECT_TRUE(grid.photoionization_rate_i.n_elem == grid.ns);
+
+    // (b) all entries non-negative; helper returns the same array.
+    Vec P = photoionization_rate_P(grid);
+    EXPECT_TRUE(P.n_elem == grid.ns);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        EXPECT_TRUE(P(i) >= 0.0f);
+    }
+
+    // (c) Stage E fixed point on cells where the calibration is NOT capped.
+    // In cells where the C7 calibration would exceed the P_max cap used in
+    // model_c7_ic (1e-2 s^-1, the upper end of the Carlsson & Stein 2002
+    // chromospheric range), the local f drifts toward the cap's smaller
+    // equilibrium and is *not* a fixed point of Stage E. We identify those
+    // cells by P(i) == P_max (within float tolerance) and skip them.
+    const float P_max = 1.0e-2f;
+    Vec prim_before = cons2prim(grid, xn);
+    Vec rho_i_b = get_scalar(grid, prim_before, prim::RHO_I);
+    Vec rho_n_b = get_scalar(grid, prim_before, prim::RHO_N);
+
+    grid.enable_ionization = true;
+    Vec prim_after = prim_before;
+    apply_ionization_stage(grid, prim_after, 1.0f);
+
+    Vec rho_i_a = get_scalar(grid, prim_after, prim::RHO_I);
+    Vec rho_n_a = get_scalar(grid, prim_after, prim::RHO_N);
+    arma::uword n_uncapped = 0;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        if (P(i) >= 0.999f * P_max) continue;     // capped — fixed point not expected
+        const float f_b = rho_i_b(i) / (rho_i_b(i) + rho_n_b(i));
+        const float f_a = rho_i_a(i) / (rho_i_a(i) + rho_n_a(i));
+        EXPECT_REL(f_a, f_b, 1e-3);
+        ++n_uncapped;
+    }
+    // Sanity: the lower/mid chromosphere (majority of cells) is uncapped.
+    EXPECT_TRUE(n_uncapped >= grid.ns / 2);
+}
+
 static void test_stage_e_no_chi_H_drain_from_photoionization() {
     const float T = 6.5e3f;
     const float ni = 1.0e15f, nn = 1.0e19f;
@@ -1306,6 +1358,7 @@ int main() {
     RUN(test_photoionization_rate_default_uniform);
     RUN(test_stage_e_photoionization_drives_low_T_equilibrium);
     RUN(test_stage_e_no_chi_H_drain_from_photoionization);
+    RUN(test_model_c7_photoionization_makes_c7_a_stage_e_fixed_point);
     RUN(test_stage_e_mass_momentum_chi_H_drain);
     RUN(test_stage_e_conserves_rho_tot_per_cell);
     RUN(test_stage_e_kinetic_equilibrium);

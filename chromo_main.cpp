@@ -11,7 +11,7 @@
 int main(int argc, char** argv) {
     using namespace chromosphere;
 
-    // Usage: chromo_main [output_path] [mode] [ionization] [scenario] [data_path] [time_mult]
+    // Usage: chromo_main [output_path] [mode] [ionization] [scenario] [data_path] [time_mult] [cooling]
     //   output_path:  defaults to "output.txt"
     //   mode:         "full" (semi-implicit, default) or "explicit" (R_I ≡ 0)
     //   ionization:   "ionization" (default — Stage E enabled) or "no-ionization"
@@ -20,14 +20,18 @@ int main(int argc, char** argv) {
     //                 ignored otherwise (pass "-" or "" for scenarios that don't use it)
     //   time_mult:    multiplier on the default total_time (default 1.0). Step
     //                 cap scales accordingly so a longer run is not truncated.
+    //   cooling:      "cooling" (Stage R, CL2012 optically-thick radiative
+    //                 cooling enabled) or "no-cooling" (default)
     const std::string out_path      = (argc > 1) ? argv[1] : "outputs/output.txt";
     const std::string mode          = (argc > 2) ? argv[2] : "full";
     const std::string ioniz_arg     = (argc > 3) ? argv[3] : "ionization";
     const std::string scenario_name = (argc > 4) ? argv[4] : "model_c7";
     const std::string data_path     = (argc > 5) ? argv[5] : "";
     const float       time_mult     = (argc > 6) ? std::stof(argv[6]) : 1.0f;
+    const std::string cool_arg      = (argc > 7) ? argv[7] : "no-cooling";
     const bool explicit_only        = (mode == "explicit");
     const bool ionization_on        = (ioniz_arg != "no-ionization");
+    const bool cooling_on           = (cool_arg == "cooling");
 
     const float cfl = 0.25f;
 
@@ -42,6 +46,7 @@ int main(int argc, char** argv) {
     Grid grid;
     grid.init(sc.peek_ns(), cfl);
     grid.enable_ionization = ionization_on;
+    grid.enable_radiative_cooling = cooling_on;
     Vec xn = sc.ic(grid);
 
     const float c_s_target = 2.0e4f; // m/s, ion sound speed scale (writeup §4)
@@ -79,7 +84,12 @@ int main(int argc, char** argv) {
         }
     };
 
-    const int frame_stride = 50;
+    // Scale snapshot cadence with run length so that frame count stays
+    // bounded (~500 frames per run) regardless of time_mult. Keeps render
+    // time roughly constant when sweeping time_mult — animation length at
+    // 30 fps is ~17 s independent of physical simulation duration.
+    const int frame_stride = std::max(50,
+        static_cast<int>(50.0f * std::max(1.0f, time_mult / 5.0f)));
     float     time         = 0.0f;
     int       step         = 0;
     write_frame(time, step);

@@ -336,6 +336,34 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
 }
 
 // ----------------------------------------------------------------------------
+// Stage R (writeup §2.4, §5.6): optically-thick chromospheric radiative
+// cooling. Carlsson & Leenaarts 2012 recipe summing H I + Ca II + Mg II
+// losses; tables in physics.hpp::cl2012. Operates as a backward-Euler sink
+// on the folded ion+electron thermal pressure: p_i ← p_i / (1 + Δt Q/ε_i)
+// at lagged Q evaluated from the post-conduction T_e. This preserves
+// positivity unconditionally — when Δt Q ≫ ε_i, the cell relaxes asymptot-
+// ically to a small positive pressure rather than overshooting to a floor.
+// Mass / velocities are unaffected; only p_i is modified.
+// ----------------------------------------------------------------------------
+void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt) {
+    const Vec rho_i = get_scalar(grid, prim_state, prim::RHO_I);
+    const Vec rho_n = get_scalar(grid, prim_state, prim::RHO_N);
+    const Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
+
+    const Vec n_i = rho_i / grid.m_i;
+    const Vec n_n = rho_n / grid.m_n;
+    const Vec T_e = p_i / (2.0f * n_i * grid.k_b);   // T_e = T_i under quasi-neutrality
+
+    const Vec Q   = radiative_loss_thick(grid, n_i, n_n, T_e);   // W/m^3, +ve = cooling
+    const Vec eps = 1.5f * p_i;                                  // thermal energy density
+    // Backward-Euler relaxation: ε^{n+1} = ε^n / (1 + Δt Q/ε^n) with Q frozen.
+    const Vec denom = 1.0f + dt * Q / arma::clamp(eps, 1.0e-30f, arma::datum::inf);
+    const Vec p_i_new = p_i / arma::clamp(denom, 1.0e-6f, arma::datum::inf);
+
+    prim_state += scalar_to(grid, p_i_new - p_i, prim::P_I);
+}
+
+// ----------------------------------------------------------------------------
 // Stage E (writeup §5.3): point-implicit hydrogen ionization / recombination.
 // The local ODE for f ≡ ρ_i / (ρ_i + ρ_n) under quasi-neutrality is
 //   df/dt = n_tot [ f(1-f) S_i(T_e) − f² α_r(T_e) ] + (1-f) P_phot,
@@ -494,6 +522,9 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     apply_conduction_stage(grid, prim, dt);
     if (grid.enable_ionization) {
         apply_ionization_stage(grid, prim, dt);
+    }
+    if (grid.enable_radiative_cooling) {
+        apply_radiative_cooling_stage(grid, prim, dt);
     }
 
     return prim2cons(grid, prim);

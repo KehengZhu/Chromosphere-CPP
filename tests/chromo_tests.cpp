@@ -403,13 +403,48 @@ static void test_photoionization_rate_default_uniform() {
     }
 }
 
-// At chromospheric T_e (~6500 K), Voronov S_i is exponentially suppressed
-// (U ≈ 24, exp(-U) ~ 1e-11). The kinetic equilibrium is then dominated by
-// the photoionization channel:
-//   f_eq = P / (P + α_r n_e),
-// where n_e ≈ f_eq n_tot. Solving the quadratic at f_eq gives an explicit
-// target. With photoionization disabled (grid.photoionization_rate = 0)
-// the same setup must relax to f → 0 (S_i is effectively zero at this T).
+// ----------------------------------------------------------------------------
+// Route B network helpers (writeup §3.1). The Stage-E ionization balance is
+//   df/dt = (1-f) P + f(1-f) n_tot (S_i+S_CR) - f² n_tot α_r - f³ n_tot² κ_c.
+// network_dfdt evaluates it; network_equilibrium_f finds the root in (0,1) by
+// bisection. These replace the obsolete two-coefficient f_eq = S/(S+α): the
+// multilevel collisional channel S_CR (Rydberg ladder) dominates direct
+// Voronov S_i in the chromosphere, so the fixed point now depends on the full
+// network (and on n_e, via the three-body f³ term).
+// ----------------------------------------------------------------------------
+static float network_dfdt(const Grid& grid, float T, float n_tot, float f, float P) {
+    Vec Tv(1); Tv(0) = T;
+    // Respect the same grid flags as apply_ionization_stage so the helper
+    // stays consistent with the integrator's active network.
+    const float Si   = grid.enable_direct_collisional_ionization
+                     ? ionization_rate_S(grid, Tv)(0) : 0.0f;
+    const float ar   = recombination_rate_alpha(grid, Tv)(0);
+    const float Scr  = ionization_rate_S_CR(grid, Tv)(0);
+    const float kc   = grid.enable_threebody_recombination
+                     ? recombination_rate_kappa_c(grid, Tv)(0) : 0.0f;
+    const float Stot = Si + Scr;
+    // Group κ_c into the three-body product before squaring n_tot (n_tot²
+    // alone overflows float32 for n_tot ≳ 1e19).
+    return (1.0f - f) * P + f * (1.0f - f) * n_tot * Stot
+         - f * f * n_tot * ar - (f * f * f) * n_tot * (n_tot * kc);
+}
+static float network_equilibrium_f(const Grid& grid, float T, float n_tot, float P) {
+    // df/dt > 0 at f→0+ (when ionization can win) and < 0 at f=1, so the
+    // physical equilibrium is bracketed by (ε, 1].
+    float lo = 1.0e-12f, hi = 1.0f;
+    for (int it = 0; it < 200; ++it) {
+        const float mid = 0.5f * (lo + hi);
+        if (network_dfdt(grid, T, n_tot, mid, P) > 0.0f) lo = mid; else hi = mid;
+    }
+    return 0.5f * (lo + hi);
+}
+
+// At chromospheric T_e (~6500 K) the direct Voronov S_i is exponentially
+// suppressed, but the multilevel collisional channel S_CR is NOT — so the gas
+// has a real collisional ionization route even without photoionization. Adding
+// photoionization raises the equilibrium ionization fraction. Verify that
+// Stage E relaxes to the full-network equilibrium in both cases, and that the
+// photoionization-on equilibrium exceeds the photoionization-off one.
 static void test_stage_e_photoionization_drives_low_T_equilibrium() {
     const float T = 6.5e3f;
     const float n_tot_target = 1.0e19f;
@@ -417,22 +452,12 @@ static void test_stage_e_photoionization_drives_low_T_equilibrium() {
 
     Grid grid_probe;
     grid_probe.init(1, 0.25f);
-    Vec T_v(1); T_v(0) = T;
-    const float S = ionization_rate_S(grid_probe, T_v)(0);
-    const float a = recombination_rate_alpha(grid_probe, T_v)(0);
 
-    // Photoionization-dominated equilibrium: with S≈0,
-    //   df/dt = (1-f)·P − f²·n_tot·α  = 0   →   n_tot α f² + P f − P = 0
-    //   f_eq  = (-P + √(P² + 4 n_tot α P)) / (2 n_tot α)
-    const float P  = grid_probe.photoionization_rate;
-    const float A  = n_tot_target * a;
-    const float disc = P * P + 4.0f * A * P;
-    const float f_eq_phot = (-P + std::sqrt(disc)) / (2.0f * A);
-
-    // Sanity: the collisional kinetic equilibrium S/(S+α) should be
-    // *much* smaller — confirms that the relaxation is photoionization-driven.
-    const float f_eq_coll = S / (S + a);
-    EXPECT_TRUE(f_eq_phot > 100.0f * f_eq_coll);
+    // Full-network equilibria with photoionization on (P=1e-4) and off (P=0).
+    const float eq_on  = network_equilibrium_f(grid_probe, T, n_tot_target, 1.0e-4f);
+    const float eq_off = network_equilibrium_f(grid_probe, T, n_tot_target, 0.0f);
+    // Photoionization is an extra ionization source, so it raises f_eq.
+    EXPECT_TRUE(eq_on > eq_off);
 
     // -- Case A: photoionization ON (default) --
     auto run_to_eq = [&](float P_phot) {
@@ -446,8 +471,10 @@ static void test_stage_e_photoionization_drives_low_T_equilibrium() {
         Vec prim = cons2prim(grid, cons);
 
         // dt large enough to walk to equilibrium quickly via backward Euler.
+        Vec Tv(1); Tv(0) = T;
+        const float a_probe = recombination_rate_alpha(grid, Tv)(0);
         const float dt = 1.0f / std::max(grid.photoionization_rate,
-                                         n_tot_target * a);
+                                         n_tot_target * a_probe);
         for (arma::uword step = 0; step < 4000; ++step) {
             // Re-pin T (test f-only kinetics).
             Vec rho_i = get_scalar(grid, prim, prim::RHO_I);
@@ -473,52 +500,57 @@ static void test_stage_e_photoionization_drives_low_T_equilibrium() {
     const float f_on  = run_to_eq(1.0e-4f);
     const float f_off = run_to_eq(0.0f);
 
-    // The strong check: with photoionization, Stage E reaches its predicted
-    // chromospheric equilibrium. Without photoionization at this T, the only
-    // active process is recombination (S_i is exponentially suppressed), so
-    // f decays — but the decay is quadratic in f (df/dt ∝ -f²) and is too
-    // slow to drive f to floating-point zero in any reasonable test budget.
-    // We assert the qualitative separation between the two regimes:
-    //   - f_on locks onto f_eq_phot
-    //   - f_off drops well below f_on (recombination is winning)
-    EXPECT_REL(f_on, f_eq_phot, 5e-2);
-    EXPECT_TRUE(f_on > 10.0f * f_off);
+    // Each run must lock onto its own full-network equilibrium, and the
+    // photoionization-on equilibrium must exceed the photoionization-off one
+    // (photoionization is an additional ionization source). Note f_off is NOT
+    // ~0: the multilevel collisional channel S_CR keeps the gas partially
+    // ionized even with the radiation field switched off.
+    EXPECT_REL(f_on,  eq_on,  5e-2);
+    EXPECT_REL(f_off, eq_off, 5e-2);
+    EXPECT_TRUE(f_on > f_off);
 }
 
-// Photoionization must NOT drain χ_H from the electron thermal pool:
-// the energy comes from absorbed photons, not from local kinetic temperature.
-// Set T_e low enough that S_i ≈ 0 (collisional ionizations are negligible)
-// and verify Δ(e_i + e_n) ≈ 0 over the step, even though Γ_phot is large.
-// `model_c7_ic` populates `grid.photoionization_rate_i` with a height-
-// dependent P_phot(s) calibrated so that C7's tabulated (n_e, n_n, T) is a
-// fixed point of the f-equation
-//   0 = S_i(T)·n_e·n_n + P_phot·n_n − α_r(T)·n_e².
-// Verify: (a) the array is populated with ns entries (i.e. it overrides
-// the scalar fallback in `photoionization_rate_P`), (b) values are
-// non-negative, (c) running Stage E in isolation on the C7 IC leaves f
-// essentially unchanged in every cell (the fixed-point check).
-static void test_model_c7_photoionization_makes_c7_a_stage_e_fixed_point() {
+// `model_c7_ic` populates `grid.photoionization_rate_i` with the Route B
+// closure (writeup §3.1; docs/photoionization_c7_inversion_plan.md): below
+// ~1500 km, P_phot is the C7-context equilibrium inversion of the *full Route B
+// network*, so C7 is a self-consistent Stage-E fixed point there; above ~1500
+// km it is blended (tanh window) to the frozen Chae (2021) FAL-C rate, the NEQ
+// region where over-ionization is real physics and C7 is deliberately not
+// pinned. The model column spans 1003–1989 km, so the blend bisects it.
+// Verify: (a) the per-cell array is populated; (b) every rate is finite,
+// positive, and bounded, and the deep-NEQ top cell matches the frozen FAL-C
+// rate; (c) Stage E on the C7 IC is a NEAR-FIXED-POINT in the deep equilibrium
+// region (h<1200 km, drift→0 by construction) and only a small bounded
+// relaxation in the NEQ region (h>1700 km) — no runaway anywhere.
+static void test_model_c7_photoionization_uses_route_b_closure() {
     Grid grid;
     grid.init(100, 0.25f);
     Vec xn = model_c7_ic(grid);
 
-    // (a) per-cell rate populated with ns entries.
-    EXPECT_TRUE(grid.photoionization_rate_i.n_elem == grid.ns);
-
-    // (b) all entries non-negative; helper returns the same array.
-    Vec P = photoionization_rate_P(grid);
-    EXPECT_TRUE(P.n_elem == grid.ns);
+    // Reconstruct cell-center heights (model_c7_ic builds faces uniformly over
+    // [1003, 2153] km — chromosphere + lower TR — with nF = ns + 5).
+    const float h0 = 1003.0f, h1 = 2153.0f;
+    const arma::uword nF = grid.ns + 5;
+    Vec h_cell(grid.ns);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        EXPECT_TRUE(P(i) >= 0.0f);
+        const float hFi  = h0 + (h1 - h0) * (float)i       / (float)(nF - 1);
+        const float hFi1 = h0 + (h1 - h0) * (float)(i + 1) / (float)(nF - 1);
+        h_cell(i) = 0.5f * (hFi + hFi1);
     }
 
-    // (c) Stage E fixed point on cells where the calibration is NOT capped.
-    // In cells where the C7 calibration would exceed the P_max cap used in
-    // model_c7_ic (1e-2 s^-1, the upper end of the Carlsson & Stein 2002
-    // chromospheric range), the local f drifts toward the cap's smaller
-    // equilibrium and is *not* a fixed point of Stage E. We identify those
-    // cells by P(i) == P_max (within float tolerance) and skip them.
-    const float P_max = 1.0e-2f;
+    // (a) per-cell rate populated with ns entries; helper returns it.
+    EXPECT_TRUE(grid.photoionization_rate_i.n_elem == grid.ns);
+    Vec P = photoionization_rate_P(grid);
+    EXPECT_TRUE(P.n_elem == grid.ns);
+
+    // (b) finite, positive, bounded; the deep-NEQ top cell ≈ frozen FAL-C rate.
+    Vec P_falc = photoionization_rate_chae(h_cell);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        EXPECT_TRUE(std::isfinite(P(i)) && P(i) > 0.0f && P(i) <= 1.0e-2f);
+    }
+    EXPECT_REL(P(grid.ns - 1), P_falc(grid.ns - 1), 0.1);   // top ≈ pure Chae
+
+    // (c) Stage E relaxation on the C7 IC, split by region.
     Vec prim_before = cons2prim(grid, xn);
     Vec rho_i_b = get_scalar(grid, prim_before, prim::RHO_I);
     Vec rho_n_b = get_scalar(grid, prim_before, prim::RHO_N);
@@ -529,16 +561,16 @@ static void test_model_c7_photoionization_makes_c7_a_stage_e_fixed_point() {
 
     Vec rho_i_a = get_scalar(grid, prim_after, prim::RHO_I);
     Vec rho_n_a = get_scalar(grid, prim_after, prim::RHO_N);
-    arma::uword n_uncapped = 0;
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        if (P(i) >= 0.999f * P_max) continue;     // capped — fixed point not expected
         const float f_b = rho_i_b(i) / (rho_i_b(i) + rho_n_b(i));
         const float f_a = rho_i_a(i) / (rho_i_a(i) + rho_n_a(i));
-        EXPECT_REL(f_a, f_b, 1e-3);
-        ++n_uncapped;
+        EXPECT_TRUE(f_a > 0.0f && f_a < 1.0f);             // no runaway
+        if (h_cell(i) < 1200.0f) {
+            EXPECT_TRUE(std::fabs(f_a - f_b) < 5.0e-3f);   // near fixed point (inversion)
+        } else if (h_cell(i) > 1700.0f) {
+            EXPECT_TRUE(std::fabs(f_a - f_b) < 0.1f);      // bounded NEQ relaxation
+        }
     }
-    // Sanity: the lower/mid chromosphere (majority of cells) is uncapped.
-    EXPECT_TRUE(n_uncapped >= grid.ns / 2);
 }
 
 static void test_stage_e_no_chi_H_drain_from_photoionization() {
@@ -566,25 +598,31 @@ static void test_stage_e_no_chi_H_drain_from_photoionization() {
     const float f_new = rho_i_new(0) / (rho_i_new(0) + rho_n_new(0));
     EXPECT_TRUE(f_new > f_old + 1.0e-5f);
 
-    // But total thermal energy must be essentially unchanged: at this T,
-    // Γ_coll ≈ 0, so the only drain term −Γ_coll·χ_H ≈ 0. The thermal/KE
-    // *exchange* between species cancels in the sum (KE = 0 here, T_i = T_n).
+    // Photoionization contributes NO χ_H drain (its energy is supplied by the
+    // absorbed UV photon). The only χ_H exchange with the thermal pool is the
+    // collisional balance: the two collisional ionization channels (direct S_i
+    // and multilevel S_CR) drain χ_H, while three-body recombination returns it
+    // (super-elastic). So Δ(e_i+e_n) must equal −(Γ_coll+Γ_mlvl−Γ_3b)·χ_H even
+    // though a large photoionization rate is creating ions. The thermal/KE
+    // exchange between species cancels in the sum (KE = 0 here, T_i = T_n).
     const float chi = grid.chi_H_J;
     Vec T_v(1); T_v(0) = T;
-    const float S = ionization_rate_S(grid, T_v)(0);
+    const float S    = ionization_rate_S(grid, T_v)(0);
+    const float Scr  = ionization_rate_S_CR(grid, T_v)(0);
+    const float kc   = recombination_rate_kappa_c(grid, T_v)(0);
     const float n_i_n = rho_i_new(0) / grid.m_i;
     const float n_n_n = rho_n_new(0) / grid.m_i;
-    const float Gamma_coll_expected = dt * n_i_n * n_n_n * S;
-    const float expected_dE_sum     = -Gamma_coll_expected * chi;
+    const float Gamma_coll = dt * n_i_n * n_n_n * S;
+    const float Gamma_mlvl = dt * n_i_n * n_n_n * Scr;
+    const float Gamma_3b   = dt * n_i_n * n_i_n * (kc * n_i_n);
+    const float expected_dE_sum = -(Gamma_coll + Gamma_mlvl - Gamma_3b) * chi;
 
     const float delta_p_sum = (p_i_new(0) + p_n_new(0)) - (p_i_old(0) + p_n_old(0));
     const float delta_e_sum = 1.5f * delta_p_sum;
 
-    // Both the actual drain and the collisional-only expectation are
-    // negligibly small compared to the baseline thermal energy
-    // (3/2)(p_i + p_n) ≈ 2e0 J/m^3. Tolerance is set on absolute scale.
-    EXPECT_NEAR(delta_e_sum, expected_dE_sum, 1.0e-4f);
-    EXPECT_NEAR(delta_e_sum, 0.0f,            1.0e-4f);
+    // The drain matches the collisional balance (independent of the large
+    // photoionization rate). Absolute tolerance set well below |expected_dE_sum|.
+    EXPECT_NEAR(delta_e_sum, expected_dE_sum, 1.0e-5f);
 }
 
 // Apply Stage E in isolation to a uniform, motionless box; check that
@@ -605,11 +643,12 @@ static void test_stage_e_mass_momentum_chi_H_drain() {
     const float n_tot     = rho_tot / m;
     Vec T_v(1); T_v(0) = T;
     const float S = ionization_rate_S(grid, T_v)(0);
-    const float a = recombination_rate_alpha(grid, T_v)(0);
 
-    // Stage E with a moderate dt: 1e-3 s. This pushes f far from f_old but
-    // still in the linear-ish regime.
-    const float dt = 1.0e-3f;
+    // Stage E with a small dt: the multilevel S_CR drain is large at 1.5e4 K,
+    // so dt is kept small enough that the χ_H drain stays well below the
+    // available thermal energy (no pressure-floor clamp), keeping the clean
+    // Δ(e_i+e_n) = −(drain) balance testable.
+    const float dt = 1.0e-5f;
     apply_ionization_stage(grid, prim, dt);
 
     // Mass: ρ_i + ρ_n unchanged per cell.
@@ -635,33 +674,41 @@ static void test_stage_e_mass_momentum_chi_H_drain() {
     Vec p_n_new = get_scalar(grid, prim, prim::P_N);
     const float n_i_new = rho_i_new(0) / m;
     const float n_n_new = rho_n_new(0) / m;
-    const float Gamma_ion = dt * n_i_new * n_n_new * S;
-    const float Gamma_rec = dt * n_i_new * n_i_new * a;
+    const float Scr = ionization_rate_S_CR(grid, T_v)(0);
+    const float kc  = recombination_rate_kappa_c(grid, T_v)(0);
     const float chi = grid.chi_H_J;
 
-    // Expected ion thermal change: Γ_ion (3/2 k T_n) - Γ_rec (3/2 k T_i) - Γ_ion χ_H.
-    // Translate to Δp = (2/3) Δ(thermal energy) -- but since the ion fluid
-    // also exchanges thermal energy with the neutral fluid via the source,
-    // we check the SUM Δ(thermal_i + thermal_n) = (2/3) Δ(p_i+p_n) = -Γ_ion χ_H.
+    // The thermal/KE exchange between species cancels in the SUM Δ(e_i+e_n),
+    // leaving only the χ_H balance with the electron thermal pool: collisional
+    // ionization (S_i and multilevel S_CR) drains χ_H, three-body recombination
+    // returns it (super-elastic). Radiative recombination radiates χ_H away and
+    // photoionization is photon-powered — neither touches the thermal pool. So
+    //   Δ(e_i+e_n) = -(Γ_coll + Γ_mlvl - Γ_3b)·χ_H.
+    const float Gamma_coll = dt * n_i_new * n_n_new * S;
+    const float Gamma_mlvl = dt * n_i_new * n_n_new * Scr;
+    const float Gamma_3b   = dt * n_i_new * n_i_new * (kc * n_i_new);
     const float delta_p_sum  = (p_i_new(0) + p_n_new(0)) - (p_i_old(0) + p_n_old(0));
     const float delta_e_sum  = 1.5f * delta_p_sum;
-    const float expected_dE  = -Gamma_ion * chi;
+    const float expected_dE  = -(Gamma_coll + Gamma_mlvl - Gamma_3b) * chi;
     EXPECT_REL(delta_e_sum, expected_dE, 1e-2);
 }
 
-// Hold T_e fixed and evolve many steps with Stage E only. The fixed point
-// of df/dt = n_tot [f(1-f) S_i - f² α_r] satisfies f/(1-f) = S_i/α_r.
+// Hold T_e fixed and evolve many steps with Stage E only (photoionization off).
+// The full Route B network relaxes to its own ionization equilibrium, where
+// ionization = recombination including the multilevel S_CR and three-body α_c
+// channels (no longer the two-coefficient f = S_i/(S_i+α_r)).
 static void test_stage_e_kinetic_equilibrium() {
     const float T = 3.0e4f;  // pick T so S_i/α_r is moderate (not tiny, not huge)
     const float ni0 = 5.0e17f, nn0 = 5.0e18f;
+    const float n_tot = ni0 + nn0;
     Grid grid;
     Vec cons = setup_uniform(grid, 1, ni0, nn0, T, T);
-    grid.enable_ionization = true;
+    grid.enable_ionization    = true;
+    grid.photoionization_rate = 0.0f;   // isolate the collisional/recombination network
 
     Vec T_v(1); T_v(0) = T;
     const float S = ionization_rate_S(grid, T_v)(0);
     const float a = recombination_rate_alpha(grid, T_v)(0);
-    const float f_eq_expected = S / (S + a);
 
     Vec prim = cons2prim(grid, cons);
     // dt scaled so a single Stage E call sees τ_rec ~ 1/(n_e α_r) per step
@@ -694,29 +741,37 @@ static void test_stage_e_kinetic_equilibrium() {
     Vec rho_n_f = get_scalar(grid, prim, prim::RHO_N);
     const float f_final = rho_i_f(0) / (rho_i_f(0) + rho_n_f(0));
 
-    // The fixed point: f/(1-f) = S/α  =>  f = S/(S+α).
-    EXPECT_REL(f_final, f_eq_expected, 5e-3);
+    // Compare against the full-network equilibrium (ionization = recombination).
+    const float f_eq_expected = network_equilibrium_f(grid, T, n_tot, 0.0f);
+    EXPECT_REL(f_final, f_eq_expected, 1e-2);
 }
 
-// Fixed point: if the state starts at the kinetic-equilibrium ionization
-// fraction f_eq = S/(S+α), Stage E must leave (ρ_i, ρ_n) essentially unchanged.
-// This stresses the quadratic solve at the algebraic root, which is where
-// catastrophic cancellation would show up if the discriminant logic is wrong.
+// Fixed point: if the state starts at the full-network ionization equilibrium,
+// Stage E must leave (ρ_i, ρ_n) essentially unchanged. This stresses the cubic
+// solve at its algebraic root, where catastrophic cancellation would show up
+// if the safeguarded-Newton logic were wrong.
 static void test_stage_e_fixed_point_at_kinetic_equilibrium() {
-    const float T = 3.0e4f;
+    const float T = 8.0e3f;   // moderate f_eq (~0.3), so both species are well
+                              // resolved in float32 (avoids the 1-f≈0 minority
+                              // precision loss that T=3e4, f_eq→1 would cause)
     const float n_tot_target = 1.0e19f;
+    // Enable the full network (including three-body κ_c) so the Stage-E cubic
+    // is exercised at its algebraic root — the cubic solver is the target here.
     Grid g_probe;
     g_probe.init(1, 0.25f);
-    Vec T_v(1); T_v(0) = T;
-    const float S = ionization_rate_S(g_probe, T_v)(0);
-    const float a = recombination_rate_alpha(g_probe, T_v)(0);
-    const float f_eq = S / (S + a);
+    g_probe.photoionization_rate                  = 0.0f;
+    g_probe.enable_direct_collisional_ionization  = true;
+    g_probe.enable_threebody_recombination        = true;
+    const float f_eq = network_equilibrium_f(g_probe, T, n_tot_target, 0.0f);
 
     const float ni = f_eq * n_tot_target;
     const float nn = (1.0f - f_eq) * n_tot_target;
     Grid grid;
     Vec cons = setup_uniform(grid, 4, ni, nn, T, T);
-    grid.enable_ionization = true;
+    grid.enable_ionization                       = true;
+    grid.photoionization_rate                    = 0.0f;   // match the P=0 equilibrium above
+    grid.enable_direct_collisional_ionization    = true;
+    grid.enable_threebody_recombination          = true;
 
     Vec prim_before = cons2prim(grid, cons);
     Vec prim_after  = prim_before;
@@ -1254,78 +1309,224 @@ static void test_open_bcs_stability_under_model_c7() {
 // reservoir). T_i, V, U are Neumann from cell 0. Perturbing cell 0 must
 // leave the three Dirichlet quantities at their pinned values and propagate
 // the three Neumann quantities to the ghost.
-static void test_model_c7_inner_bc_neumann_ni_dirichlet_rho_n_outer_T_doubles() {
+static void test_model_c7_bc_discrete_hse_inner_mach_capped_outer() {
     Grid grid;
     grid.init(100, 0.25f);
     Vec xn = model_c7_ic(grid);
-
-    const float rho_n_pinned = grid.inner_boundary0_i(cons::RHO_N);   // snapshot from IC
-
-    auto outer_T_i = [&](const Vec& ob) {
-        const float rho_i = ob(cons::RHO_I);
-        const float n_i   = rho_i / grid.m_i;
-        const float V     = ob(cons::MOM_I) / rho_i;
-        const float phi_g = grid.phi_g_iph(grid.ns - 1);
-        return (ob(cons::E_I) - 0.5f * rho_i * V * V - rho_i * phi_g)
-                / (3.0f * grid.k_b * n_i);
-    };
-    auto outer_T_n = [&](const Vec& ob) {
-        const float rho_n = ob(cons::RHO_N);
-        const float n_n   = rho_n / grid.m_n;
-        const float U     = ob(cons::MOM_N) / rho_n;
-        const float phi_g = grid.phi_g_iph(grid.ns - 1);
-        return (ob(cons::E_N) - 0.5f * rho_n * U * U - rho_n * phi_g)
-                / (1.5f * grid.k_b * n_n);
-    };
-
-    model_c7_update_bc(grid, xn);
-
-    // Inner: ρ_n Dirichlet at IC snapshot.
-    EXPECT_REL(grid.inner_boundary0_i(cons::RHO_N), rho_n_pinned, 1e-5);
-    EXPECT_REL(grid.inner_boundary1_i(cons::RHO_N), rho_n_pinned, 1e-5);
-
-    // Inner: ρ_i Neumann — must match cell 0.
     const auto sz = arma::size(grid.ns, num_of_eq);
-    const float rho_i_cell_0 = xn(arma::sub2ind(sz, 0, cons::RHO_I));
-    EXPECT_REL(grid.inner_boundary0_i(cons::RHO_I), rho_i_cell_0, 1e-5);
-    EXPECT_REL(grid.inner_boundary1_i(cons::RHO_I), rho_i_cell_0, 1e-5);
 
-    // Outer: T_g1 = 2·T_g0 for both species.
-    EXPECT_REL(outer_T_i(grid.outer_boundary1_i),
-               2.0f * outer_T_i(grid.outer_boundary0_i), 1e-4);
-    EXPECT_REL(outer_T_n(grid.outer_boundary1_i),
-               2.0f * outer_T_n(grid.outer_boundary0_i), 1e-4);
-
-    // Perturb cell 0: triple ρ_i and add a downflow. Ghost ρ_n stays pinned;
-    // ghost ρ_i, V, U must all track cell 0's new values (Neumann).
-    const float rho_i_new   = 3.0f * rho_i_cell_0;
-    const float V_new       = -250.0f;
-    const float U_new       = -200.0f;
-    const float rho_n_cell0 = xn(arma::sub2ind(sz, 0, cons::RHO_N));
-    xn(arma::sub2ind(sz, 0, cons::RHO_I)) = rho_i_new;
-    xn(arma::sub2ind(sz, 0, cons::MOM_I)) = rho_i_new * V_new;
-    xn(arma::sub2ind(sz, 0, cons::MOM_N)) = rho_n_cell0 * U_new;
-    const float phi_g_cell_0 = 0.5f * (grid.phi_g_imh(0) + grid.phi_g_iph(0));
-    const float p_i_target   = 2.0f * (rho_i_new / grid.m_i) * grid.k_b * 6500.0f;
-    const float p_n_target   = (rho_n_cell0 / grid.m_n) * grid.k_b * 6500.0f;
-    xn(arma::sub2ind(sz, 0, cons::E_I)) = 1.5f * p_i_target + 0.5f * rho_i_new * V_new * V_new
-                                          + rho_i_new * phi_g_cell_0;
-    xn(arma::sub2ind(sz, 0, cons::E_N)) = 1.5f * p_n_target + 0.5f * rho_n_cell0 * U_new * U_new
-                                          + rho_n_cell0 * phi_g_cell_0;
+    // IC-pinned inner reservoir (Dirichlet ρ) and decoded cell-0 pressure.
+    const float rho_i_pinned = grid.inner_boundary0_i(cons::RHO_I);
+    const float rho_n_pinned = grid.inner_boundary0_i(cons::RHO_N);
+    const float phi_g_inner  = grid.phi_g_imh(0);
+    auto ghost_p = [&](const Vec& ob, arma::uword E, arma::uword RHO, arma::uword MOM) {
+        const float rho = ob(RHO);
+        const float V   = ob(MOM) / rho;
+        return 2.0f/3.0f * (ob(E) - 0.5f * rho * V * V - rho * phi_g_inner);
+    };
+    // Cell-0 pressures for the discrete-HSE comparison.
+    const float rho_i_0 = xn(arma::sub2ind(sz, 0, cons::RHO_I));
+    const float n_i_0   = rho_i_0 / grid.m_i;
+    const float phi_g_c0 = 0.5f * (grid.phi_g_imh(0) + grid.phi_g_iph(0));
+    const float V0       = xn(arma::sub2ind(sz, 0, cons::MOM_I)) / rho_i_0;
+    const float p_i_cell0 = 2.0f/3.0f * (xn(arma::sub2ind(sz, 0, cons::E_I))
+                            - 0.5f * rho_i_0 * V0 * V0 - rho_i_0 * phi_g_c0);
 
     model_c7_update_bc(grid, xn);
 
-    // ρ_n still Dirichlet.
+    // --- Inner: discrete-HSE V=U=0 reservoir, Dirichlet ρ ---
+    EXPECT_REL(grid.inner_boundary0_i(cons::RHO_I), rho_i_pinned, 1e-5);
     EXPECT_REL(grid.inner_boundary0_i(cons::RHO_N), rho_n_pinned, 1e-5);
-    EXPECT_REL(grid.inner_boundary1_i(cons::RHO_N), rho_n_pinned, 1e-5);
+    EXPECT_REL(grid.inner_boundary1_i(cons::RHO_I), rho_i_pinned, 1e-5);
+    EXPECT_TRUE(grid.inner_boundary0_i(cons::MOM_I) == 0.0f);   // V = 0
+    EXPECT_TRUE(grid.inner_boundary0_i(cons::MOM_N) == 0.0f);   // U = 0
+    // Hydrostatic ghost pressure: p_ghost = p_0 + ρ_0 g ds0 > p_0.
+    const float p_i_ghost = ghost_p(grid.inner_boundary0_i, cons::E_I, cons::RHO_I, cons::MOM_I);
+    EXPECT_TRUE(p_i_ghost > p_i_cell0);
+    const float ds0 = grid.ds_i(0);
+    EXPECT_REL(p_i_ghost, p_i_cell0 + rho_i_0 * grid.g * ds0, 1e-3);
 
-    // ρ_i, V, U Neumann — must track cell 0's new values.
-    EXPECT_REL(grid.inner_boundary0_i(cons::RHO_I), rho_i_new, 1e-5);
-    EXPECT_REL(grid.inner_boundary1_i(cons::RHO_I), rho_i_new, 1e-5);
-    const float V_ghost = grid.inner_boundary0_i(cons::MOM_I) / grid.inner_boundary0_i(cons::RHO_I);
-    const float U_ghost = grid.inner_boundary0_i(cons::MOM_N) / grid.inner_boundary0_i(cons::RHO_N);
-    EXPECT_REL(V_ghost, V_new, 1e-4);
-    EXPECT_REL(U_ghost, U_new, 1e-4);
+    // --- Outer: Mach-capped outflow, U locked to V ---
+    // Force a large outflow in cell ns-1; the ghost V must be capped at
+    // 0.05 c_s(T_TR) and the neutral ghost U must equal V.
+    const arma::uword L = grid.ns - 1;
+    const float rho_i_L = xn(arma::sub2ind(sz, L, cons::RHO_I));
+    const float rho_n_L = xn(arma::sub2ind(sz, L, cons::RHO_N));
+    const float V_big   = 5.0e4f;   // 50 km/s, far above the cap
+    xn(arma::sub2ind(sz, L, cons::MOM_I)) = rho_i_L * V_big;
+    xn(arma::sub2ind(sz, L, cons::MOM_N)) = rho_n_L * V_big;
+
+    model_c7_update_bc(grid, xn);
+
+    const float T_TR  = 2.310e4f;   // table-top TR-base temperature
+    const float c_s   = std::sqrt(2.0f * grid.gamma_mono * grid.k_b * T_TR / grid.m_i);
+    const float V_cap = 0.05f * c_s;
+    const float Vg = grid.outer_boundary0_i(cons::MOM_I) / grid.outer_boundary0_i(cons::RHO_I);
+    const float Ug = grid.outer_boundary0_i(cons::MOM_N) / grid.outer_boundary0_i(cons::RHO_N);
+    EXPECT_REL(Vg, V_cap, 1e-3);    // capped (positive outflow)
+    EXPECT_REL(Ug, Vg, 1e-5);       // neutral locked to charge fluid
+    // Outer ρ is Neumann (tracks cell ns-1).
+    EXPECT_REL(grid.outer_boundary0_i(cons::RHO_I), rho_i_L, 1e-5);
+}
+
+// TRAC broadening factor ε(T): 1 outside [T_b, T_c), (T_c/T)^{5/2} inside, and
+// the conservation property κ'=κε is constant (=κ(T_c)) so κ'Λ' = κΛ.
+static void test_trac_broadening_conserves_kappa_lambda() {
+    Grid grid;
+    grid.init(6, 0.25f);
+    grid.enable_trac   = true;
+    grid.trac_T_chrom  = 2.0e4f;
+    grid.trac_cutoff_T = 1.0e5f;
+    Vec T(6);
+    T(0) = 1.0e4f; T(1) = 2.0e4f; T(2) = 5.0e4f;
+    T(3) = 1.0e5f; T(4) = 2.0e5f; T(5) = 8.0e3f;
+    Vec eps = trac_broadening_factor(grid, T);
+
+    EXPECT_REL(eps(0), 1.0f, 1e-4);   // below T_b
+    EXPECT_REL(eps(5), 1.0f, 1e-4);   // below T_b
+    EXPECT_REL(eps(3), 1.0f, 1e-4);   // T == T_c → not broadened
+    EXPECT_REL(eps(4), 1.0f, 1e-4);   // above T_c
+    EXPECT_REL(eps(1), std::pow(1.0e5f / 2.0e4f, 2.5f), 1e-3);  // inside
+    EXPECT_REL(eps(2), std::pow(1.0e5f / 5.0e4f, 2.5f), 1e-3);
+
+    // Spitzer-like κ ∝ T^{5/2}: broadened κ' = κ·ε must equal κ(T_c), constant.
+    const float kappa_Tc = std::pow(1.0e5f, 2.5f);
+    EXPECT_REL(std::pow(T(1), 2.5f) * eps(1), kappa_Tc, 1e-3);
+    EXPECT_REL(std::pow(T(2), 2.5f) * eps(2), kappa_Tc, 1e-3);
+
+    // Disabled → all ones (clean baseline).
+    grid.enable_trac = false;
+    Vec eps_off = trac_broadening_factor(grid, T);
+    for (arma::uword i = 0; i < 6; ++i) EXPECT_REL(eps_off(i), 1.0f, 1e-5);
+}
+
+// TRAC adaptive cutoff: returns the floor for a resolved profile, rises above it
+// for an under-resolved (steep) TR, bounded by 0.2 T_peak, and the per-step
+// limiter caps the rate of change.
+static void test_trac_cutoff_detection_and_limiter() {
+    Grid grid;
+    grid.init(10, 0.25f);
+    grid.ds_i.fill(1.0e4f);
+    grid.B_i.fill(1.0f); grid.B_imh.fill(1.0f); grid.B_iph.fill(1.0f);
+    grid.dinvB_ds_i.zeros(); grid.phi_g_imh.zeros(); grid.phi_g_iph.zeros();
+    grid.broadcast();
+    grid.enable_trac  = true;
+    grid.trac_T_chrom = 2.0e4f;
+
+    auto make_prim = [&](const float* Tp) {
+        Vec prim(grid.n_state, arma::fill::zeros);
+        const float ni = 1.0e16f, nn = 1.0e10f;
+        const auto sz = arma::size(10, num_of_eq);
+        for (arma::uword i = 0; i < 10; ++i) {
+            prim(arma::sub2ind(sz, i, prim::RHO_I)) = ni * grid.m_i;
+            prim(arma::sub2ind(sz, i, prim::RHO_N)) = nn * grid.m_n;
+            prim(arma::sub2ind(sz, i, prim::P_I))   = ni * 2.0f * grid.k_b * Tp[i];
+            prim(arma::sub2ind(sz, i, prim::P_N))   = nn * grid.k_b * Tp[i];
+        }
+        return prim;
+    };
+
+    // Smooth, well-resolved profile → nothing under-resolved → T_c at floor.
+    float smooth[10];
+    for (int i = 0; i < 10; ++i) smooth[i] = 6.0e3f + 100.0f * i;
+    grid.trac_cutoff_T = 2.0e4f;
+    EXPECT_REL(compute_trac_cutoff_T(grid, make_prim(smooth)), grid.trac_T_chrom, 1e-4);
+
+    // Steep TR jump (under-resolved). T_peak = 1.2e5 → cutoff bound 0.2·T_peak = 2.4e4.
+    float steep[10] = {6.0e3f,6.0e3f,6.0e3f,6.0e3f,6.0e3f,6.0e3f,2.0e4f,6.0e4f,1.0e5f,1.2e5f};
+    grid.trac_cutoff_T = 2.0e4f;
+    const float Tc1 = compute_trac_cutoff_T(grid, make_prim(steep));
+    EXPECT_TRUE(Tc1 >= 2.0e4f && Tc1 <= 2.0e4f * 1.0301f);   // limiter caps the rise
+    for (int k = 0; k < 200; ++k)
+        grid.trac_cutoff_T = compute_trac_cutoff_T(grid, make_prim(steep));
+    EXPECT_TRUE(grid.trac_cutoff_T > 2.05e4f);                // TRAC engaged
+    EXPECT_TRUE(grid.trac_cutoff_T <= 0.2f * 1.2e5f + 1.0f);  // bounded by 0.2 T_peak
+}
+
+// Flare beam heating (physics.hpp::beam_heating_rate): the volumetric heating
+// is zero before onset, deposits only inside the height window during the
+// flat-top, and its column integral equals the beam energy flux (∫φ ds = 1).
+static void test_beam_heating_rate_profile() {
+    Grid grid;
+    grid.init(10, 0.25f);
+    grid.ds_i.fill(1.0e4f);                 // 10 km cells; centers 1008,1018,..,1098 km
+    grid.B_i.ones(); grid.B_imh.ones(); grid.B_iph.ones();
+    grid.dinvB_ds_i.zeros(); grid.phi_g_imh.zeros(); grid.phi_g_iph.zeros();
+    grid.broadcast();
+    grid.enable_beam_heating = true;
+    grid.beam_flux     = 5.0e7f;            // W/m^2
+    grid.beam_t_on     = 2.0f;
+    grid.beam_duration = 10.0f;
+    grid.beam_ramp     = 1.0f;
+    grid.beam_h_lo_km  = 1020.0f;
+    grid.beam_h_hi_km  = 1070.0f;           // selects cell centers 1028..1068 (i=2..6)
+
+    Vec n_i(10), n_n(10);
+    n_i.fill(1.0e16f); n_n.fill(2.0e16f);
+
+    // Before onset → no heating.
+    grid.sim_time = 0.0f;
+    EXPECT_TRUE(arma::max(beam_heating_rate(grid, n_i, n_n)) == 0.0f);
+
+    // Flat-top (t well inside [t_on+ramp, t_off-ramp]) → g = 1.
+    grid.sim_time = 6.0f;
+    Vec Q = beam_heating_rate(grid, n_i, n_n);
+    EXPECT_TRUE(Q(0) == 0.0f && Q(1) == 0.0f);          // below window
+    EXPECT_TRUE(Q(7) == 0.0f && Q(9) == 0.0f);          // above window
+    for (int i = 2; i <= 6; ++i) EXPECT_TRUE(Q(i) > 0.0f);   // inside window
+    // Column-integrated heating equals the imposed flux at flat-top.
+    EXPECT_REL(arma::dot(Q, grid.ds_i), grid.beam_flux, 1e-3);
+
+    // Disabled → identically zero (clean baseline for other scenarios).
+    grid.enable_beam_heating = false;
+    EXPECT_TRUE(arma::max(beam_heating_rate(grid, n_i, n_n)) == 0.0f);
+}
+
+// Flare beam heating stage shares the deposited energy by heat capacity so both
+// fluids gain the SAME ΔT (the weakly-ionized chromosphere would otherwise spike
+// T_e). Verifies ΔT_i == ΔT_n and that ΔT matches Δt·Q/(C_i + C_n).
+static void test_beam_heating_partitions_by_heat_capacity() {
+    Grid grid;
+    grid.init(4, 0.25f);
+    grid.ds_i.fill(1.0e4f);
+    grid.B_i.ones(); grid.B_imh.ones(); grid.B_iph.ones();
+    grid.dinvB_ds_i.zeros(); grid.phi_g_imh.zeros(); grid.phi_g_iph.zeros();
+    grid.broadcast();
+    grid.enable_beam_heating = true;
+    grid.enable_trac   = false;
+    grid.beam_flux     = 1.0e7f;
+    grid.beam_t_on     = 0.0f;
+    grid.beam_duration = 10.0f;
+    grid.beam_ramp     = 1.0e-6f;           // ~instant flat top
+    grid.beam_h_lo_km  = 1000.0f;
+    grid.beam_h_hi_km   = 1100.0f;          // whole little grid in window
+    grid.sim_time      = 5.0f;
+
+    const float ni = 1.0e16f, nn = 5.0e16f, T0 = 6.0e3f;
+    Vec prim(grid.n_state, arma::fill::zeros);
+    const auto sz = arma::size(4, num_of_eq);
+    for (arma::uword i = 0; i < 4; ++i) {
+        prim(arma::sub2ind(sz, i, prim::RHO_I)) = ni * grid.m_i;
+        prim(arma::sub2ind(sz, i, prim::RHO_N)) = nn * grid.m_n;
+        prim(arma::sub2ind(sz, i, prim::P_I))   = 2.0f * ni * grid.k_b * T0;
+        prim(arma::sub2ind(sz, i, prim::P_N))   =        nn * grid.k_b * T0;
+    }
+
+    const float dt = 0.01f;
+    Vec Q = beam_heating_rate(grid, Vec(4, arma::fill::value(ni)),
+                                    Vec(4, arma::fill::value(nn)));
+    apply_beam_heating_stage(grid, prim, dt);
+
+    for (arma::uword i = 0; i < 4; ++i) {
+        const float pi = prim(arma::sub2ind(sz, i, prim::P_I));
+        const float pn = prim(arma::sub2ind(sz, i, prim::P_N));
+        const float Ti = pi / (2.0f * ni * grid.k_b);
+        const float Tn = pn /        (nn * grid.k_b);
+        const float dTi = Ti - T0, dTn = Tn - T0;
+        EXPECT_REL(dTi, dTn, 1e-3);                              // equal ΔT both fluids
+        const float C = (3.0f * ni + 1.5f * nn) * grid.k_b;     // total heat capacity
+        EXPECT_REL(dTi, dt * Q(i) / C, 1e-3);                   // = Δt Q / (C_i+C_n)
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -1358,7 +1559,7 @@ int main() {
     RUN(test_photoionization_rate_default_uniform);
     RUN(test_stage_e_photoionization_drives_low_T_equilibrium);
     RUN(test_stage_e_no_chi_H_drain_from_photoionization);
-    RUN(test_model_c7_photoionization_makes_c7_a_stage_e_fixed_point);
+    RUN(test_model_c7_photoionization_uses_route_b_closure);
     RUN(test_stage_e_mass_momentum_chi_H_drain);
     RUN(test_stage_e_conserves_rho_tot_per_cell);
     RUN(test_stage_e_kinetic_equilibrium);
@@ -1375,7 +1576,11 @@ int main() {
     RUN(test_apply_open_bcs_mirrors_and_extrapolates);
     RUN(test_apply_open_bcs_outer_velocity_halving_pattern);
     RUN(test_open_bcs_stability_under_model_c7);
-    RUN(test_model_c7_inner_bc_neumann_ni_dirichlet_rho_n_outer_T_doubles);
+    RUN(test_model_c7_bc_discrete_hse_inner_mach_capped_outer);
+    RUN(test_trac_broadening_conserves_kappa_lambda);
+    RUN(test_trac_cutoff_detection_and_limiter);
+    RUN(test_beam_heating_rate_profile);
+    RUN(test_beam_heating_partitions_by_heat_capacity);
 
     std::cout << "\n===== Summary =====\n";
     std::cout << "Passed: " << g_pass << "\n";

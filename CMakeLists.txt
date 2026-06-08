@@ -25,6 +25,7 @@ add_library(chromosphere STATIC
     src/integrators.cpp
     scenarios/scenario.cpp
     scenarios/model_c7.cpp
+    scenarios/model_flare.cpp
     scenarios/analytic_canopy.cpp
     scenarios/data_file_parser.cpp
     scenarios/pfss_field_line.cpp

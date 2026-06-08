@@ -1,6 +1,7 @@
 #include "chromosphere.hpp"
 #include "physics.hpp"
 
+#include <cmath>
 #include <iostream>
 
 namespace chromosphere {
@@ -17,6 +18,34 @@ Vec cal_max_v_i(const Grid& grid, const Vec& xn_state) {
 Vec cal_dt_i(const Grid& grid, const Vec& xn_state) {
     Vec dt_i = grid.CFL * grid.ds_i / cal_max_v_i(grid, xn_state);
     float dt_min_i = arma::min(dt_i);
+
+    // Beam-heating timescale limit. In the low-density chromosphere (n ~ 10^16
+    // m^-3) the heat capacity is tiny, so the flare beam's heating time
+    // τ_heat = ε / Q can be SHORTER than the hydro CFL step. Operator splitting
+    // then over-heats a cell in one step (ΔT ~ 10^5 K) and breaks. Cap dt so the
+    // beam raises the total thermal energy by at most BEAM_HEAT_CFL per step.
+    if (grid.enable_beam_heating) {
+        const Vec prim  = cons2prim(grid, xn_state);
+        const Vec rho_i = get_scalar(grid, prim, prim::RHO_I);
+        const Vec rho_n = get_scalar(grid, prim, prim::RHO_N);
+        const Vec p_i   = get_scalar(grid, prim, prim::P_I);
+        const Vec p_n   = get_scalar(grid, prim, prim::P_N);
+        const Vec n_i   = rho_i / grid.m_i;
+        const Vec n_n   = rho_n / grid.m_n;
+        const Vec Q     = beam_heating_rate(grid, n_i, n_n);   // W/m^3
+        const float Qmax = Q.max();
+        if (Qmax > 0.0f) {
+            const float BEAM_HEAT_CFL = 0.1f;
+            const Vec eps = 1.5f * (p_i + p_n);               // total thermal energy density
+            // dt ≤ BEAM_HEAT_CFL · min(ε/Q) over cells receiving the beam.
+            Vec tau = eps / arma::clamp(Q, 1.0e-30f, arma::datum::inf);
+            // Only constrain where the beam actually deposits (Q>0).
+            for (arma::uword i = 0; i < grid.ns; ++i)
+                if (Q(i) <= 0.0f) tau(i) = arma::datum::inf;
+            const float dt_beam = BEAM_HEAT_CFL * arma::min(tau);
+            if (dt_beam < dt_min_i) dt_min_i = dt_beam;
+        }
+    }
     return dt_min_i * arma::ones<Vec>(grid.ns);
 }
 
@@ -34,6 +63,52 @@ static void broadcast_dt(Grid& grid, const Vec& dt_i) {
     for (arma::uword i = 0; i < num_of_eq; ++i) {
         grid.dt_state += scalar_to(grid, dt_i, i);
     }
+}
+
+// ----------------------------------------------------------------------------
+// TRAC adaptive cutoff temperature (Johnston et al. 2020 Eq. 8). T_c is the
+// highest charged-fluid temperature among cells where the TR is under-resolved
+// (L_R/L_T > δ = 1/2, with L_T = T/|dT/ds| the temperature length scale and
+// L_R = Δs the grid spacing), clamped to [trac_T_chrom, 0.2 T_peak]. When no
+// cell is under-resolved it defaults to the floor trac_T_chrom.
+// ----------------------------------------------------------------------------
+float compute_trac_cutoff_T(const Grid& grid, const Vec& prim_state) {
+    const Vec rho_i = get_scalar(grid, prim_state, prim::RHO_I);
+    const Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
+    const Vec n_i   = rho_i / grid.m_i;
+    const Vec T     = p_i / (2.0f * n_i * grid.k_b);   // T_e = T_i
+
+    const float Tpeak    = arma::max(T);
+    const float Tc_upper = std::max(0.2f * Tpeak, grid.trac_T_chrom);
+    float Tc = grid.trac_T_chrom;
+    const arma::uword ns = grid.ns;
+    for (arma::uword i = 0; i < ns; ++i) {
+        float dTds;
+        if (i == 0)            dTds = (T(1) - T(0)) / grid.ds_i(0);
+        else if (i == ns - 1)  dTds = (T(i) - T(i - 1)) / grid.ds_i(i);
+        else                   dTds = (T(i + 1) - T(i - 1)) / (2.0f * grid.ds_i(i));
+        // Under-resolved ⟺ L_R/L_T = Δs|dT/ds|/T > 1/2.
+        if (std::fabs(dTds) * grid.ds_i(i) > 0.5f * T(i)) {
+            if (T(i) > Tc) Tc = T(i);
+        }
+    }
+    Tc = std::min(Tc, Tc_upper);
+    Tc = std::max(Tc, grid.trac_T_chrom);
+
+    // Cutoff-temperature limiter (Johnston 2020 Appendix A.2): a sudden jump in
+    // T_c changes κ/Λ over many cells at once, producing a conduction/radiation
+    // shock. Limit the per-step change to a small ratio (both directions) so the
+    // broadening region grows/shrinks gradually; the integrated quantities are
+    // unaffected. grid.trac_cutoff_T holds the previous step's value.
+    const float prev      = grid.trac_cutoff_T;
+    const float max_ratio = 1.03f;
+    if (prev >= grid.trac_T_chrom) {
+        Tc = std::min(Tc, prev * max_ratio);
+        Tc = std::max(Tc, prev / max_ratio);
+        Tc = std::min(Tc, Tc_upper);
+        Tc = std::max(Tc, grid.trac_T_chrom);
+    }
+    return Tc;
 }
 
 // ----------------------------------------------------------------------------
@@ -270,9 +345,32 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     const Vec ds_iph   = 0.5 * (grid.ds_i + ds_i_ip1);
     const Vec ds_imh   = 0.5 * (ds_i_im1  + grid.ds_i);
 
+    // Isotropic numerical diffusion (Pandey 2024 §3.3): add K_num = χ·C to each
+    // face conductivity, where C is the face-averaged heat capacity per volume
+    // (ion C = 3 n_i k_B, neutral C = 1.5 n_n k_B). Folding it into K turns the
+    // existing backward-Euler tridiagonal into an unconditionally-stable solve
+    // for the combined Spitzer + isotropic-diffusion operator at no extra cost.
+    const float chi = grid.numerical_diffusivity;
+    const Vec Knum_iph_i = (1.5f * grid.k_b * chi) * (n_i + n_i_ip1);
+    const Vec Knum_imh_i = (1.5f * grid.k_b * chi) * (n_i + n_i_im1);
+    const Vec Knum_iph_n = (0.75f * grid.k_b * chi) * (n_n + n_n_ip1);
+    const Vec Knum_imh_n = (0.75f * grid.k_b * chi) * (n_n + n_n_im1);
+
+    // TRAC broadening (Johnston 2020): below the adaptive cutoff T_c the charged-
+    // fluid conductivity is enhanced by ε=(T_c/T)^{5/2} (→ κ' = κ(T_c), constant),
+    // spreading the unresolved TR onto the coarse grid. Applied per cell at the
+    // cell temperature (and at the shifted-neighbour temperatures) before face
+    // averaging. Only κ_e is broadened; the neutral row is chromospheric.
+    Vec Kb = K_e, Kb_ip1 = K_e_ip1, Kb_im1 = K_e_im1;
+    if (grid.enable_trac) {
+        Kb     %= trac_broadening_factor(grid, T_i);
+        Kb_ip1 %= trac_broadening_factor(grid, T_i_ip1_full);
+        Kb_im1 %= trac_broadening_factor(grid, T_i_im1_full);
+    }
+
     // ----- ion (charged) row ----- K_ion_total = κ_e (κ_i is zero in this code)
-    const Vec K_face_iph_i = 0.5 * (K_e + K_e_ip1);
-    const Vec K_face_imh_i = 0.5 * (K_e + K_e_im1);
+    const Vec K_face_iph_i = 0.5 * (Kb + Kb_ip1) + Knum_iph_i;
+    const Vec K_face_imh_i = 0.5 * (Kb + Kb_im1) + Knum_imh_i;
     const Vec C_i = 3.0 * n_i * grid.k_b;
     const Vec g_iph_i = grid.B_i / grid.ds_i % (K_face_iph_i / grid.B_iph) / ds_iph;
     const Vec g_imh_i = grid.B_i / grid.ds_i % (K_face_imh_i / grid.B_imh) / ds_imh;
@@ -291,14 +389,27 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     // Inner BC (Dirichlet at i = -1): fold L_0 * T_ghost into RHS, zero a[0].
     d_i[0] += L_coef_i[0] * T_ghost_in_i[0];
     a_i[0] = 0.0f;
-    // Outer BC (Dirichlet at i = ns): fold R_{ns-1} * T_ghost into RHS, zero c[ns-1].
-    d_i[grid.ns - 1] += R_coef_i[grid.ns - 1] * T_ghost_out_i[0];
-    c_i[grid.ns - 1] = 0.0f;
+    // Outer BC. Either:
+    //   * Neumann fixed-flux (impose_outer_heat_flux): the top face carries the
+    //     imposed coronal conductive flux q = outer_heat_flux [W/m²] into the
+    //     cell. Drop the R_coef coupling (no Dirichlet ghost) and add the flux
+    //     as a source ΔT = dt·q/(C·ds). Robust on the coarse grid — does not
+    //     over-conduct through a hot T-wall. (RTV q(T); plan upper-BC step 2.)
+    //   * Dirichlet (default): fold R_{ns-1}·T_ghost into the RHS.
+    const arma::uword nlast = grid.ns - 1;
+    if (grid.impose_outer_heat_flux) {
+        b_i[nlast] = 1.0f + L_coef_i[nlast];
+        d_i[nlast] = T_i[nlast]
+                   + dt * grid.outer_heat_flux / (C_i[nlast] * grid.ds_i[nlast]);
+    } else {
+        d_i[nlast] += R_coef_i[nlast] * T_ghost_out_i[0];
+    }
+    c_i[nlast] = 0.0f;
     const Vec T_i_new = thomas_solve(a_i, b_i, c_i, d_i);
 
     // ----- neutral row -----
-    const Vec K_face_iph_n = 0.5 * (K_n + K_n_ip1);
-    const Vec K_face_imh_n = 0.5 * (K_n + K_n_im1);
+    const Vec K_face_iph_n = 0.5 * (K_n + K_n_ip1) + Knum_iph_n;
+    const Vec K_face_imh_n = 0.5 * (K_n + K_n_im1) + Knum_imh_n;
     const Vec C_n_vec = 1.5 * n_n * grid.k_b;
     const Vec g_iph_n = grid.B_i / grid.ds_i % (K_face_iph_n / grid.B_iph) / ds_iph;
     const Vec g_imh_n = grid.B_i / grid.ds_i % (K_face_imh_n / grid.B_imh) / ds_imh;
@@ -318,10 +429,23 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     a_n[0] = 0.0f;
     d_n[grid.ns - 1] += R_coef_n[grid.ns - 1] * T_ghost_out_n[0];
     c_n[grid.ns - 1] = 0.0f;
-    const Vec T_n_new = thomas_solve(a_n, b_n, c_n, d_n);
+    Vec T_n_new = thomas_solve(a_n, b_n, c_n, d_n);
+    Vec T_i_new2 = T_i_new;
+
+    // Flare robustness: at the explosive evaporation front the conduction
+    // tridiagonal can occasionally yield a non-finite temperature (extreme
+    // κ_e∝T^{5/2} contrasts across a near-discontinuity on the coarse grid). Fall
+    // back to the pre-conduction temperature for any such cell rather than
+    // letting the NaN propagate. Gated on beam heating → steady runs unchanged.
+    if (grid.enable_beam_heating) {
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            if (!std::isfinite(T_i_new2(i))) T_i_new2(i) = T_i(i);
+            if (!std::isfinite(T_n_new(i)))  T_n_new(i)  = T_n(i);
+        }
+    }
 
     // Rebuild pressures and store back into prim_state.
-    const Vec p_i_new = 2.0 * n_i * grid.k_b % T_i_new;
+    const Vec p_i_new = 2.0 * n_i * grid.k_b % T_i_new2;
     const Vec p_n_new =       n_n * grid.k_b % T_n_new;
     const Vec V = get_scalar(grid, prim_state, prim::V);
     const Vec U = get_scalar(grid, prim_state, prim::U);
@@ -354,7 +478,19 @@ void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt) 
     const Vec n_n = rho_n / grid.m_n;
     const Vec T_e = p_i / (2.0f * n_i * grid.k_b);   // T_e = T_i under quasi-neutrality
 
-    const Vec Q   = radiative_loss_thick(grid, n_i, n_n, T_e);   // W/m^3, +ve = cooling
+    // Total radiative sink: optically-thick chromospheric (CL2012, H/Ca/Mg) plus
+    // optically-thin TR/coronal losses n_e n_H Λ(T). The two are stitched by a
+    // ~2e4 K switch inside radiative_loss_thin so neither double-counts; together
+    // they span the chromosphere through the lower TR / corona, giving the TR the
+    // radiative sink to re-radiate the imposed coronal conductive flux q(T).
+    // Optically-thin loss is TRAC-broadened (divided by ε): Λ' = Λ(T/T_c)^{5/2}
+    // below T_c, so κ'Λ' = κΛ and the TR-integrated radiation is conserved on the
+    // coarse grid (Johnston 2020). The optically-thick CL2012 chromospheric term
+    // is left unbroadened (it lives below the TRAC region).
+    Vec Q_thin = radiative_loss_thin(grid, n_i, n_n, T_e);
+    if (grid.enable_trac) Q_thin /= trac_broadening_factor(grid, T_e);
+    const Vec Q   = radiative_loss_thick(grid, n_i, n_n, T_e)    // W/m^3, +ve = cooling
+                  + Q_thin;
     const Vec eps = 1.5f * p_i;                                  // thermal energy density
     // Backward-Euler relaxation: ε^{n+1} = ε^n / (1 + Δt Q/ε^n) with Q frozen.
     const Vec denom = 1.0f + dt * Q / arma::clamp(eps, 1.0e-30f, arma::datum::inf);
@@ -364,23 +500,188 @@ void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt) 
 }
 
 // ----------------------------------------------------------------------------
-// Stage E (writeup §5.3): point-implicit hydrogen ionization / recombination.
-// The local ODE for f ≡ ρ_i / (ρ_i + ρ_n) under quasi-neutrality is
-//   df/dt = n_tot [ f(1-f) S_i(T_e) − f² α_r(T_e) ] + (1-f) P_phot,
-// where P_phot [s^-1] is the effective ground-state photoionization rate
-// (Carlsson & Stein 2002 ApJ 572, 626; physics.hpp::photoionization_rate_P).
-// Backward Euler at lagged T_e reduces to the cell-local quadratic
-//   A (f^{n+1})² + B f^{n+1} − C = 0,
-//   A ≡ Δt n_tot (S_i + α_r),
-//   B ≡ 1 − Δt n_tot S_i + Δt P_phot,
-//   C ≡ f^n + Δt P_phot.
-// The positive root gives f^{n+1}; integrated ionizations / recombinations
-// then drive the conservative mass / momentum / energy updates of §3.4.
-// Photoionization contributes to the integrated ion count but does NOT
-// drain χ_H from the electron thermal pool (the energy comes from the
-// absorbed UV photon, not from kinetic temperature).
-// Mutates V, U, p_i, p_n, ρ_i, ρ_n in place.
+// Vacuum-floor / single-fluid-collapse stage for the flare scenario. Explosive
+// evaporation fully ionizes the heated gas, so the neutral density n_n collapses
+// toward zero in the evaporated column. There the neutral velocity decode
+// U = ρ_n U / ρ_n becomes 0/0 noise and the spectral radius |U| + c_s,n blows up
+// → NaN (the ρ_n→0 ill-conditioning of two-fluid codes). We therefore floor both
+// densities, floor the pressures positive, cap the per-fluid speeds at a generous
+// physical ceiling, and — where the gas is ionized — COLLAPSE the neutral onto
+// the charged fluid (U = V, T_n = T_e), the exact single-fluid limit (Gómez
+// Míguez et al. 2024; the same slaving the C7 outer BC uses).
+//
+// The collapse triggers on the ionization fraction f = n_i/(n_i+n_n) exceeding
+// F_SLAVE, NOT on an absolute n_n floor. This is the key to a smooth neutral
+// profile: f varies smoothly through the hot column, so the whole ionized region
+// is slaved consistently. An absolute-floor trigger instead let neighbouring
+// cells flip in and out of the slaved state every step — the explicit hydro
+// re-noises the near-zero-mass neutral momentum each step, pushing ρ_n a hair
+// above/below the floor — producing the cell-to-cell checkerboard (sawtooth) seen
+// in u and p_n. Gated on enable_beam_heating so steady scenarios and the existing
+// test suite are untouched. Mutates prim in place.
 // ----------------------------------------------------------------------------
+void apply_flare_floor_stage(const Grid& grid, Vec& prim_state) {
+    const float m_i = grid.m_i, m_n = grid.m_n, k_b = grid.k_b;
+    const float RHO_I_FLOOR = m_i * 1.0e10f;   // n_i ≥ 10^10 m^-3
+    const float RHO_N_FLOOR = m_n * 1.0e10f;   // n_n ≥ 10^10 m^-3
+    const float P_FLOOR     = 1.0e-8f;         // Pa (chromospheric p ~ 10^-2 Pa)
+    const float V_MAX       = 1.5e6f;          // m/s, above the 2.35 c_s evaporation ceiling
+    const float T_MAX       = 5.0e7f;          // K, ceiling — beyond coronal validity; bounds
+                                               // κ_e∝T^{5/2} & TRAC ε so conduction stays finite
+    const float F_SLAVE     = 0.99f;           // ionization fraction above which the neutral is a
+                                               // collisionally-locked trace species → single fluid
+
+    Vec rho_i = get_scalar(grid, prim_state, prim::RHO_I);
+    Vec rho_n = get_scalar(grid, prim_state, prim::RHO_N);
+    Vec V     = get_scalar(grid, prim_state, prim::V);
+    Vec U     = get_scalar(grid, prim_state, prim::U);
+    Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
+    Vec p_n   = get_scalar(grid, prim_state, prim::P_N);
+
+    rho_i = arma::clamp(rho_i, RHO_I_FLOOR, arma::datum::inf);
+    p_i   = arma::clamp(p_i,   P_FLOOR,     arma::datum::inf);
+    V     = arma::clamp(V,    -V_MAX, V_MAX);
+
+    const Vec n_i = rho_i / m_i;
+    // Temperature ceiling on the charged fluid: p_i ≤ 2 n_i k_B T_MAX.
+    p_i = arma::min(p_i, 2.0f * n_i * (k_b * T_MAX));
+    const Vec T_e = p_i / (2.0f * n_i * k_b);     // electron/ion temperature (≤ T_MAX)
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        // Floor both densities positive so the V = ρV_i/ρ_i and U = ρU_n/ρ_n decodes
+        // and the spectral radii stay well-conditioned, then pick the regime.
+        if (rho_n(i) < RHO_N_FLOOR) rho_n(i) = RHO_N_FLOOR;
+        const float n_n_i = rho_n(i) / m_n;
+        const float f_ion = rho_i(i) / (rho_i(i) + rho_n(i));   // ionization fraction
+        if (f_ion >= F_SLAVE) {                  // ion-dominated → neutral is trace: slave neutral
+            U(i)   = V(i);                        // U = V
+            p_n(i) = n_n_i * k_b * T_e(i);        // T_n = T_e
+        } else {                                  // partially/fully neutral → two-fluid, bound both
+            if (U(i) >  V_MAX) U(i) =  V_MAX;
+            if (U(i) < -V_MAX) U(i) = -V_MAX;
+            if (p_n(i) < P_FLOOR) p_n(i) = P_FLOOR;
+            float T_n_i = p_n(i) / (n_n_i * k_b);
+            if (T_n_i > T_MAX) { T_n_i = T_MAX; p_n(i) = n_n_i * k_b * T_MAX; }   // T_n ≤ T_MAX
+            // Trace-ion overheating cap. When the ion is a minority species (f small)
+            // its T_i = p_i/(2 n_i k_B) blows up if n_i craters faster than p_i can
+            // relax — recombination at the condensation front. Cap the trace ion's
+            // temperature at the dominant neutral's T_n (the collisional single-fluid
+            // limit). DOWNWARD-only, with a 2× deadband, so it fires ONLY on genuine
+            // overheating (T_i > 2 T_n): the cool quiescent lower chromosphere
+            // (T_i ≈ T_n, also low f) is left untouched and V is never overwritten —
+            // unlike a full slave, which would rewrite the whole cool column and
+            // violate energy conservation (it crashed the run at beam onset).
+            if (f_ion <= 1.0f - F_SLAVE) {
+                const float p_i_cap = 2.0f * (rho_i(i) / m_i) * k_b * T_n_i;
+                if (p_i(i) > 2.0f * p_i_cap) p_i(i) = p_i_cap;
+            }
+        }
+    }
+
+    prim_state += scalar_to(grid, rho_i - get_scalar(grid, prim_state, prim::RHO_I), prim::RHO_I);
+    prim_state += scalar_to(grid, rho_n - get_scalar(grid, prim_state, prim::RHO_N), prim::RHO_N);
+    prim_state += scalar_to(grid, V     - get_scalar(grid, prim_state, prim::V),     prim::V);
+    prim_state += scalar_to(grid, U     - get_scalar(grid, prim_state, prim::U),     prim::U);
+    prim_state += scalar_to(grid, p_i   - get_scalar(grid, prim_state, prim::P_I),   prim::P_I);
+    prim_state += scalar_to(grid, p_n   - get_scalar(grid, prim_state, prim::P_N),   prim::P_N);
+}
+
+// ----------------------------------------------------------------------------
+// Flare beam-heating stage. Adds the nonthermal-electron-beam volumetric
+// heating Q_beam [W/m³] (physics.hpp::beam_heating_rate) to the gas over one
+// step. The deposited energy is shared between the charged and neutral fluids in
+// proportion to their heat capacities per volume, C_i = 3 n_i k_b (ions +
+// electrons, since ε_i = 3/2 p_i = 3 n_i k_b T) and C_n = 3/2 n_n k_b, so both
+// fluids gain the SAME ΔT = Δt Q / (C_i + C_n). This is essential in the weakly
+// ionized chromosphere: there n_e ≪ n_n, so dumping the whole flux into the tiny
+// electron pool alone would spike T_e by many× in one step (numerically fatal,
+// and unphysical — a precipitating beam heats the bulk gas, which the fast
+// electron–neutral collisions then share; the temperature-equilibration stage
+// enforces the same on longer scales). Resulting pressure increments are
+// Δp_i = 2 n_i k_b ΔT and Δp_n = n_n k_b ΔT. Q_beam is T-independent so this
+// explicit additive update is exact and positivity-preserving. When TRAC is
+// active the heating is broadened by the same factor ε = (T_c/T)^{5/2} as the
+// optically-thin loss, conserving κQ across the unresolved TR (Johnston 2020).
+// Mutates p_i and p_n in place. (Nonthermal collisional ionization by the beam
+// is omitted; the thermal heating drives Stage E ionization as T rises.)
+// ----------------------------------------------------------------------------
+void apply_beam_heating_stage(const Grid& grid, Vec& prim_state, float dt) {
+    if (!grid.enable_beam_heating) return;
+    const Vec rho_i = get_scalar(grid, prim_state, prim::RHO_I);
+    const Vec rho_n = get_scalar(grid, prim_state, prim::RHO_N);
+    const Vec n_i   = rho_i / grid.m_i;
+    const Vec n_n   = rho_n / grid.m_n;
+    const float k_b = grid.k_b;
+
+    Vec Q_beam = beam_heating_rate(grid, n_i, n_n);   // W/m^3, +ve = heating
+    if (grid.enable_trac) {
+        const Vec p_i = get_scalar(grid, prim_state, prim::P_I);
+        const Vec T_e = p_i / (2.0f * n_i * k_b);
+        Q_beam /= trac_broadening_factor(grid, T_e);
+    }
+    // Shared temperature rise: ΔT = Δt Q / (C_i + C_n), C_i = 3 n_i k, C_n = 1.5 n_n k.
+    const Vec C_i  = 3.0f * n_i * k_b;
+    const Vec C_n  = 1.5f * n_n * k_b;
+    const Vec dT   = (dt * Q_beam) / (C_i + C_n);
+    const Vec dp_i = 2.0f * n_i % (k_b * dT);          // = (2/3) C_i ΔT
+    const Vec dp_n =        n_n % (k_b * dT);          // = (2/3) C_n ΔT
+    prim_state += scalar_to(grid, dp_i, prim::P_I);
+    prim_state += scalar_to(grid, dp_n, prim::P_N);
+}
+
+// ----------------------------------------------------------------------------
+// Stage E (writeup §5.3): point-implicit hydrogen ionization / recombination,
+// Route B network (docs/photoionization_c7_inversion_plan.md). The local ODE
+// for f ≡ ρ_i / (ρ_i + ρ_n) under quasi-neutrality (n_e = n_i = f n_tot) is
+//   df/dt = (1-f) P_phot                          [photoionization,    always on]
+//         + f(1-f) n_tot S_CR                     [multilevel collisional, always on]
+//         + f(1-f) n_tot S_i                      [Voronov direct,  flag-gated, off by default]
+//         - f²      n_tot  α_r                     [radiative recomb, always on]
+//         - f³      n_tot² κ_c                     [three-body recomb, flag-gated, off by default]
+// Default network (grid.enable_direct_collisional_ionization = false,
+// grid.enable_threebody_recombination = false): P_phot + S_CR + α_r only.
+// S_i is subdominant by 2–3 orders vs. S_CR everywhere in the chromosphere.
+// α_c is within 1–2 orders of α_r below ~700 km but negligible above.
+// Backward Euler at lagged T_e reduces to the cell-local polynomial
+//   a3 f³ + a2 f² + a1 f + a0 = 0,
+//   a3 = Δt n_tot² κ_c,                   (= 0 when three-body is off → quadratic)
+//   a2 = Δt n_tot (S_i + S_CR + α_r),
+//   a1 = 1 + Δt P_phot - Δt n_tot (S_i + S_CR),
+//   a0 = -(f^n + Δt P_phot).
+// g(0)=a0≤0 and g(1)≥0 always, so the physical root lies in [0,1]; it is
+// found by a safeguarded Newton iteration seeded from the κ_c→0 quadratic
+// root (which recovers the pre-Route-B solve exactly when κ_c=0).
+// χ_H bookkeeping: collisional ionization (S_i and S_CR) drains χ_H from the
+// electron thermal pool; three-body recombination is super-elastic and returns
+// χ_H to it (the S_CR drain and α_c return cancel at LTE by detailed balance);
+// photoionization adds ions but drains no χ_H (energy comes from the absorbed
+// UV photon), and radiative recombination radiates χ_H away (case B, optically
+// thin). Mutates V, U, p_i, p_n, ρ_i, ρ_n in place.
+// ----------------------------------------------------------------------------
+
+// Solve a3 f³ + a2 f² + a1 f + a0 = 0 for the physical root in [0,1].
+// The Stage-E coefficients guarantee g(0)=a0≤0 and g(1)=a3+a2+a1+a0≥0, so a
+// root is bracketed by [0,1]. Safeguarded Newton (Newton step when it stays in
+// the bracket, bisection otherwise) — robust through the degenerate quadratic
+// and linear limits (a3,a2 → 0). `f_seed` is the κ_c→0 quadratic root.
+static float solve_ion_cubic(float a3, float a2, float a1, float a0, float f_seed) {
+    auto g  = [&](float f) { return ((a3 * f + a2) * f + a1) * f + a0; };
+    auto dg = [&](float f) { return (3.0f * a3 * f + 2.0f * a2) * f + a1; };
+    if (g(0.0f) >= 0.0f) return 0.0f;     // root at/below 0 (f^n = 0, no photoion)
+    if (g(1.0f) <= 0.0f) return 1.0f;     // root at/above 1
+    float lo = 0.0f, hi = 1.0f;           // g(lo) < 0 < g(hi)
+    float f = (f_seed > 0.0f && f_seed < 1.0f) ? f_seed : 0.5f;
+    for (int it = 0; it < 60; ++it) {
+        const float gf = g(f);
+        if (gf > 0.0f) hi = f; else lo = f;
+        const float d = dg(f);
+        float f_next = (d != 0.0f) ? f - gf / d : 0.5f * (lo + hi);
+        if (!(f_next > lo && f_next < hi)) f_next = 0.5f * (lo + hi);
+        if (std::fabs(f_next - f) < 1.0e-7f) return f_next;
+        f = f_next;
+    }
+    return f;
+}
+
 void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     const Vec rho_i = get_scalar(grid, prim_state, prim::RHO_I);
     const Vec rho_n = get_scalar(grid, prim_state, prim::RHO_N);
@@ -395,48 +696,71 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     const Vec T_i = p_i / (2.0 * n_i * grid.k_b);   // T_e = T_i under quasi-neutrality
     const Vec T_n = p_n / (n_n * grid.k_b);
 
-    // Rate coefficients at lagged T_e.
-    const Vec S = ionization_rate_S(grid, T_i);
-    const Vec a = recombination_rate_alpha(grid, T_i);
-    const Vec P = photoionization_rate_P(grid);
+    // Rate coefficients at lagged T_e (Route B network).
+    // Default network: P_phot + S_CR (ionization), α_r (recombination).
+    // S_i and κ_c are zeroed unless their Grid flags are set (see chromosphere.hpp).
+    const Vec S       = grid.enable_direct_collisional_ionization
+                      ? ionization_rate_S(grid, T_i)
+                      : Vec(grid.ns, arma::fill::zeros);       // S_i, direct Voronov (off by default)
+    const Vec a       = recombination_rate_alpha(grid, T_i);   // α_r, case-B radiative
+    const Vec P       = photoionization_rate_P(grid);          // P_phot
+    const Vec S_cr    = ionization_rate_S_CR(grid, T_i);       // multilevel (= κ_c Φ, n_e-free)
+    const Vec kappa_c = grid.enable_threebody_recombination
+                      ? recombination_rate_kappa_c(grid, T_i)
+                      : Vec(grid.ns, arma::fill::zeros);       // κ_c for α_c=κ_c n_e (off by default)
 
-    // Backward-Euler quadratic A f² + B f - C = 0.
+    // Backward-Euler cubic a3 f³ + a2 f² + a1 f + a0 = 0 (see header).
     const Vec rho_tot = rho_i + rho_n;
     const Vec n_tot   = rho_tot / m;
     const Vec f_old   = rho_i / rho_tot;
-    const Vec Acoef = dt * n_tot % (S + a);
-    const Vec Bcoef = 1.0 - dt * n_tot % S + dt * P;
-    const Vec Ccoef = f_old + dt * P;
+    const Vec Stot    = S + S_cr;                              // total collisional ionization
+    // a3 = dt n_tot² κ_c — group κ_c in first: n_tot² alone overflows float32
+    // (n_tot ~ 1e19 → n_tot² ~ 1e38 ≈ FLT_MAX), but n_tot·κ_c is ~1e-18.
+    const Vec a3v = dt * n_tot % (n_tot % kappa_c);
+    const Vec a2v = dt * n_tot % (Stot + a);
+    const Vec a1v = 1.0 + dt * P - dt * n_tot % Stot;
+    const Vec a0v = -(f_old + dt * P);
 
     Vec f_new(grid.ns);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        // Degenerate A → 0 (no collisional rate activity): linear fallback
-        // f = C / B accounts for the photoionization-only limit.
-        if (Acoef(i) < 1e-30f) {
-            const float B_i = Bcoef(i);
-            f_new(i) = (B_i > 0.0f) ? (Ccoef(i) / B_i) : f_old(i);
+        // Seed: κ_c→0 quadratic root a2 f² + a1 f - (-a0) = 0 (the pre-Route-B
+        // solve). Linear fallback when a2→0 (photoionization-only limit).
+        const float A = a2v(i), B = a1v(i), C = -a0v(i);
+        float seed;
+        if (A < 1e-30f) {
+            seed = (B > 0.0f) ? (C / B) : f_old(i);
         } else {
-            const float B_i = Bcoef(i);
-            const float disc = B_i * B_i + 4.0f * Acoef(i) * Ccoef(i);
-            // disc ≥ 0 always when f_old, A, P ≥ 0; guard against rounding.
-            const float sqrt_disc = std::sqrt(std::max(disc, 0.0f));
-            f_new(i) = (-B_i + sqrt_disc) / (2.0f * Acoef(i));
+            const float disc = B * B + 4.0f * A * C;
+            seed = (-B + std::sqrt(std::max(disc, 0.0f))) / (2.0f * A);
         }
-        if (f_new(i) < 0.0f) f_new(i) = 0.0f;
-        if (f_new(i) > 1.0f) f_new(i) = 1.0f;
+        seed = std::min(std::max(seed, 0.0f), 1.0f);
+        f_new(i) = solve_ion_cubic(a3v(i), a2v(i), a1v(i), a0v(i), seed);
     }
 
-    // Integrated ionization / recombination counts (per m³) over Δt. Evaluated
-    // at post-step densities and lagged T_e (writeup §5.3, plan §3.4 issue d).
-    // Photoionization adds a (1-f)·P branch that bypasses the n_e·n_n product.
+    // Keep f strictly interior so neither ρ_i nor ρ_n underflows to zero. At the
+    // hot top (corona-ghost T) Route B fully ionizes the gas (f→1); a vanishing
+    // neutral density would make U_new = ρU_n/ρ_n (and cons2prim downstream)
+    // divide by ~0. F_FLOOR bounds the minority species to a dynamically
+    // negligible but numerically safe fraction.
+    constexpr float F_FLOOR = 1.0e-8f;
+    f_new = arma::clamp(f_new, F_FLOOR, 1.0f - F_FLOOR);
+
+    // Integrated channel counts (per m³) over Δt, evaluated at post-step
+    // densities and lagged T_e (writeup §5.3, plan §3.4 issue d). Collisional
+    // ionization (S_i, S_CR) uses the n_e·n_n product; photoionization is the
+    // (1-f)·P branch; recombination (α_r radiative, α_c three-body) uses n_e·n_i.
     const Vec rho_i_new = f_new % rho_tot;
     const Vec rho_n_new = (1.0 - f_new) % rho_tot;
     const Vec n_i_new   = rho_i_new / m;
     const Vec n_n_new   = rho_n_new / m;
-    const Vec Gamma_coll = dt * n_i_new % n_n_new % S;       // collisional only — drains χ_H
+    const Vec a_c        = recombination_rate_alpha_c(grid, T_i, n_i_new);  // = κ_c n_e
+    const Vec Gamma_coll = dt * n_i_new % n_n_new % S;       // ground collisional — drains χ_H
+    const Vec Gamma_mlvl = dt * n_i_new % n_n_new % S_cr;    // multilevel collisional — drains χ_H
     const Vec Gamma_phot = dt * n_n_new % P;                 // photoionization — no χ_H drain
-    const Vec Gamma_ion  = Gamma_coll + Gamma_phot;          // total ionizations (mass/mom/KE budget)
-    const Vec Gamma_rec  = dt * n_i_new % n_i_new % a;
+    const Vec Gamma_ion  = Gamma_coll + Gamma_mlvl + Gamma_phot;   // total ionizations
+    const Vec Gamma_rec_rad = dt * n_i_new % n_i_new % a;    // radiative — χ_H radiated away
+    const Vec Gamma_rec_3b  = dt * n_i_new % n_i_new % a_c;  // three-body — super-elastic, returns χ_H
+    const Vec Gamma_rec  = Gamma_rec_rad + Gamma_rec_3b;     // total recombinations
 
     // Momentum bookkeeping (lagged velocities).
     const Vec rhoV_i_old = rho_i % V;
@@ -444,8 +768,17 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     const Vec dmom       = m * (Gamma_ion % U - Gamma_rec % V);
     const Vec rhoV_i_new = rhoV_i_old + dmom;
     const Vec rhoU_n_new = rhoU_n_old - dmom;
-    const Vec V_new = rhoV_i_new / rho_i_new;
-    const Vec U_new = rhoU_n_new / rho_n_new;
+    Vec V_new = rhoV_i_new / rho_i_new;
+    Vec U_new = rhoU_n_new / rho_n_new;
+    // When a species is at the F_FLOOR limit its momentum/density ratio is
+    // ill-conditioned (ρU_n/ρ_n with ρ_n→0). Physically the trace fluid is
+    // collisionally locked to the dominant one, so set its velocity to the
+    // dominant fluid's rather than the (numerically noisy) division result.
+    constexpr float F_GUARD = 1.0e-7f;   // a few × F_FLOOR
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        if (rho_n_new(i) < F_GUARD * rho_tot(i)) U_new(i) = V_new(i);
+        if (rho_i_new(i) < F_GUARD * rho_tot(i)) V_new(i) = U_new(i);
+    }
 
     // Energy bookkeeping (writeup §5.3, eqs. stageE-ei / stageE-en). We update
     // in *thermal* form: convert pressures to thermal energy ε = (3/2) p, apply
@@ -462,18 +795,21 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     const Vec KE_inherit = 0.5 * m * U % U;        // per-particle KE inherited by new ion (from neutral)
     const Vec KE_leave   = 0.5 * m * V % V;        // per-particle KE leaving ion fluid
 
-    // Δ(total energy_i) = Q^{e_i}_ion · Δt  (writeup §2.3 boxed; updated for
-    // photoionization)
+    // Δ(total energy_i) = Q^{e_i}_ion · Δt  (writeup §2.3 boxed; Route B)
     //                   = Γ_ion^Δ  (3/2 k_B T_n + ½ m U²)
     //                   − Γ_rec^Δ  (3/2 k_B T_i + ½ m V²)
-    //                   − Γ_coll^Δ χ_H
-    // Only the collisional ionization branch drains χ_H from the electron
-    // thermal pool; photoionizations are powered by absorbed UV photons, so
-    // their χ_H is supplied by the (unmodeled) radiation field rather than
-    // by the local plasma. Thermal/KE inheritance applies to all new ions.
+    //                   − (Γ_coll + Γ_mlvl)^Δ χ_H        [collisional ioniz drain]
+    //                   + Γ_rec,3b^Δ χ_H                 [three-body super-elastic]
+    // χ_H exchange with the electron thermal pool: both collisional ionization
+    // channels (direct S_i and multilevel S_CR) remove χ_H per event; three-body
+    // recombination is super-elastic and returns χ_H to the electrons (the
+    // S_CR drain and α_c return cancel at LTE by detailed balance). Photoioniz-
+    // ations are powered by absorbed UV photons (χ_H from the radiation field,
+    // not the plasma); radiative recombination radiates χ_H away (case B,
+    // optically thin). Thermal/KE inheritance applies to all new ions.
     const Vec dE_i = Gamma_ion  % (th_inherit + KE_inherit)
                    - Gamma_rec  % (th_leave   + KE_leave)
-                   - Gamma_coll * grid.chi_H_J;
+                   - (Gamma_coll + Gamma_mlvl - Gamma_rec_3b) * grid.chi_H_J;
     const Vec dE_n = -Gamma_ion % (th_inherit + KE_inherit)
                    +  Gamma_rec % (th_leave   + KE_leave);
 
@@ -517,14 +853,35 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     Vec prim   = cons2prim(grid, U_star);
 
     const float dt = dt_i(0);  // uniform by cal_dt_i construction
+    // Flare: sanitize the explicit predictor before any source stage reads it.
+    // The MUSCL update can drive p_i/p_n (hence T) negative at the steep
+    // evaporation front on the coarse grid, which would feed a negative T into
+    // the conduction tridiagonal and produce NaN. The floor clips densities and
+    // pressures positive and slaves the trace neutral; no-op for steady runs.
+    if (grid.enable_beam_heating) apply_flare_floor_stage(grid, prim);
+    // TRAC: recompute the adaptive cutoff T_c from the current profile so the
+    // conduction and cooling stages broaden the (currently) unresolved TR.
+    if (grid.enable_trac) grid.trac_cutoff_T = compute_trac_cutoff_T(grid, prim);
     apply_drag_stage(grid, prim, dt);
     apply_temperature_stage(grid, prim, dt);
     apply_conduction_stage(grid, prim, dt);
     if (grid.enable_ionization) {
         apply_ionization_stage(grid, prim, dt);
     }
+    // Beam heating BEFORE cooling so the heating-vs-radiation competition that
+    // defines the explosive/gentle threshold (Fisher et al. 1985) is captured:
+    // the cooling stage then radiates whatever fraction of the deposited heat
+    // the gas can.
+    if (grid.enable_beam_heating) {
+        apply_beam_heating_stage(grid, prim, dt);
+    }
     if (grid.enable_radiative_cooling) {
         apply_radiative_cooling_stage(grid, prim, dt);
+    }
+    // Vacuum floor / trace-neutral slaving — keeps the fully-ionized evaporated
+    // column well-conditioned (ρ_n→0). No-op for steady scenarios.
+    if (grid.enable_beam_heating) {
+        apply_flare_floor_stage(grid, prim);
     }
 
     return prim2cons(grid, prim);

@@ -44,6 +44,19 @@ Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
     Vec r_state_ip1 = dxn_state_iph / (prim_xn_state_ip2 - prim_xn_state_ip1);
     Vec r_state_im1 = (prim_xn_state_im1 - prim_xn_state_im2) / dxn_state_imh;
 
+    // Flare scenario: the positivity floors can pin several adjacent cells to the
+    // SAME density/pressure value (flat plateaus in the evaporated column), making
+    // the slope ratio r = 0/0 = NaN, which propagates through flux_lim into the
+    // reconstruction and the Rusanov spectral radius. Replace any non-finite ratio
+    // with 0 → flux_lim(0)=0 → first-order (no reconstructed slope) at those flat
+    // cells, which is the correct TVD behavior at extrema. Gated on beam heating
+    // so steady scenarios / the test suite are unchanged.
+    if (grid.enable_beam_heating) {
+        r_state.elem(arma::find_nonfinite(r_state)).zeros();
+        r_state_ip1.elem(arma::find_nonfinite(r_state_ip1)).zeros();
+        r_state_im1.elem(arma::find_nonfinite(r_state_im1)).zeros();
+    }
+
     // extrapolated cell-edge variables (MUSCL paper eq 4.5)
     Vec Rxn_state_iph = prim_xn_state_ip1 - 0.5 * flux_lim(r_state_ip1) % (prim_xn_state_ip2 - prim_xn_state_ip1);
     Vec Lxn_state_iph = prim_xn_state     + 0.5 * flux_lim(r_state)     % (prim_xn_state_ip1 - prim_xn_state);
@@ -68,6 +81,29 @@ Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
     Vec prim_xt_state     = cons2prim(grid,
         xn_state - grid.dt_state / grid.ds_state %
         (cal_flux_state(grid, Lxn_state_iph) - cal_flux_state(grid, Rxn_state_imh)));
+    // Positivity safeguard (flare scenario only): the half-step predictor can
+    // undershoot density/pressure to ≤0 at the steep evaporation front on the
+    // coarse grid, which then poisons the 2nd-order reconstruction and the
+    // Rusanov spectral radius (c_s = √(γp/ρ) → NaN). Floor the predicted density
+    // and pressure slots to small positive values. Gated on enable_beam_heating
+    // so steady scenarios and the existing test suite are byte-for-byte unchanged
+    // (a floor that only clips negatives never fires on those runs anyway).
+    if (grid.enable_beam_heating) {
+        const auto  sz = arma::size(grid.ns, num_of_eq);
+        const float RHO_FLOOR = grid.m_i * 1.0e10f;
+        const float P_FLOOR   = 1.0e-8f;
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            float& ri = prim_xt_state(arma::sub2ind(sz, i, prim::RHO_I));
+            float& rn = prim_xt_state(arma::sub2ind(sz, i, prim::RHO_N));
+            float& pi = prim_xt_state(arma::sub2ind(sz, i, prim::P_I));
+            float& pn = prim_xt_state(arma::sub2ind(sz, i, prim::P_N));
+            if (ri < RHO_FLOOR) ri = RHO_FLOOR;
+            if (rn < RHO_FLOOR) rn = RHO_FLOOR;
+            if (pi < P_FLOOR)   pi = P_FLOOR;
+            if (pn < P_FLOOR)   pn = P_FLOOR;
+        }
+    }
+
     Vec prim_xt_state_ip1 = cons2prim(grid, ip1(grid, prim2cons(grid, prim_xt_state)));
     Vec prim_xt_state_im1 = cons2prim(grid, im1(grid, prim2cons(grid, prim_xt_state)));
 
@@ -76,6 +112,30 @@ Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
     Lxn_state_iph = 0.5 * (prim_xn_state     + prim_xt_state)     + 0.5 * flux_lim(r_state)     % (prim_xn_state_ip1 - prim_xn_state);
     Rxn_state_imh = 0.5 * (prim_xn_state     + prim_xt_state)     - 0.5 * flux_lim(r_state)     % (prim_xn_state_ip1 - prim_xn_state);
     Lxn_state_imh = 0.5 * (prim_xn_state_im1 + prim_xt_state_im1) + 0.5 * flux_lim(r_state_im1) % (prim_xn_state     - prim_xn_state_im1);
+
+    // Positivity safeguard (flare scenario only): floor the reconstructed face
+    // primitives' density/pressure before prim2cons, so the Rusanov spectral
+    // radius c_s = √(γp/ρ) at the steep evaporation front stays real. Gated on
+    // enable_beam_heating → steady scenarios / test suite unchanged.
+    if (grid.enable_beam_heating) {
+        const auto  sz = arma::size(grid.ns, num_of_eq);
+        const float RHO_FLOOR = grid.m_i * 1.0e10f;
+        const float P_FLOOR   = 1.0e-8f;
+        Vec* faces[4] = {&Rxn_state_iph, &Lxn_state_iph, &Rxn_state_imh, &Lxn_state_imh};
+        for (Vec* fp : faces) {
+            Vec& F = *fp;
+            for (arma::uword i = 0; i < grid.ns; ++i) {
+                float& ri = F(arma::sub2ind(sz, i, prim::RHO_I));
+                float& rn = F(arma::sub2ind(sz, i, prim::RHO_N));
+                float& pi = F(arma::sub2ind(sz, i, prim::P_I));
+                float& pn = F(arma::sub2ind(sz, i, prim::P_N));
+                if (ri < RHO_FLOOR) ri = RHO_FLOOR;
+                if (rn < RHO_FLOOR) rn = RHO_FLOOR;
+                if (pi < P_FLOOR)   pi = P_FLOOR;
+                if (pn < P_FLOOR)   pn = P_FLOOR;
+            }
+        }
+    }
 
     Rxn_state_iph = prim2cons(grid, Rxn_state_iph);
     Lxn_state_iph = prim2cons(grid, Lxn_state_iph);

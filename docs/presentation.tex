@@ -1,0 +1,351 @@
+% Chromospheric Ionization and Evaporation — Beamer talk
+% Build inside docs/presentation-build/ to keep aux files out of the source tree:
+%   cd docs && latexmk -pdf -output-directory=presentation-build presentation.tex
+\documentclass[aspectratio=169]{beamer}
+
+\usetheme{AnnArbor}      % Michigan maize & blue
+\usecolortheme{rose}
+\useinnertheme{rectangles}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{caption}[numbered]
+
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\graphicspath{{writeup-overleaf/}{../util/visualization/}}
+
+% compact reference macro
+\newcommand{\cit}[1]{{\scriptsize\color{gray}[#1]}}
+
+\title[Chromospheric Ionization \& Evaporation]{Chromospheric Ionization and Evaporation}
+\subtitle{A 1.5D field-aligned two-fluid model of the partially-ionized chromosphere}
+\author{Keheng Zhu}
+\institute{University of Michigan}
+\date{\today}
+
+\begin{document}
+
+{\setbeamertemplate{footline}{}
+\begin{frame}\titlepage\end{frame}}
+
+\begin{frame}{Outline}
+  \tableofcontents
+\end{frame}
+
+% =====================================================================
+\section{Ionization \& Recombination Mechanisms}
+% =====================================================================
+\begin{frame}{The chromosphere bridges two regimes}
+  Partially ionized gas: $f \equiv \rho_i/\rho_\mathrm{tot}$ runs from $\lesssim 10^{-4}$ at the
+  temperature minimum to $\sim 1$ at the top of the transition region.
+  \vfill
+  \begin{columns}[T]
+  \begin{column}{0.5\textwidth}
+    \textbf{Dense lower chromosphere}\\ collision-dominated, near \alert{LTE / Saha}
+    \begin{itemize}
+      \item ionization set by Saha equilibrium
+      \item requires collisional ionization balanced by its exact inverse, \alert{three-body recombination}
+      \item $\dfrac{n_e n_i}{n_n}=\Phi(T_e)$
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.5\textwidth}
+    \textbf{Rarefied middle / upper chromosphere}\\ \alert{out of equilibrium}
+    \begin{itemize}
+      \item ioniz./recomb. time $>$ dynamical time
+      \item $f$ set by \emph{history}, not Saha
+      \item radiation-driven balance: photoionization $\leftrightarrow$ radiative recombination
+    \end{itemize}
+  \end{column}
+  \end{columns}
+  \vfill
+  \cit{Carlsson \& Stein 2002; Leenaarts et al. 2007}
+\end{frame}
+
+\begin{frame}{Ionization channels}
+  \[
+    \Gamma_\mathrm{ion}
+      = \underbrace{n_e n_n\,(S_i+S_\mathrm{CR})}_{\text{collisional}}
+      \;+\; \underbrace{n_n\,P_\mathrm{phot}}_{\text{photo}}
+  \]
+  \begin{itemize}
+    \item \textbf{Direct ground-state (Voronov):}
+      $S_i(T_e)=2.91\times10^{-14}\,\dfrac{U^{0.39}e^{-U}}{0.232+U}\ \mathrm{m^3 s^{-1}}$,
+      $\;U=\chi_H/k_BT_e$.\\
+      At $T\!\sim\!5$--$6$\,kK, $U\!\sim\!26$--$31$, so $S_i\propto e^{-U}$ is exponentially tiny —
+      \alert{negligible until the transition region}. \cit{Voronov 1997}
+    \item \textbf{Multilevel / Rydberg-ladder} $S_\mathrm{CR}=\alpha_c\,\Phi/n_e$:
+      stepwise excitation up the level ladder ($\chi_n=\chi_H/n^2\!\to\!0$, no Boltzmann penalty).
+      $\sim10^{4}$--$10^{5}\times$ ground state; the ionizer that reaches Saha at the base.
+      \cit{Bates, Kingston \& McWhirter 1962; Johnson 1972}
+    \item \textbf{Photoionization} (Ly$\alpha$ + Balmer-continuum): the \alert{dominant chromospheric
+      ionizer}; energy comes from radiation $\Rightarrow$ no $\chi_H$ drain on the gas.
+      \cit{Carlsson \& Stein 2002}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Recombination channels}
+  \[
+    \Gamma_\mathrm{rec}
+      = \underbrace{n_e^2\,\alpha_r}_{\text{radiative}}
+      \;+\; \underbrace{n_e^2\,\alpha_c}_{\text{three-body (collisional)}}
+  \]
+  \begin{itemize}
+    \item \textbf{Radiative} $\mathrm{H^+}+e\to\mathrm H+\gamma$, Hummer case-B fit:
+      $\alpha_r=2.7\times10^{-19}\,(T_e/10^4\,\mathrm K)^{-0.75}\ \mathrm{m^3 s^{-1}}$.
+      Binding energy escapes as an (optically-thin) Ly-continuum photon. \cit{Hummer 1994}
+    \item \textbf{Three-body / collisional-radiative} $\mathrm{H^+}+e+e\to\mathrm H(n)+e$,
+      rate $\propto n_e^2 n_i$. Capture into high-$n$ Rydberg levels then cascade $\Rightarrow$
+      $\sim5\times10^4\times$ the ground-state estimate; \alert{grows with $n_e$}.\\
+      $\alpha_c\approx 5.6\times10^{-27}(k_BT_e[\mathrm{eV}])^{-9/2}\,n_e\ \mathrm{cm^3 s^{-1}}$.
+      \cit{Hinnov \& Hirschberg 1962; Stevefelt et al. 1975}
+    \item \textbf{Neutral / molecular} ($\propto n_e n_i n_n$, $\propto n_i n_n^2$): comparable to
+      radiative \emph{only} at the dense base; carried as quantified uncertainty.
+      \cit{Drawin 1968; Cretu et al. 2022}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Equilibrium: one formulation, two limits}
+  Setting $df/dt=0$ (dropping $P_\mathrm{phot}$ for clarity):
+  \[
+    (1-f)\,S_i = f\big[\alpha_r + \alpha_{3b}\,f\,n_\mathrm{tot}\big]
+  \]
+  \begin{columns}[T]
+  \begin{column}{0.5\textwidth}
+    \textbf{Low density} ($\alpha_c\ll\alpha_r$)
+    \[ \frac{f}{1-f}=\frac{S_i}{\alpha_r} \]
+    density-independent kinetic balance.
+  \end{column}
+  \begin{column}{0.5\textwidth}
+    \textbf{High density} ($\alpha_c\gg\alpha_r$), with $\alpha_{3b}=S_i/\Phi$
+    \[ \boxed{\ \frac{f^2}{1-f}=\frac{\Phi(T_e)}{n_\mathrm{tot}}\ } \]
+    the \alert{Saha equation} — pure thermodynamics.
+  \end{column}
+  \end{columns}
+  \vfill
+  Detailed balance holds \emph{level by level} ($\alpha_{3b}(n)=S_i(n)/\Phi_n$), so the
+  collisional ionization / three-body pair has Saha as its \emph{exact} equilibrium.
+  A single-level model with the $S_\mathrm{CR}=\alpha_c\Phi/n_e$ closure recovers the LTE
+  limit \emph{by construction}.
+\end{frame}
+
+% =====================================================================
+\section{Photoionization}
+% =====================================================================
+\begin{frame}{Photoionization — frozen field, inverted from C7}
+  \small
+  \[
+    \mathrm H + \gamma \to \mathrm H^+ + e,\qquad
+    \Gamma_\mathrm{ion}^\mathrm{phot}=n_n\,P_\mathrm{phot}
+  \]
+  \vspace{-4pt}
+  \begin{itemize}\setlength\itemsep{2pt}
+    \item We do \emph{not} solve radiative transfer. The chromospheric photoionizing field is
+      nearly time-independent — its radiation temperature varies only $\sim1$--$2\%$ even through
+      shocks (Balmer-continuum photons come from the slowly-varying deep layers).
+      \cit{Carlsson \& Stein 2002}
+    \item $\Rightarrow$ \alert{freeze the radiative rate} into a function of height alone (the
+      ``fixed radiative-rate'' recipe). \cit{Sollum 1999; Leenaarts et al. 2007}
+  \end{itemize}
+  \textbf{C7-context inversion.} Solve the local balance of the \emph{full} network on C7's
+  tabulated $(n_p,n_e,n_n,T)$ so that C7 is an equilibrium fixed point:
+  \vspace{-4pt}
+  \[
+    P_\mathrm{phot}=\frac{n_p}{n_n}\,(\alpha_r+\alpha_c)\,n_e-(S_i+S_\mathrm{CR})\,n_e,
+    \quad n_p=n_\mathrm H-n_\mathrm{H1}\ \ \cit{Avrett \& Loeser 2008, Tab.~26}
+  \]
+  \vspace{-4pt}
+  \begin{itemize}\setlength\itemsep{2pt}
+    \item Blend above $z\!\approx\!1500$\,km to the frozen FAL-C $R_{ik}(z)$ of \cit{Chae 2021}.
+    \item Profile: $R_{ik}\!\sim\!7\times10^{-8}\,\mathrm{s^{-1}}$ at $T_\mathrm{min}$, rising to
+      $\sim7\times10^{-3}\,\mathrm{s^{-1}}$ at the chromosphere top.
+  \end{itemize}
+\end{frame}
+
+% =====================================================================
+\section{Rates in the C7 Atmosphere}
+% =====================================================================
+\begin{frame}{Dominant mechanisms across the C7 column}
+  \begin{columns}[T]
+  \begin{column}{0.46\textwidth}
+    \centering
+    \includegraphics[height=0.78\textheight]{c7_ioniz_recomb_rates.png}
+  \end{column}
+  \begin{column}{0.54\textwidth}\footnotesize
+    \begin{tabular}{@{}lll@{}}
+      \toprule
+      Layer & Ionization & Recombination\\
+      \midrule
+      Lower & multilevel $S_\mathrm{CR}$ & three-body $\alpha_c$\\
+      (Saha) & (Rydberg ladder) & ($\alpha_c/\alpha_r\!\approx\!3$)\\[2pt]
+      Mid/Upper & photoionization & radiative $\alpha_r$\\
+      (NEQ) & (Ly$\alpha$+Balmer) & ($\alpha_c/\alpha_r\!\lesssim\!0.04$)\\[2pt]
+      TR & direct Voronov $S_i$ & radiative (weak)\\
+      \bottomrule
+    \end{tabular}
+    \vfill
+    \textbf{Organizing principle:}
+    $n_e$ sets the \emph{rate} competition (3-body $\propto n_e$ vs.\ radiative),
+    $T_e$ sets the \emph{equilibrium} (Saha) and the $e^{-U}$ suppression of direct ionization.
+    \vfill
+    \alert{In evaporation, both edges activate:}
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item \textbf{Voronov $S_i$} switches on at high $T$ (upflow $\to$ coronal $T$).
+      \item \textbf{Three-body $\alpha_c$} dominates in dense gas (condensation downflow).
+    \end{itemize}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+% =====================================================================
+\section{Cooling}
+% =====================================================================
+\begin{frame}{Energy sinks: ionization potential + radiation}
+  \textbf{1. Ionization-potential bookkeeping ($\chi_H=13.6$\,eV).}
+  \begin{itemize}
+    \item Collisional ionization \emph{drains} the electron pool: $-\Gamma^\mathrm{col}_\mathrm{ion}\chi_H$
+      (photoionization does \emph{not} — its energy came from radiation).
+    \item Three-body recombination is \alert{superelastic}: $+\Gamma^\mathrm{col}_\mathrm{rec}\chi_H$
+      handed to the third electron, stays as heat.
+    \item Net non-radiative budget $=-\Gamma^\mathrm{col}_\mathrm{ion}\chi_H+\Gamma^\mathrm{col}_\mathrm{rec}\chi_H$
+      $\to 0$ in LTE (detailed balance) — \emph{no spurious sink} in the deep chromosphere.
+    \item Radiative recombination removes one $\chi_H$ Ly-continuum photon (optically-thin case-B loss).
+  \end{itemize}
+  \vfill
+  \textbf{Cooling can be switched off} (\texttt{no-cooling}) to isolate ionization energetics;
+  it is \alert{on by default}.
+\end{frame}
+
+\begin{frame}{Radiative cooling: optically thick + optically thin}
+  \textbf{2a. Optically-thick chromospheric line cooling} \cit{Carlsson \& Leenaarts 2012}\\
+  H~I Ly$\alpha$, Ca~II H\,\&\,K + IR triplet, Mg~II h\,\&\,k — formed out of LTE, escape
+  probability $\ll1$:
+  \[
+    Q^X_\mathrm{rad}=L_X(T_e)\,E_X(\tau_X)\,\frac{N_{X^\star}}{N_X}(T_e)\,A_X\,\frac{N_\mathrm H}{\rho}\,n_e\,\rho,
+    \qquad X\in\{\mathrm{H\,I,Ca\,II,Mg\,II}\}
+  \]
+  $E_X(\tau_X)$ = empirical escape probability vs.\ Ly$\alpha$ optical depth / column mass
+  (downward integration); effective for $T\lesssim3\times10^4$\,K.
+  \vfill
+  \textbf{2b. Optically-thin TR / coronal loss} \cit{Klimchuk et al. 2008}
+  \[
+    Q_\mathrm{thin}=n_e n_H\,\Lambda(T),\qquad
+    \Lambda_\mathrm{peak}\approx4\times10^{-35}\ \mathrm{W\,m^3}\ \text{at}\ \log T\approx5.1
+  \]
+  Switched on smoothly above $\sim2\times10^4$\,K (no double-count). Lets the lower TR
+  re-radiate the imposed coronal conductive flux $q(T)$.
+  \vfill
+  Both advanced on the \alert{implicit side} of the operator split (Stage~R) — $\tau_\mathrm{rad}\!\sim\!1$--$10$\,s
+  falls below the explicit CFL step.
+\end{frame}
+
+% =====================================================================
+\section{Chromospheric Evaporation}
+% =====================================================================
+\begin{frame}{Explosive evaporation — the physics to reproduce}
+  \cit{Fisher, Canfield \& McClymont 1985}
+  \begin{itemize}
+    \item \textbf{Energy-flux threshold:} explosive when heating exceeds what the upper chromosphere
+      can radiate near the $10^5$\,K loss peak:
+      $F_\mathrm{crit}\approx7\times10^9\,\mathrm{erg\,cm^{-2}s^{-1}}=7\times10^6\,\mathrm{W\,m^{-2}}$.\\
+      Above $\to$ \alert{explosive}; below $\to$ \emph{gentle}, conduction-driven.
+    \item \textbf{Timescale:} $3kT/Q\lesssim L_0/c_s$ — heat faster than hydrodynamic expansion ($\sim$10\,s).
+    \item \textbf{Velocity ceiling:} upflow $v\le 2.35\,c_s$ of the evaporated (coronal-$T$) plasma.
+    \item \textbf{Driver:} thick-target nonthermal electron beam, deposited where it stops in the
+      upper chromosphere; matching downward condensation recoil.
+  \end{itemize}
+  \vfill
+  \emph{Requirement:} the radiative sink \alert{must be active} — the threshold \emph{is} the
+  heating-vs-radiation competition.
+\end{frame}
+
+\begin{frame}{Setup: boundary, initial, and deposited-energy conditions}
+  \begin{columns}[T]
+  \begin{column}{0.5\textwidth}
+    \textbf{Initial condition}
+    \begin{itemize}\footnotesize
+      \item Model~C7 chromosphere column \cit{Avrett \& Loeser 2008}
+      \item discrete-HSE base; let it settle one acoustic time
+    \end{itemize}
+    \textbf{Boundary conditions}
+    \begin{itemize}\footnotesize
+      \item lower: physical $V=0$ + numerical diffusion
+      \item upper: \alert{opened outer boundary} (Neumann $V$, free supersonic outflow) — the
+        evaporated plasma must leave the top
+      \item ambient coronal conductive flux $q(T)$, RTV (negligible vs.\ beam)
+    \end{itemize}
+  \end{column}
+  \begin{column}{0.5\textwidth}
+    \textbf{Deposited electron energy}
+    \begin{itemize}\footnotesize
+      \item volumetric beam-heating source (not a hot wall)
+      \item thick-target stopping is sub-grid $\Rightarrow$ deposit over $\Delta h_\mathrm{beam}\!\approx\!80$\,km,
+        weighted $\propto n_\mathrm{tot}$, normalized to column flux $F_e$
+      \item into the electron/ion thermal pool; applied just \emph{before} cooling
+      \item $t_\mathrm{on}=2$\,s, $\tau=10$\,s, 1\,s cosine ramps
+    \end{itemize}
+    \textbf{Two runs}
+    \begin{itemize}\footnotesize
+      \item \alert{Explosive}: $F_e=5\times10^7\,\mathrm{W\,m^{-2}}$
+      \item Gentle control: $F_e=1\times10^6\,\mathrm{W\,m^{-2}}$
+    \end{itemize}
+  \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Evolution — results}
+  \centering
+  \includegraphics[width=0.64\textwidth]{flare_evolution_frames.png}
+  \vspace{-2pt}
+  \begin{itemize}\scriptsize\setlength\itemsep{1pt}
+    \item Upper chromosphere heated to $\sim10^6$--$10^7$\,K; cannot radiate the deposited flux.
+    \item \alert{Explosive upflow} of evaporated plasma into the corona ($\sim$100s of km\,s$^{-1}$,
+      $\le 2.35\,c_s$), with a \alert{downward condensation front} ($\sim-150$\,km\,s$^{-1}$) below it.
+    \item Gentle control: stays cool, only a weak ($\lesssim30$\,km\,s$^{-1}$) upflow — the threshold isolated.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Neutral-profile oscillation — a trace-species effect}
+  \small
+  \textbf{What is seen.} In the evaporating front the gas is driven to $f\to1$, so the
+  \alert{neutral becomes the trace species} ($n_n\to0$); its profile develops oscillations
+  while $n_\mathrm{tot}$ stays smooth.
+  \vfill
+  \textbf{Why.} Where a species' density craters faster than its pressure relaxes,
+  $T=p/(2nk_B)$ blows up. This bites at \emph{both} edges:
+  \begin{itemize}
+    \item evaporation front: $f\to1$, $n_n\to0$ (trace \emph{neutral});
+    \item condensation downflow: recombination drives $f\to0$, $n_i\to0$ (trace \emph{ion}) —
+      the mirror image, a transient $T_i$ spike in the dense lower chromosphere.
+  \end{itemize}
+  Diagnostic: $n_\mathrm{tot}$ smooth while $f$ and the trace density oscillate $\Rightarrow$
+  \alert{not} a hydro/limiter artifact, but trace-species overheating fed back through the
+  cell-local Stage-E solve.
+  \vfill
+  \textbf{Fix.} Downward-only cap of the trace pressure to the dominant fluid's temperature
+  (single-fluid limit) with a 2$\times$ deadband — kills the oscillation, preserves the physical
+  $-184$\,km\,s$^{-1}$ condensation flow, never touches $V$.
+\end{frame}
+
+% =====================================================================
+\begin{frame}[allowframebreaks]{Key references}
+  \scriptsize
+  \begin{itemize}
+    \item Avrett \& Loeser 2008, \emph{ApJS} 175, 229 — Model C7 reference atmosphere.
+    \item Fisher, Canfield \& McClymont 1985, \emph{ApJ} 289, 425 — explosive chromospheric evaporation.
+    \item Carlsson \& Stein 2002, \emph{ApJ} 572, 626 — NEQ ionization; frozen photoionizing field.
+    \item Carlsson \& Leenaarts 2012, \emph{A\&A} 539, A39 — optically-thick chromospheric cooling recipe.
+    \item Hummer 1994, \emph{MNRAS} 268, 109 — radiative recombination (case-B).
+    \item Voronov 1997, \emph{ADNDT} 65, 1 — collisional ionization.
+    \item Hinnov \& Hirschberg 1962, \emph{Phys.\ Rev.} 125, 795; Stevefelt et al.\ 1975,
+      \emph{Phys.\ Rev.\ A} 12, 1246 — three-body / CR recombination.
+    \item Bates, Kingston \& McWhirter 1962, \emph{Proc.\ R.\ Soc.\ A} 267, 297; Johnson 1972,
+      \emph{ApJ} 174, 227 — multilevel collisional-radiative rates.
+    \item Chae 2021, \emph{JASS} 38, 83 — frozen-field photoionization rate $R_{ik}(z)$.
+    \item Leenaarts et al.\ 2007, \emph{A\&A} 473, 625 — NEQ hydrogen ionization.
+    \item Klimchuk et al.\ 2008 — optically-thin coronal loss function.
+    \item Drawin 1968, \emph{Z.\ Phys.} 211, 404; Cretu et al.\ 2022, \emph{Phys.\ Rev.\ A} — neutral/molecular channels.
+  \end{itemize}
+\end{frame}
+
+\end{document}

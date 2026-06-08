@@ -38,8 +38,17 @@ Vec cal_spectral_radius_state(const Grid& grid, const Vec& xn_state) {
     const Vec V     = rhoV_i / rho_i;
     const Vec U     = rhoU_n / rho_n;
     const Vec phi_g = 0.5 * (grid.phi_g_imh + grid.phi_g_iph);
-    const Vec p_i   = 2.0/3.0 * e_i - 1.0/3.0 * rho_i % V % V - 2.0/3.0 * rho_i % phi_g;
-    const Vec p_n   = 2.0/3.0 * e_n - 1.0/3.0 * rho_n % U % U - 2.0/3.0 * rho_n % phi_g;
+    Vec p_i   = 2.0/3.0 * e_i - 1.0/3.0 * rho_i % V % V - 2.0/3.0 * rho_i % phi_g;
+    Vec p_n   = 2.0/3.0 * e_n - 1.0/3.0 * rho_n % U % U - 2.0/3.0 * rho_n % phi_g;
+
+    // Flare scenario: in the fast (~10²–10³ km/s), hot (~10⁷ K) evaporated column
+    // the float32 cancellation p = ⅔E − ⅓ρv² − ⅔ρφ can leave p slightly NEGATIVE,
+    // making c_s = √(γp/ρ) a NaN that poisons the Rusanov flux. Clamp p ≥ 0 for
+    // the sound speed only. Gated on beam heating so steady runs / tests are unchanged.
+    if (grid.enable_beam_heating) {
+        p_i = arma::clamp(p_i, 0.0f, arma::datum::inf);
+        p_n = arma::clamp(p_n, 0.0f, arma::datum::inf);
+    }
 
     const Vec cs_i = arma::sqrt(grid.gamma_mono * p_i / rho_i);
     const Vec cs_n = arma::sqrt(grid.gamma_mono * p_n / rho_n);

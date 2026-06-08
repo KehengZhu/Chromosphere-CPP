@@ -1,9 +1,11 @@
 #include "scenario.hpp"
 #include "analytic_canopy.hpp"
 #include "model_c7.hpp"
+#include "model_flare.hpp"
 #include "pfss_field_line.hpp"
 
 #include <stdexcept>
+#include <cstdlib>
 
 namespace chromosphere {
 
@@ -15,6 +17,19 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
         sc.peek_ns   = []() -> arma::uword { return 100; };
         sc.ic        = [](Grid& g) { return model_c7_ic(g); };
         sc.update_bc = [](Grid& g, const Vec& xn) { model_c7_update_bc(g, xn); };
+        return sc;
+    }
+    if (name == "model_flare") {
+        // Grid resolution is env-tunable (FLARE_NS, default 100) — a finer grid
+        // resolves the steep condensation-front contact discontinuity and shrinks
+        // the single-cell T = p/n overheating there. Matches the FLARE_* knobs.
+        sc.peek_ns   = []() -> arma::uword {
+            arma::uword ns = 100;
+            if (const char* e = std::getenv("FLARE_NS")) { try { ns = std::stoul(e); } catch (...) {} }
+            return ns;
+        };
+        sc.ic        = [](Grid& g) { return model_flare_ic(g); };
+        sc.update_bc = [](Grid& g, const Vec& xn) { model_flare_update_bc(g, xn); };
         return sc;
     }
     if (name == "analytic_canopy") {

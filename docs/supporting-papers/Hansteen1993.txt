@@ -1,0 +1,1062 @@
+==== PAGE 1 ====
+
+THE ASTROPHYSICAL JOURNAL, 402:741–755, 1993 January 10
+© 1993. The American Astronomical Society. All rights reserved. Printed in U.S.A.
+
+A NEW INTERPRETATION OF THE REDSHIFT OBSERVED IN OPTICALLY THIN
+TRANSITION REGION LINES
+
+Viggo H. Hansteen¹
+Institute of Theoretical Astrophysics, University of Oslo, P.O. Box 1029, Blindern N-0315, Oslo, Norway
+Received 1992 April 9; accepted 1992 July 17
+
+ABSTRACT
+
+We propose that the pervasive redshift observed in transition region spectral lines is caused by downward
+propagating acoustic waves. The waves are assumed to be generated in the corona as a result of nanoflares or
+some other form of episodic heating. The dynamic response of a coronal loop to energy released as heat near
+the loop apex is studied by solving the hydrodynamic equations numerically, consistently including the effects
+of nonequilibrium ionization of the radiative losses and on the internal energy. We find that the radiative loss
+curve may change by a factor of 2 during the loop evolution as a result of flows and waves. Spectral line
+intensities and line profiles are computed in accordance with the numerical model for the resonance lines of
+C IV, O IV, O VI, and Ne VIII. The three lower temperature lines display an average redshift on the order of I
+km s⁻¹ while the high-temperature line (Ne VIII) displays little average shift. The largest line shifts occur as
+the loop undergoes transient heating. A simple analytical analysis is performed to isolate the physical effects
+relevant to the line formation process. We find that the amplitude of the line shift depends on the character-
+istic time scale for ionization of the radiating ion as well as the global loop parameters; the time scales for
+loop cooling, the maximum temperature, and the base pressure. The importance of nonequilibrium ionization
+in the line-forming process will also have impact on the interpretation of the emission measure derived from
+ionization data.
+
+Subject headings: line: formation — radiative transfer — Sun: transition region
+
+1. INTRODUCTION
+
+Observations of spectral lines formed in the solar transition
+region have provided clues to discriminating between
+mechanisms responsible for locating the solar corona. There are
+several advantages in using observations of spectral lines
+formed in this region. Transition region resonance lines are in
+the extreme ultraviolet (EUV) where data with high spatial
+resolution of 1″ (700 km at the Sun), spectral resolution of 0.05
+Å and temporal resolution 5 s are available from the High-
+Resolution Telescope and Spectrograph (Bartoe & Brueckner
+1975). As the lines are optically thin, we may force the solving
+the radiative transport equation in mapping the observed line
+characteristics to plasma parameters. The transition region has
+shorter cooling times than the corona and is thus able to
+rapidly respond to changes in the energy balance. The major
+difficulty in understanding the observations is the compli-
+cated geometry and time-variability of the transition region
+such that a statistical approach to observation analysis must
+often be followed. The transport of energy into the corona will
+affect the transition region both as the energy passes upward
+from the convection zone and as "overflow" energy is trans-
+ported downward. In this paper we will concentrate on the
+observational aspects of the transport of energy by downward
+propagating acoustic waves.
+
+There are two basic coronal heating theories currently in
+vogue, namely, resonant absorption of magnetohydrodynamic
+waves and nanoflare heating (see e.g., Ulinschenkski, Priest, &
+Rosner 1991). The studies of resonant absorption have focused
+on Alfvén waves generated in deeper layers that become
+trapped in resonant cavities in the corona. The observational
+signature of this process should (1) be the signature of stand-
+
+ing or propagating Alfvén waves, with periods in the range
+5–300 s in order to fit into coronal loops, (2) the signature of
+any downward propagating signal from the dissipation
+process itself. We expect that the former signature will domi-
+nate the line profile in the transition region unless the dissi-
+pation mechanism has a time dependence resembling
+nanofares as described below.
+
+Nanoflare heating of the corona depends on the low-
+frequency random motions of the photospheric granulation.
+The motions of the footpoints of coronal tubes by the
+photospheric plasma continually deforms the coronal mag-
+netic field. This continual deformation introduces a large
+number of tangential discontinuities which, upon reaching
+some critical strength, dissipate through rapid reconnection
+(Parker 1988). Coronal heating is achieved by the sum of the
+heat deposited by all these small reconnection events. Each
+event has a duration on the order of a few seconds and a spatial
+scale below present observational limits. Parker (1991) esti-
+mates the energy of one nanoflare to be ~10²³–10²⁴ ergs. Re-
+leasing a large amount of energy in a small volume and in the
+course of a few seconds will evict a material magnetohydro-
+dynamic (MHD) wave modes in the low β plasma. The
+signature of the nanoflare heating mechanism in transition
+region lines will consist of the transition region response to the
+downward propagating waves. The signature will be modu-
+lated by the global heating and cooling of the loop as the loop
+responds to the heat injected by the nanofares.
+
+The solar chromosphere-corona transition region is highly
+structured, both spatially and temporally. Intensity observa-
+tions by Dere, Bartoe, & Brueckner (1984), Porter et al. (1987),
+and Habbal (1990) indicate that the dominant portion of the
+transition region radiation arises in regions of variable emis-
+sion. There are, however, two characteristics of the observa-
+tions that seem to be invariant from region to region and from
+
+==== PAGE 2 ====
+
+742                                     HANSTEEN                                     Vol. 402
+
+time to time; the shape of the emission measure curve and the
+net redshift of spectral lines. It should be mentioned that the
+redshift decreases toward the limb (Dere et al. 1984; Doschek
+et al. 1976), which indicates that the motions are primarily vertical. The invariant shape of the
+emission measure curve and the net redshift extend to
+several other stars (e.g., Jordan & Linsky 1987; Ayres, Jensen,
+& Engvold 1988).
+
+Analysis of spectral line profiles shows that transition region
+lines display a net redshift (e.g. Doschek, Feldman, & Bohlin
+1976; Dere et al. 1984; Athay & Dere 1989; Hassler, Rottman,
+& Orrall 1991). The observed mean redshift is typically 5 km
+s⁻¹ for C IV z1548 formed at 10⁴ K but varies considerably.
+The amplitude of the shift is largest for lines formed at lower
+temperatures and chromospheric lines display little net shift
+(see Samain 1991). There are few observations of higher tem-
+perature lines but there is evidence that the net redshift is
+reduced or disappears in the upper transition region. Doschek
+et al. (1976) report no substantial downflow for O V z1218
+formed at 2.5 × 10⁵ K. Since the wavelength determination of
+this oxygen line may be influenced by Ly z(2116), it is perhaps
+more significant that Hassler et al. (1991) report a downflow of
+0 ± 4 km s⁻¹ for the Ne VIII 2770 line formed at 8 × 10⁵ K.
+The center-to-limb variation of the redshifts seem to indicate
+that the motions are primarily vertical, but a horizontal flow
+component is also present. There is no clear correlation
+between the intensity of the line and the line shift, but there is
+correlation between intensity and line shift and between line width
+and line shift. At line shift correlations (McWhirter et al. 1994).
+
+The existence of the solar wind makes it evident that there is
+no net flow of mass from the chromosphere and explanations
+for the net redshifts have invoked "collection" effects in the
+radiative or thermal properties of gas flowing up. Perennian &
+Kopp (1977) and later Athay & Dere (1982) hypothesized that the redshifts were
+caused by the return of spectacular material. Alternatively, the
+observations signatures were interpreted as upflow due from
+through coronal loops (e.g., Boris & Mariska 1982). McCly-
+mont & Craig (1986, 1987) and Mariska (1988) showed that
+asymmetric heating of coronal loops may drive the flow. Both
+ideas seem conflicting; however, the observations reported by
+Athay & Dere (1989) seem inconsistent with a steady flow of
+material returning to the chromosphere.
+
+In this paper we propose that the net redshifts may be
+explained as a consequence of nanoflare coronal heating.
+Several of the wave modes generated by a nanoflare near the
+apex of a coronal loop will propagate along the loop through
+the transition region. Alfvén waves are noncompressive, and it is thus difficult to separate upward propagating
+from downward propagating Alfvén waves. This is particularly
+true if we have observations only in the transition region where
+do we expect, however, that the presence of Alfvén waves will
+broaden the transition region spectral lines (see Hansteen &
+Malty 1990). On the other hand, propagating compressive
+waves will cause spectral line asymmetries and line shifts in the
+"direction" of wave propagation (Erickson & Maltby 1967;
+McWhirter & Wilson 1974; Brecht, McWhirter, & Winters
+1975; Goutthebroz 1989). Nanoflare-generated waves are of
+high amplitude and may evolve into shock waves. Shocks lead
+to changes in line emission strength (e.g., Elzner 1975; Poletto
+et al. 1974; Flower & Pineau des Forêts 1983) and also alter the line
+profile (Hansteen 1991). Thus we should expect a net redshift
+resulting from compressive waves originating in the corona
+and propagating down through the transition region. The
+focus of this paper will therefore be on the effects of the com-
+
+pressive waves that result from the episodic release of energy
+near the apex of coronal loops. For reasons of computational
+expediency we consider a one-dimensional loop with strong
+magnetic field and restrict our attention to the slow-mode
+waves propagating along the magnetic field in this low β
+plasma. Other wave modes may be important in a further
+development of this idea.
+
+2. LOOP MODEL
+
+2.1. Equations and Assumptions
+
+The loop into which the nanoflares are introduced consists
+of a one-dimensional semicircular geometry of length l and
+constant cross section containing a plasma of hydrogen,
+helium, carbon, oxygen, and neon (all photospheric)
+abundances (Grevesse 1984). We solve the equations of mass,
+momentum, and energy conservation to obtain the run of
+density (ρ), velocity (u), temperature (T), and population den-
+sities (n_i) of elements i in ionization states j along the loop as a
+function of time. The variable s is the length along the loop
+while t is the time.
+
+We make the assumption that all species have the same flow
+speed and the same temperature. In a collisionless plasma
+acoustic waves are heavily Landau damped; however, at the
+densities (ρ > 10⁻⁹ g cm⁻³) and temperatures (T > 2.5 × 10⁶ K)
+we find the ion-ion collision frequency ν_i sufficiently larger
+than the wave frequency to ensure a collisionally dominated
+plasma. This also applies to the electron-ion collision fre-
+quency ν_e; we may safely assume that ion and electron tem-
+peratures are equal on the time scales of interest in this study. A
+magnetic field of large enough to ensure a low β plasma in
+the low-density transition region and corona is assumed, in
+this case, acoustic waves propagate along the magnetic field
+and a one-dimensional approach is justified, since we are
+ignoring the Alfvén and fast mode waves.
+
+In the observer's frame the ionization rate equation for
+element i and ionization state j, is written
+
+∂n_{ij}/∂t + ∂/∂z(n_{ij}u) = n_i[n_j - C_{j-1} - n_j(C_j + z_j) + n_{j+1} z_{j+1}]. (1)
+
+The ionization and recombination rates are represented,
+respectively, by C_j and z_j. It is assumed that local processes
+dominate the ionization rate; the rates are mainly functions of
+temperature except the electronic recombination rates which
+have a slight dependence on electron density, n_e. Photoioniza-
+tions are ignored, although they presumably play an important
+role in the ionization state of hydrogen below T ≈ 2 × 10⁴ K
+and of helium below T ≈ 8 × 10⁴ K.
+
+The spontaneous and dielectronic recombination rates are
+calculated according to Mazzotta et al. (1973, 1976), the
+collisional excitation ionization rate is obtained from Bell et al. (1982), and the collisional excitation
+rates are taken from the compendium of Mertz et al. (1980).
+The equation ensuring the conservation of mass is written
+
+∂ρ/∂t + ∂/∂z(ρu) = 0. (2)
+
+The momentum equation is written
+
+ρ(∂u/∂t + u∂u/∂z) = -∂/∂z(p + Q) - ρg_z, (3)
+
+==== PAGE 3 ====
+
+No. 2, 1993                        REDSHIFT IN TRANSITION REGION LINES                           743
+
+where p = nkT_e is the gas pressure, and g_z the absolute value of
+the component of gravity parallel with the magnetic field (z).
+We have also allowed for an "artificial viscosity" term, ∂Q/∂z,
+which is discussed in the Appendix. The energy equation is
+written
+
+ρ(∂/∂t(ρe) + ∂/∂z(ρue)) + (p + Q)∂u/∂z = -∂F_c/∂z + S - L_r. (4)
+
+The denotes F_c, and the divergence of the conductive
+heat flux, the radiative loss per unit volume and time L_r, and the heating rate S. The
+internal energy e is calculated as the sum of the thermal and
+internal energy including only ionization states, the contribu-
+tion from the radiation energy is negligible.
+
+We consider the radiative losses from the transition region
+to be pushed upward and downward. This should be a reasonable assumption
+with the exception of the radiation loss from neutral hydrogen
+in the Lyman α. In this paper heat is added to the footpoints
+of the loop where hydrogen becomes neutral to balance the Lyman
+radiative losses and maintain a reasonable chromospheric tem-
+perature. Kuin & Poland (1991) have presented an alternate
+approach to treating the Lyman radiative losses. We have not
+used their method, as it does not allow for a consistent treatment of the radiation
+and time-dependent ionization state of hydrogen, the impor-
+tance of which has been pointed out by Carlsson & Stein
+(1993).
+
+Optically thin radiative losses are computed consistently
+with the hydrodynamic equations by summing the individual
+loss rates of the various processes. In the transition region the
+most important processes are the resonance line radiation of
+ionized metals, radiative recombinations, and at higher tem-
+perature (T > 10⁶ K) electron-ion free-free radiation. We
+parameterize the radiative loss curve as
+
+L_r = n_e ∑ n_i ν_i C_u + L_rsx + L_rff, (5)
+
+where the sum is over all elements and ionization stages, with
+population densities n_i, transition energies h_ν, and excitation
+rates n_i, C_u. The quantities L_rsx and L_rff represent the losses
+from recombination and bremsstrahlung. In the present paper
+the resonance line losses from hydrogen, helium, carbon,
+oxygen, and neon along with loss from electron-ion
+trating are included. This gives a fairly good representation of
+the radiative loss curve for the temperature range 2 × 10⁴
+K < T < 3 × 10⁶ K. The omission of iron from the radiative
+losses leads to an underestimate of the losses at temperatures
+above 3 × 10⁶ K (Landoni & Mongonrot-Fossi 1990). This
+will in turn lead to a greater conductive flux and therefore a
+larger temperature gradient in the transition region where
+would be the case if iron included in the radiative losses. We
+find that the computed radiative loss curve Φ(T) = L_r/n_e/ρ,
+varies by more than a factor of 2 in the transition region during
+the time evolution of the model calculation as a result of non-
+equilibrium ionization as described in § 3. Figure 1 shows this
+variation, where the maximum and minimum loss curves Φ(T)
+are plotted. This variation is much larger than the 10% gain in
+accuracy achieved by including ions such as silicon and nitro-
+gen in equilibrium.
+
+The conductive flux F_c is assumed to run parallel with the
+magnetic field and is computed in this paper according to
+Spitzer (1962),
+
+F_c = -κ_0 T^{5/2} dT/dz, (6)
+
+where κ_0 = 1.1 × 10^{-6} ergs cm^{-1} s^{-1} K^{-7/2}. This should be
+an adequate approximation for the coronal and upper tran-
+sition region part of the loop, but may have to be revised for
+the lower transition region (e.g., Fontella, Avrett, & Loeser
+1990) at if the temperature gradient becomes extremely large
+(e.g., Shoub 1982, 1983).
+
+It should be pointed out that the energy balance is coupled
+to the ionization state of the plasma both through the calcu-
+lation of the internal energy and through the radiative losses.
+For several of the relevant ions the characteristic times of col-
+lisional ionization and recombination are long compared to
+the dynamic time scales of the plasma, and we cannot expect
+the plasma to be in the ionization equilibrium.
+
+2.2. Initial Loop
+
+The initial loop was set up with footpoint pressure of p_E =
+0.7 dyn cm⁻² and a temperature of T = 1.5 × 10⁴ K. Since
+photoionizations are ignored hydrogen is some 65% neutral at
+this temperature, giving a footpoint electron density of n_e =
+8 × 10⁹ cm⁻³. In the "chromospheric" region stretching up
+for s = 1000 km, heating and radiation are balanced. This is
+achieved by adding a heating term S = 3 × 10^{-3} n_μ to the
+energy equation; since this scales approximately as the radi-
+ative losses (mainly from Lyman) the chromospheric temperature
+is constant until the transition region temperature rise is
+encountered. Figure 2 shows the model loop at the onset of the
+calculation, where the temperature, electron density, and gas
+pressure are plotted in the left panel, while the velocity is
+plotted in the right panel. All these variables are plotted as a
+function of distance z along the loop, which is given a length of
+l = 20 Mm.
+
+The initial transition region and corona lie above the
+chromosphere with a base pressure of p_c ~ 0.07 dyn cm⁻² and
+a maximum temperature of T ≈ 3 × 10⁵. The transition region
+has a temperature scale height H_s ~ 180 km as determined by
+the divergence of the thermal conduction and the radiative loss
+terms which dominate the energy equation in this temperature
+range. The heating function used to heat the chromosphere
+plays a small role in the transition region and is unimportant
+in the energy budget at temperatures above T ≈ 3 × 10⁴ K—
+
+[FIGURE 1: Radiative loss curve Φ(T) as a function of temperature for 2 times in the model calculation. The difference between these times is caused by nonequilibrium ionization in plasma in a model of cooling as explained in §5. Notice the large effect at T ≈ 2 × 10⁵ caused by neutral hydrogen flowing up the transition region and cooling by chromospheric material is heated. This effect is similar to one seen by Avrett (1991), although there the flow is essentially different.]
+
+[FIGURE 2: The initial distribution of temperature, pressure, and electron density (left panel) and velocity (right panel) with distance (z) along the flux tube. The loop
+is nearly in force balance, but the gas pressures and conductive losses are not balanced by any heating. The "corona" is condensing onto the chromosphere
+which is moving up the loop legs. The asymmetry in the velocity is due to a low-amplitude acoustic wave which is bouncing between the two transition regions.]
+
+indeed other functional forms give similar transition region
+scale heights at long the wavelength portion at long wavelengths.
+
+At the temperatures of the initial loop the "corona" is
+cooling through radiative and through heat conduction to the
+transition region where the radiative losses are most effective.
+As a consequence, the transition region pressure is depressed
+below the hydrostatic pressure and gas flows from the chromo-
+sphere and from the loop into the transition region which is moving upward at a rate of u ≈ 1 km s⁻¹. The
+asymmetry shown in Figure 2 is due to a
+low-amplitude acoustic wave which is "bouncing" between
+the transition regions on either end of the loop.
+
+In Figure 3 we show a plot of the initial contribution func-
+tions n_ia, n_n, s_Cl, C_u, and the O VI z1037 spectral lines as a function of length along
+and the O VI z1037 spectral lines as a function of length along
+the apex temperature is initially T ≈ 3 × 10⁵ K while the footpoint
+temperature are some T ≈ 1.5 × 10⁴ K.
+
+==== PAGE 4 ====
+
+744                                     HANSTEEN                                     Vol. 402
+
+[FIGURE: The initial distribution of temperature, pressure, and electron density (left panel) and velocity (right panel) with distance (z) along the flux tube. The loop is nearly in force balance, but the gas pressures and conductive losses are not balanced by any heating. The "corona" is condensing onto the chromosphere which is moving up the loop legs. The asymmetry in the velocity is due to a low-amplitude acoustic wave which is bouncing between the two transition regions.]
+
+[FIGURE: Initial contribution function hν_a n_n s_Cl C_u plotted as a function of length along the coronal flux tube for the resonance lines of C IV, O IV, and O VI z1037 spectral lines. At the apex temperature is initially T ≈ 3 × 10⁵ K while the footpoint temperature are some T ≈ 1.5 × 10⁴ K.]
+
+[FIGURE: Initial contribution function hν_a n_n s_Cl C_u plotted as a function
+of length along the coronal flux tube for the resonance lines of C IV, O IV, and
+O VI z1037 spectral lines as a function of length along
+the apex temperature is initially T ≈ 3 × 10⁵ K while the footpoint
+temperatures are some T ≈ 1.5 × 10⁴ K.]
+
+indeed other functional forms give similar transition region
+scale heights at long the wavelength portion at long wavelengths.
+
+At the temperatures of the initial loop the "corona" is
+cooling through radiative and through heat conduction to the
+transition region where the radiative losses are most effective.
+As a consequence, the transition region pressure is depressed
+below the hydrostatic pressure and gas flows from the chromo-
+sphere and from the loop into the transition region which is moving upward at a rate of u ≈ 1 km s⁻¹. The
+asymmetry shown in Figure 2 is due to a
+low-amplitude acoustic wave which is "bouncing" between
+the transition regions on either end of the loop.
+
+In Figure 3 we show a plot of the initial contribution func-
+tions n_ia n_n, s_Cl C_u plotted as a function of length along
+and the O VI z1037 spectral lines as a function of length along
+the apex temperature is initially T ≈ 3 × 10⁵ K while the footpoint
+temperatures are some T ≈ 1.5 × 10⁴ K.
+
+[FIGURE 3: Initial contribution function hν_a n_n s_Cl C_u plotted as a function
+of length along the coronal flux tube for the resonance lines of C IV, O IV, and
+O VI z1037 spectral lines as a function of length along the apex temperature is initially T ≈ 3 × 10⁵ K while the footpoint temperatures are some T ≈ 1.5 × 10⁴ K.]
+
+We reconsider the emission of optically thin resonance lines
+from multiple ionized metals formed in the transition region in
+the presence of atmospheric perturbations. To a good approx-
+imation (e.g., Jordan & Wilson 1971) the statistical equilibrium
+between the upper (u) and lower (l) level of a transition region
+resonance line is determined locally by the balance between
+collisional excitation and spontaneous de-excitation
+
+n_l n_e C_u = n_u A_u1. (7)
+
+Here n_l and n_u are the lower level and upper level number
+densities, n_e is the electron density, C_u is the
+electron impact collision rate, and A_u1 the Einstein probability
+for spontaneous de-excitation. Since we are considering reso-
+nance lines and n_e C_u ≪ A_u1, we may identify the population of
+the lower level with the total population of the radiating ion,
+i.e., n_l ≈ n_ij.
+
+The emergent intensity from the transition region and
+corona, for an optically thin transition of energy hν_ul and an
+emission profile equal to the absorption profile φ_ν may be
+written
+
+I_ν = (hν_ul)/(4π) ∫₀^l φ_ν n_u n_j C_u ds. (8)
+
+==== PAGE 5 ====
+
+No. 2, 1993                        REDSHIFT IN TRANSITION REGION LINES                           745
+
+where we have employed the assumptions above, and we
+assume an area fill factor f_a = 1. The integration is carried
+out along the line of sight, here represented by path length
+variable z.
+
+The absorption (and emission) profile is in the case of
+thermal Doppler broadening given by
+
+φ_ν(z, n) = (1)/(π^{1/2} Δν_D) exp[-(Δν - ν_u cos θ/c)²/(Δν_D)²], (9)
+
+where Δν = ν - ν_ul is the distance from the rest frequency, and
+θ = φ - φ_E is the angle, and φ_E is the angle along the line of
+sight. All variation of the absorption profile is along the length
+variable z. The thermal broadening corresponds to a width
+
+Δν_D = (ν_ul)/(c) √(2kT)/(m_i), (10)
+
+where m_i is the mass of the radiating ion.
+
+With a Maxwellian electron distribution function the collision
+rate is a function of the temperature alone
+
+C_u(T) = C_u^0 (1)/(η_l) T^{1/2} exp(-h_ul/(kT))Γ(T), (11)
+
+where Γ, the Maxwellian-averaged collision strength (Seaton
+1962), is a slowly varying function of the temperature. η_l is the
+ionization potential of the lower level, e.g., ≈ 863.3 × 10^{-12} erg K^{-1}.
+
+In order to isolate the physical effect of the compressive
+wave on the intensity and line profile, the population of the
+radiating ion is rewritten as
+
+n_ij = x_ij (n_t)/(n_H) n_H, (12)
+
+where n_i is the total density of the atom to which the radiating
+ion belongs, n_H is the total hydrogen density, and n_H is the
+total hydrogen density, and x_ij = n_ij/n_i is the ionic concentra-
+tion. The region of line formation is the region along the line of
+sight where the function
+
+ψ(T) = x_ij exp(-h_ul/(kT))T_s^{1/2} (13)
+
+is significantly different from zero. The function ψ(T) generally
+has a sharp maximum near the temperature of maximum
+concentration, and the extent of the region of line formation
+is thus a good indicator measure of the temperature gradient.
+This has been used in emission measure analysis of transition
+region lines (e.g., Petsuch 1964; Jordan & Wilson 1971). Inte-
+grating over line frequency and using the expressions given
+above the integrated line intensity is seen to vary as
+
+I ∝ n_e n_ij x_ij C_u Δz, (14)
+
+where the variables are evaluated at some appropriate place in
+the line-forming region.
+
+The response of the optically thin transition region line
+profile and intensity depends on how the densities described
+above correlate in the presence of a compressive perturbation.
+The basic effects that outlined by considering a sinusoidal
+progressive sound wave with frequency ω propagating along
+the loop in the s-direction. The particle velocity v_x varies in
+phase with the pressure perturbation Δp and the density per-
+turbation Δρ
+
+u_z/c_s = (Δp)/(ρ) (Δρ)/(ρ) sin[ω(t - z/c_s)], (15)
+
+where Δp_ic is the amplitude of the pressure perturbation and
+the sound speed c_s is given by c_s = √(γp/ρ), where γ is the usual
+ratio of the specific heats (c_p/c_v). The phase relation between
+the density and velocity perturbation will cause the inten-
+sity to vary with the loss-of-sight velocity, leading to a net shift
+of the spectral line if we integrate over a wave period Δz'=
+2π/ω. Thus, in the absence of other effects we expect redshifted
+transition region lines if pressure perturbations originate in the
+corona and propagate down the chromosphere. On the other
+hand, blueshifted spectral lines are expected should remnants of
+the acoustic waves which presumably heat the lower chromo-
+sphere propagate through the transition region and dominate
+other pressure perturbations.
+
+The above discussion was made without reference to depar-
+tures from ionization equilibrium and variations in the tem-
+perature, which will effect both the intensity integrand in
+equation (8) and the extent of the region of line formation. The
+effect of nonequilibrium ionization will cause the response of
+the spectral line to an acoustic perturbation to be not only a
+function of the density and temperature but also of the velocity
+and of the history of the plasma. In addition, the waves we are
+considering are propagating in a time-varying atmosphere as
+the loop heats and cools. The consequences of these nonlinear
+effects are taken into account in the numerical calculations.
+
+4. RESULTS
+
+The nanoflare model requires that tangential discontinuities
+introduced by the random motions of the loop footpoints
+explosively dissipate, releasing 10²³–10²⁴ ergs within a few
+seconds in a small region. The physics of time-dependent
+reconnection is a difficult subject, but perturbations introduced
+by this dissipation are expected to propagate away from the
+reconnection region with velocities on the order of the Alfvén
+speed v_A as well as the sound speed c_s. As noted in § 2.1
+Alfvén fast mode waves are ignored. It is imagined that the energy
+release, momentum will be injected directly to the
+plasma in the reconnection event. Since we are interested in
+effects occurring at large distances from the nanofares we
+assume that the momentum released is thermalized before
+reaching scales comparable to that of the numerical grid.
+
+The nanofares are modeled here by introducing energy in a
+randomly located computational cell confined to the upper
+third of the loop, centered on the loop apex. The amount of
+energy in a single nanoflare is computed from a truncated
+Gaussian distribution around a chosen average energy, each
+energy released using exponential decay within a few seconds
+from zero to this value. The interval between nanofares is
+Poisson-random around a given mean interval between explo-
+sions.
+
+Let us now consider the response of transition region spec-
+tral lines to the nanofares released in the upper (coronal) por-
+tions of the loop. In the model described below the atmosphere
+is cycled through a heating phase lasting 120 s where nano-
+flares are set off in succession, followed by a cooling phase of
+250 s where no nanofares are set off. The individual flare has
+an average energy release of 10²⁴ ergs ~ 10⁻⁴ ergs cm⁻³ a,
+where a is the loop cross section. Since we are considering a
+constant cross section loop we will for simplicity set a = 1 cm²
+in the following. The nanoflare energy is inserted into the loop
+as heat. We assume that the heat is distributed in one computa-
+tional cell of length Δs_n = l_p ≈ 10² km. Each nanoflare is
+modeled as having a duration s_n = 5 s, while the average time
+between flares is set to 30 s during the heating phase. The
+==== PAGE 6 ====
+
+HANSTEEN                                                                Vol. 402
+
+energy inserted is sufficient to maintain a steady state loop
+of the given length with a maximum temperature of
+~ T ≈ 6 × 10^5 K.
+  Releasing a large amount of heat in the corona in the course
+of a few seconds enhances the temperature locally and the heat
+conductive flux. Other parts of the flux tube become heated as
+thermal conduction spreads heat throughout the corona and
+acoustic waves are excited. The heating causes motions in the
+transition region as well as perturbations of the transition
+region temperature gradient and density. This leads to variations in line shifts and line intensities.
+  The acoustic waves that are generated pass through the
+transition region and enter the chromospheric footpoints of
+the loop, eventually leaving through effectively transparent boundaries (see Appendix).
+  In Figures 4 and 5 we show the line shift and elements
+of the contribution function for C iv λ1548 and
+O iv λ 2789 as functions of time. In upper panels the intensity
+I_s is plotted as a function of velocity u_ab and as a function of
+time. Overlying this plot the line shift as approximated by the
+
+[FIGURE: Time vs Velocity (km/s) plot showing intensity variations, appears to be a greyscale 2D time-velocity diagram. Horizontal axis from -40 to 40 km/s, vertical axis from 0 to 1500 s.]
+
+[FIGURE: Time vs Relative logarithmic scale plot showing line formation regions. Left side shows intensity distribution with multiple peaks, right side shows relative logarithmic scale with labeled features.]
+
+first moment,
+
+ΔλΔB = [∫ I_s(λ - λ_0)Mdλ] / [∫ I_s dλ]     (16)
+
+is plotted after being converted to a velocity scale. Here λ_0 is
+the rest wavelength of the transition. The relation between the
+velocity scale and the line shift is u_ab = Δλ_ab λ_0/c. In the lower
+panels, elements of the contribution function—the electron
+density squared n_e^2, the concentration of the radiating ion x_i,
+and the temperature dependent part of the collisional excitation
+rate C_ij ∝ exp [−(h_c ν)/(k_B T_e)]—are plotted of the region of line
+formation Δz—are plotted relative to their values at t = 0
+on a logarithmic scale as a function of time. We arbitrarily
+define Δz as the region where the contribution function is
+greater than 20% of its maximum value. Both figures show that
+the model loop may be characterized by three time scales. One
+time scale of order tens of seconds is associated directly with
+the compressive waves propagating down from the corona and
+shows up as "spikes" in the plots, while the other time scale
+is on the order of several hundred seconds is associated with
+the global heating and cooling properties of the loop. Also
+
+FIG. 5.—Relationship between O iv 2789 intensity, line shift, and elements
+of the contribution function: x_i n_e^2, the latter plotted on a logarithmic
+scale. The lower panel along with the region of line formation (Δz ∝ 1/Y_T_i).
+Variations in the density are compensated by variations in the region of line
+formation; as the transition region pushes into the hotter atmosphere by
+enhanced heating, the corona forces the temperature gradient to rise, reducing the region of line
+formation. See Fig. 4 for comparison with C iv. O iv has a fairly complicated
+term structure and the calculation here should be taken more as indicative of
+the behavior of a line with short characteristic times for achieving ionization
+equilibrium than an accurate portrayal of O iv λ2789.
+
+==== PAGE 7 ====
+
+No. 2, 1993                       REDSHIFT IN TRANSITION REGION LINES                     747
+
+apparent is the time scale of the heating (120 s) phase when
+packets of nanoflares occur and the cooling phase (250) when
+the nanoflares are set off.
+  Figure 4 shows that the C iv line intensity varies by a large
+amount as a result of the heating in the transition region
+responds to the heating and cooling cycle. The line intensity is
+enhanced and the line is redshifted (u_ab ≈ 20) as waves strike the
+transition region. During the cooling cycle when no nanoflares
+are set off the wave amplitudes are much smaller and there is a
+slight blueshift. Thus, there is a tendency for the redshift to be
+correlated with intensity through the correlation is weak (see,
+e.g., Fig. 6). The low-frequency behavior of the intensities
+not readily apparent in Figure 4, but will be discussed later.
+  The lower panel of Figure 4 shows that an important contribution to the blueshift of the C iv λ1548 line is a variation
+in the concentration of C iv. Starting from an initial value
+of x_c ≈ 0.1 the concentration rises almost by an order of
+magnitude as the loop is heated. The temperature of maximum
+emission for C iv λ1548 line varies from 9 × 10^4 K to 1.4 × 10^5
+K. This temperature variation is not large enough to significantly alter the collisional excitation C_ij(T). As the nanoflares
+induced waves strike the region of line formation the density
+increases rapidly from the initial value of n_e = 2.3 × 10^9 cm^−3
+
+[FIGURE: Four scatter plots showing line-of-sight velocity u_ab vs logarithm of total intensity (log(I)) for C iv, O iv, O vi, and Ne viii. C iv and O iv show tight correlation centered around 3.2-3.4 in log(I) with u_ab from -5 to 20 km/s. O vi shows broader scatter with log(I) from 3.3 to 3.8 and u_ab from -10 to 15 km/s. Ne viii shows distinct bimodal distribution with log(I) from 1.0 to 2.5 and u_ab from -15 to 10 km/s.]
+
+and then rapidly relaxes toward its initial value. The electron
+density also shows variation on the longer time scale of τ_long,
+by slowly increasing as the loop is heated. This variation in
+electron density would by itself indicate a large variation in line
+intensity (see eq. [14]). However, the change in the electron
+density is partly offset by the variation of the length of the
+region of line formation, and the product of these two factors
+varies little. The initial value of the length of the line-forming
+region for the C iv λ1548 line is ≈ 10 km.
+  Figure 5 shows that while the lineshift of the O iv λ2789 line is
+similar to that of the C iv λ1548 line the intensity variation of
+the O iv line is smaller than the intensity variation of the C iv
+line (see Fig. 6). The low-frequency behavior of the O iv line
+intensity is not readily apparent and will be discussed later.
+The temperature of maximum emission for this line varies from
+1.25 × 10^5 K to 1.45 × 10^5 K. This variation is not large
+enough to significantly alter the collisional excitation rate for
+O iv. The temporal evolution of the extent of the formation
+region of the O iv line, which initially is Δz_eq = 1.6 × 10^3 km,
+and decreases with time, is partly offset by the evolution of the
+electron density which initially is given by n_e = 1.8 × 10^9 cm^−3
+and increases with time. The variations in the concentration
+x_OIV is also small. The product of these factors therefore shows
+that [?] x_OIV is also small. The product of these factors therefore shows
+
+[FIGURE: Same format as above but lower panels show different ions - O vi and Ne viii scatter plots with different density and velocity distributions]
+
+for the C and O iv lines are small and the O v line shows
+a small blueshift. The Ne viii line is formed at intermediate
+temperatures on the order of a few fold increase of the temperature of the formation region in the cooler atmosphere by
+enhanced heating as nanoflares are set, and their functional
+forms of the atmospheric heating parameters and other [?]
+  The line widths as approximated by the second moment
+
+ΔλSq = [∫ I_s(λ - λ_0 + Δλ_cd)^2 dλ] / [∫ I_s dλ]     (17)
+
+are presented in Figure 7, where we plot the line width versus
+
+FIG. 6.—Line-of-sight velocity u_ab vs the logarithm of the total intensity (integrated over frequency and loop volume) for the four transition region spectral lines C iv
+λ1548 formed at T = 10^5 K, O iv λ2789 formed at T ≈ 1.3 × 10^5 K, O vi λ1032 formed at T = 2.2 × 10^5 K, and Ne viii λ770 formed at T ≈ 8 × 10^5 K. One point is
+plotted for every fifth second in the calculation.
+
+==== PAGE 8 ====
+
+748                                    HANSTEEN                                  Vol. 402
+
+little variation leaving a small intensity variation in the O iv                and then rapidly relaxes toward its initial value. The electron
+λ2789 line (see eq. [14]). Despite the small intensity variation in         density also shows variation on the longer time scale of τ_long,
+the O iv line, the line does show a net wavelength shift.                   by slowly increasing as the loop is heated. This variation in
+  In Figure 6 we show scatterplots of the shift u_ab versus                 electron density would by itself indicate a large variation in line
+the logarithm of the total intensity I_s (integrated over log[I]). where I = ∫ I_s(ν)dν,   intensity (see eq. [14]). However, the change in the electron
+for the resonance lines C iv λ1548, O iv 2789, O vi 2107, and              density is partly offset by the variation of the length of the
+Ne viii 2770. One point is plotted every fifth second of the               region of line formation, and the product of these two factors
+simulation. For all the lines except Ne viii the range in line             varies little. The initial value of the length of the line-forming
+shifts shows a positive asymmetry, which corresponds to a red-              region for the C iv λ1548 line is ≈ 10 km.
+shift of the lines. The C iv, O iv, and O vi line shifts vary in the        Figure 5 shows that while the lineshift of the O iv λ2789 line is
+range −5 km s^−1 < u_ab < 20 km s^−1 while the Ne viii line               similar to that of the C iv λ1548 line the intensity variation of
+shifts are in the range −10 km s < u_ab < 10 km s^−1. The                 the O iv line is smaller than the intensity variation of the C iv
+intensity varies by two orders of magnitude for the Ne viii line           line (see Fig. 6). The low-frequency behavior of the O iv line
+as a result of the loop being heated and neon becoming sufficiently ionized to support a significant fraction of Ne viii. The               intensity is not readily apparent and will be discussed later.
+intensities of the C iv line vary by an order of magnitude, while         The temperature of maximum emission for this line varies from
+the intensities of the O iv and O vi lines vary by a factor of 5 or       1.25 × 10^5 K to 1.45 × 10^5 K. This variation is not large
+so during the model calculation. The average shifts over the              enough to significantly alter the collisional excitation rate for
+entire calculation, over the first 300 s and the last 1000 s are         O iv. The temporal evolution of the extent of the formation
+shown in Table 1. The lower temperature lines emitted by                   region of the O iv line, which initially is Δz_eq = 1.6 × 10^3 km,
+C iv, formed at T ≈ 10^5 K, by O iv, formed at T = 1.3 × 10^5            and decreases with time, is partly offset by the evolution of the
+K, and by O vi, formed at T ≈ 2.2 × 10^5 K, all show net                electron density which initially is given by n_e = 1.8 × 10^9 cm^−3
+redshifts when they are integrated over the entire model run              and increases with time. The variations in the concentration
+and during the first 500 s. During the last 1000 s the net shifts        x_OIV is also small. The product of these factors therefore shows
+
+[TABLE 1 showing Average Line Shifts]
+
+TABLE 1
+AVERAGE LINE SHIFTS FOR TIMES (t_i ; t_s)
+
+                    u_ab (0; 500 s)    u_ab (0 s; 500 s)    u_ab (500 s; 1500 s)
+C iv ........       0.9                3.0                   0.2
+O iv ........       1.0                2.7                   -0.1
+O vi ........       0.5                0.6                   -0.6
+Ne viii ......      -0.3               0.6                   -3.0
+
+for the C and O iv lines are small and the O v line shows
+a small blueshift. The Ne viii line is formed over an appreciable fraction of the loop
+length and has intensity contributions from portions of the
+loop that are perpendicular to the line of sight. These trends in
+net line shifts are typical also for other model calculations,
+where we start with hotter loops and used other nanoflare
+parameters, and other functional forms of the atmospheric
+heating parameters, and other functional forms of the atmosphere
+[?]. The line widths as approximated by the second moment
+
+ΔλSq = [∫ I_s(λ - [λ_0 + Δλ_cd])^2 dλ] / [∫ I_s dλ]     (17)
+
+are presented in Figure 7, where we plot the line width versus
+
+[FIGURE: Four scatter plots showing line width u_ab vs logarithm of total intensity for C iv, O iv, O vi, and Ne viii. Similar layout to previous figure but showing line width relationships instead of velocity.]
+
+FIG. 7.—Line width u_ab vs the logarithm of the total intensity (integrated over frequency and loop volume) for the following four transition region spectral lines.
+C iv λ1548 formed at T ≈ 10^5 K with a thermal width at the temperature u_th,C = 11.8 km; O iv λ2789 formed at T = 1.3 × 10^5 K with thermal width
+u_th,O = 11.8 km s^−1; O vi λ1032 formed at T = 2.2 × 10^5 K with thermal width u_th,O = 15 km s^−1; and Ne viii λ770 formed at T = 8 × 10^5 K with thermal
+width at this temperature u_th,Ne = 22 K m^s^−1. One point is plotted for every fifth second in the calculation.
+
+==== PAGE 9 ====
+
+No. 2, 1993                       REDSHIFT IN TRANSITION REGION LINES                     749
+
+[FIGURE: Left panels show temperature T(K), electron density n_e (10^9 cm^−3), gas pressure p (10^−1 dyn cm^−2) vs height z (Mm). Right panels show velocity u (km/s) vs height z (Mm). Multiple time snapshots labeled t = 12s, 30s, 45s, 60s, 75s shown with solid, dashed, and dotted lines representing different quantities.]
+
+FIG. 8a
+
+[Four panels showing similar plots as above, labeled Fig. 8b]
+
+FIG. 8b
+
+FIG. 8.—(a-b) The temperature T(K), electron density n_e × 10^9 (cm^−3), gas pressure ρ × 10^−1 (dyn cm^−2) in the left panels and the velocity along the loop u(km
+s from a function of position along the atmospheric axis z. (a) The temperature T(K), electron density n_e × 10^9 cm^−3, gas pressure ρ × 10^−1 (dyn cm^−2) in the left panels and the velocity along the loop
+started at t = 11 s. (c-d) The temperature T(K), electron density n_e × 10^9 (cm^−3), gas pressure ρ × 10^−1 (dyn cm^−2) in the left panels and the velocity along the loop
+u(km/s) vs height along the atmospheric axis z. The two nanoflares appear as an [?] at t = 43 s and at t = 60 s after the beginning of the run. The first
+nanoflare started at t = 11 s. Note the wave reflection caused by the transition region temperature gradient in (d). (e) The temperature T(K), electron density
+n_e × 10^9 (cm^−3) gas pressure ρ × 10^−1 (dyn cm^−2) vs height along the loop at t = 75 s after the beginning of the run. Note that the second nanoflare is set off just prior to this snapshot.
+
+the logarithm of the total line intensity for the resonance lines
+of C iv, O iv, O vi, and Ne viii. The line widths are converted to
+a velocity scale u_ab = (ΔλSq/λ_0)c and are plotted for every
+fifth second. The line widths are not averaged over this time
+period in order to simulate the effects of finite exposure times.
+The C iv, O iv, and O vi lines show a slight correlation
+between width and intensity, although there is some scatter.
+The Ne viii widths are at some times smaller than the thermal
+width. At these times the maximum temperature is below
+the Ne viii ionization equilibrium temperature of T = 8 × 10^5
+K from which the thermal width of the Ne viii 2770 line is
+computed.
+  In Figures 8a−8e we illustrate how the loop plasma responds
+to the energy release by the first and second nanoflares in the
+model run. The temperature, pressure, electron density, and
+velocity along the loop as a function of position along the loop
+are plotted. The nanoflares are set of at t = 11 s and t = 65 s.
+  Away from the site of the nanoflare in both directions (Fig.
+8a−8b). The maximum temperature falls quickly and is on the
+order of T ≈ 5 × 10^6 K some 30 s after the nanoflare. All the
+plasma behind the pulse is heated to approximately this
+maximum temperature, forming an expanding bubble of
+heated gas. At t ≈ 60 s the pulse strikes the transition region in
+the footpoint at z ≈ (Fig. 8d). The pulse deepens and propagates
+away from the site of the nanoflare in both directions (Fig.
+the footpoint at z ≈ 0 (Fig. 8d). The pulse deepens and propagates
+
+
+
+
+
+
+==== PAGE 10 ====
+
+750                                    HANSTEEN                                  Vol. 402
+
+[FIGURE: Five pairs of plots showing temperature T(K), electron density n_e (10^9 cm^−3), gas pressure p (10^−1 dyn cm^−2) vs height z (Mm) on left panels, and velocity u (km/s) vs height z (Mm) on right panels. Time snapshots labeled t = 45s, 60s, 75s labeled as Fig. 8c, 8d, 8e respectively.]
+
+FIG. 8c
+
+FIG. 8d
+
+FIG. 8e
+
+the model run material is condensing onto the chromosphere
+though the loop is heated. As the material temperature of the
+loop becomes high enough around t ≈ 500 s, the trend is
+reversed, and material begins evaporating into the corona.
+This phase lasts the extent of the model run to t = 1500 s. The
+evaporation of chromospheric material leads to an increase of
+C iv concentration in the loop and thus enhanced C iv λ1548
+radiation. The O iv λ2789 line intensity (not shown in Fig. 9)
+show an increase of only 5% whereas the increase in the C iv
+
+line is 40%. O iv is at all times nearly in ionizational equilibrium, and the density increase in the transition region is
+offset by the decrease in the extent of the region of line formation which is caused by the increased conductive flux and
+enhanced temperature gradient. The loop pressure increases as
+a result of the coronal temperature increase and, later, as
+material is brought up into the loop as a result of evaporation.
+The loop length varies little with a variation on the order of the
+chromospheric scale height.
+==== PAGE 11 ====
+
+No. 2, 1993                    REDSHIFT IN TRANSITION REGION LINES                    751
+
+[FIGURE: Four panels showing temporal evolution. Top-left: log(ρ) (erg s^-1 cm^-2) vs t (s), ranging 2.8-3.8 over 0-1500s. Top-right: Coronal pressure (dyne cm^-2) vs t (s), ranging 0.04-0.14 over 0-1500s. Bottom-left: Column mass (10^-2 g cm^-2) vs t (s), ranging 2.2-2.7 over 0-1500s. Bottom-right: Loop length (km) vs t (s), ranging 17.4-18.6 over 0-1500s.]
+
+FIG. 9.—The variation of the C IV λ1548 total intensity, the average coronal pressure, the column mass integrated above T = 5 × 10^4 K, and the loop length with time. During the first 500 s the loop is cooling (condensing) onto the chromosphere. As the loop is heated by nanoflares, the conductive heat originating in the corona becomes large enough to evaporate chromospheric material which flows into the corona. Both condensing and evaporating flows are on the order of u_a ~ 1 km s^-1 in the transition region.
+
+5. DISCUSSION
+
+As nanoflares are inserted into the loop acoustic waves are generated and propagate along the magnetic field. On longer time scales the energy inserted is spread throughout the loop by thermal conduction. Conversely, in a period of no nanoflares the loop cools through thermal conduction and radiative losses. These effects will have an impact on the formation of transition region spectral lines. In this section an attempt is made to isolate the physical processes relevant to line formation through simple analytical arguments.
+
+5.1. Nanoflare-generated Waves
+
+In our calculation a pattern of energy E_p ~ ρ_0 dv_0 a, where a is the loop cross section, generates a thermal wave and an acoustic wave. The thermal wave which initially propagates faster than the acoustic wave spreads the nanoflare energy over a large coronal region. Subsequently as the speed of the thermal wave falls below the speed of sound, the nanoflare energy is transported as an acoustic pulse in both directions away from the site of the nanoflare explosion.
+
+We may estimate the characteristics of the early phases of the thermal wave by assuming that the plasma motion and the density perturbations are unimportant in an energy budget dominated by the conductive flux. As long as thermal conduction dominates the energy balance the energy released in the
+
+nanoflare is conserved within the wavefront defined by the thermal wave. The thermal wave propagates from the position of the nanoflare energy release, z_n, and the temperature behind the nanoflare at z = z_n - s. The conductive flux Q is written in order to conserve energy:
+
+Q = e_n/ρc_v = ∫ T dz ≈ T z_f .                    (18)
+
+The energy equation for the early phase of the thermal wave is set up by Stein & Leibovich & Rautzer (1967) as
+
+∂T/∂t = ∂/∂z(κ_0 T^{5/2} ∂T/∂z)                    (19)
+
+by assuming plasma motion and density perturbations are negligible. Replacing ∂T/∂z by 1/z_f and ∂T/∂t by 1/t_f allows for an estimate of the velocity of the thermal wave front
+
+dz_f/dt ≈ z_f/t ≈ κ_0/ρc_v Q^{α} 1/z_f^2
+
+≈ (κ_0/(ρc_v)^{1/2}) a_n^{1/2} 1/z_f^2 .                    (20)
+
+The acoustic pulses generated by the nanoflares are of fairly high amplitude, with energy on the order P ~ 10 s and wavelengths around λ_c ≈ 10^3 km. These acoustic pulses propagate at a speed on the order of the speed of sound c_s ≈ (γ T/μ)^{1/2} in the heated medium. Initially, the thermal wave precedes the acoustic wave, but it is quickly overtaken. With a nanoflare energy of 10^{-2} - 10^{-5} ergs s^-1 the thermal wave is overtaken after τ_0 ≈ 1 s which corresponds to a front position of z_0 ≈ 100 km. Thus the thermal wave sets the wavelength and period of the following acoustic pulse, erasing information on the spatial and temporal properties of the nanoflare as long as the energy release occurs in a region smaller than 1 and is shorter duration than τ_0. The acoustic pulse is itself a source of an additional thermal wave as it compresses and heats the coronal plasma. Since the thermal conductivity coefficient is nonlinear, the superposition principle does not hold and it becomes impossible to separate the thermal and acoustic waves. After a delay of the order of the thermal wave crossing time the transition region is struck by an acoustic shock pulse followed by increased thermal conduction as the flare energy spreads throughout the corona.
+
+The waves propagate towards the transition region where the rapidly decreasing sound speed causes partial reflection of the wave and displacement of the transition region. In the model presented here we have found that typically 70% of the wave energy is transmitted while the rest is reflected back into the corona. By considering the amount of momentum deposited in the chromosphere by a pulse, we obtain a transition region displacement of some hundreds of kilometers during a pulse period P_a = 10 s. The density and temperature perturbations associated with the pulse passing through the accelerated transition region causes spikes in the contribution function; see Figure 4(b) and Figure 5. These spikes show up in the continuum contribution function for the C IV λ1548 line in Figure 4 and the O IV λ789 line in
+
+Figure 5.
+
+5.2. Loop Heating and Cooling
+
+The combined acoustic/thermal wave heats the corona and leads to an increase in the coronal pressure. The transition region does not rebound to its former position after the wave has passed. The net result of several nanoflares is to drive the transition region into the chromosphere thereby increasing the loop length and the transition region density. At the same time, the temperature gradient in the transition region must increase in order to support the increased thermal conduction from the corona. Let us now consider the low-frequency response of the loop and the line-forming region in the transition region as the loop is heated and cools.
+
+We consider the energy and force balance at a specified temperature in the transition region T_r. The radiative loss Q_r varies by approximately a factor of 2.5 of a result of nonequilibrium ionization described below. The divergence of the conductive flux is roughly given as a function of the loop length l and the maximal coronal temperature T_c, by T_c^{7/2}/l. In the upper transition region, the energy balance is dominated by the radiative losses as well as the decrease in thermal conduction flux. The relative size of these terms will determine whether the transition region is being heated or cooled. If the divergence of the thermal conduction flux is larger than the radiative losses at a given temperature material is heated and flows up through the transition region temperature gradient. Conversely, an excess of radiative losses at a given temperature will cause material to cool and flow down.
+
+a given temperature will cause material to cool and flow down. Since in the model that as the loop heats, energy is deposited closer to the base of the transition region, and the chromospheric plasma is heated. Neutral hydrogen is not immediately ionized as a result of this heating, and radiative losses in the Lya line from the region where T ≈ 2–3 × 10^4 K are enhanced (see Fig. 1). (The heating included in the model in order to maintain the chromosphere is not insignificant in this region and may therefore not be in evaporation process.)
+
+The electron density n_e,tr in the transition region will, in tending toward force equilibrium, scale with the coronal pressure; n_e,tr ∝ (p_r/T_tr). Likewise, changes in the loop length l will scale with the coronal pressure with Δp_c ≈ (dp/dz)Δl, where (dp/dz) is the chromospheric pressure gradient. The loop length scales on the order of the chromospheric scale height which is small compared to the loop length. In the context of determining the average divergence of thermal conductive flux at a given coronal pressure, we may consider the loop length to be constant. Thus, assuming that the coronal pressure roughly scales with the coronal temperature T_c, we see that for a loop of given length l and base pressure the mass flow is determined by the evolution of the coronal temperature (pressure).
+
+The relevant time scale for the low-frequency transition region motion and flows given by the characteristic time scale of a coronal loop cooling through thermal conduction
+
+t_cool ∝ κ_0 T_c^{7/2}/l^2 ,                    (21)
+
+or by the time scale of a loop being heated. The latter is determined by the temporal distribution of "spicules" of nanoflares and the time scale of spreading the inserted heat throughout the loop, which is on the order of the sound crossing time. The flows resulting from the heating and cooling cycles of the loop are of fairly small magnitude (u ~ 1 km s^-1 at T ≈ 10^5 K) compared to the impulsive velocities generated by the nanoflares. However, the net spectral line shifts associated with these flows weigh heavily in the average net line shift since the line shifts associated with the impulsive nanoflare-generated motion fill a small portion of the total time relative to the flows. In addition, the velocities of the evaporating or condensing plasma are large enough to perturb the ionizational balance and thus the intensity response of transition region spectral lines to variations in the plasma state caused by nanoflare-generated acoustic waves.
+
+5.3. Ionization State
+
+The ionizational state of a radiating ion in a time-varying atmosphere is determined by the characteristic times for recombination and collisional ionization. For ions such as O IV, the rates are sufficiently large one may consider them in ionizational equilibrium on the time scales of the acoustic waves considered. On the other hand, the helium-like ions C V and O IV, and the lithium-like ions N IV, and He-like recombination times on the order of 1 s. These rates are slow compared to the dynamic time scales associated with the dynamics in the transition region and thus lead to ionization states far from equilibrium. This nonequilibrium will, in turn, affect the concentration evolution of the ions ''neighboring'' the helium-like ions, primarily the lithium-like and, to a lesser extent, the beryllium-like ions. Let us use C IV as an example. Carbon, which is being heated or is flowing up through a temperature gradient from regions of T < 10^5 K to regions of T > 10^4 K,
+
+==== PAGE 12 ====
+
+752                                  HANSTEEN                                  Vol. 402
+
+will undergo successive ionizations and thus pass from beryllium-like C IV through lithium-like C IV and eventually to helium-like C V. The C IV is quickly ionized to C V as the temperature rises but the transition to C V is delayed by slow ionization rates. This C IV becomes overabundant at temperatures above its equilibrium temperature. The maximum concentration of C IV at the equilibrium value of x_{C IV} ≈ 0.4 to a value of x_{C IV} ≈ 1.0. In the reverse process, where plasma is cooling or flowing down to a lower temperature region, the recombination rate of C V to C IV is also is slow, C V remains the dominant carbon ion at temperatures far below the equilibrium value of T ≈ 10^5 K, while the maximum concentration is depressed to x_{C IV} ≈ 0.1.
+
+In order to achieve net redshift in the absence of a net mass flow a correlation between the intensity and velocity line shifts in transition region spectral lines is necessary. The model calculations show that the redshifts in transition region spectral lines as a result of the correlation between the intensity and velocity that occurs in the loop cooling and material is condensing onto the chromosphere, while it is suppressed when the loop is heated and chromospheric material evaporates. This effect discriminates between lines from ions with short and long characteristic times of ionization. Model calculations also show that the computed average net line redshifts are smaller than the observed values. The net redshift in the computed model is for the reasons stated above largest as the loop plasma condenses onto the chromosphere. Increasing the average net shift should therefore be possible in loops where the plasma cools quickly and a large fraction of time is spent in the condensing phase. The cooling of coronal loops decreases with decreasing loop length and increasing base pressures. In order to match the observed net redshifts, the proposed mechanism of creating net redshifts may therefore require that most of the transition region emission predominantly come from loops shorter than the loop considered.
+
+6. CONCLUSIONS
+
+We have considered the hypothesis that compressive waves with origin in coronal nanoflares can account for the pervasive redshift seen in transition region lines. The calculations show that we are able to account for several of the observational characteristics of transition region spectral lines, including the apparently small correlation between intensity and the shift, the range of observed velocities, the correlation between line widths, shifts, and intensity, and the smaller net shift speeds in higher temperature lines. However, the average net shifts calculated in the present model are smaller than the observed values. This problem may be rectified by having the emission predominantly come from loops shorter than the loop considered.
+
+The inclusion of a heating term for the low-temperature "chromospheric" plasma is a strict assumption that the upper chromosphere and lower transition region and corona are heated by different mechanisms than the corona. The role of the chromosphere in the heating in the model is mainly to set the chromospheric scale height H_c. A secondary role of the chromospheric heating lies in determining the rate of evaporation of chromospheric material as described in § 5. It is thought that the lower chromosphere is heated by the dissipation of acoustic waves. If these waves do not reach the transition region and corona with sufficient amplitude to cause significant heating has been pointed out by Athay & White (1978). In fact, the preponderance of redshifts in the transition region is an indication of the lack of upward propagating acoustic heating waves. We have made test calculations of acoustic waves propagating from the chromosphere to the transition region. Such waves cause a net upflow in transition region spectral lines. A complete theory of transition region line shifts should therefore also account for the fate of the acoustic flux presumably bearing the lower chromosphere. Here the role played by the ionization of hydrogen and the radiative losses from Ly_a (or from opacity critical).
+
+The proposed hypothesis to explain the net redshift of transition region spectral lines is an alternative to the hypothesis based on steady flow through loops (e.g., Pneuman & Kopp 1977; Mariska 1983), or to the hypothesis of cooling, falling spicules (e.g., Athay & Holzer 1982; Athay or 1984). Separating the effects of these hypotheses each will require a thorough calculation of the observational consequences of each. A fundamental difficulty lies in determining the geometry of observed regions. It is important to know if one is observing two or more loops of anomalous at any given time or several "snapshots" of a cycle with period longer than the observational exposure time.
+
+In any case the separation of steady state models from time-dependent episodic models should be fairly straightforward. A gas which is being repeatedly heated and cooled will reflect this behavior of emission lines originating from ions with differing characteristic ionization times. This should allow for future discriminate between Athay & Eder (1989) have made an analysis of transition region line shifts and found that observations of shifts are inconsistent with a continuous flow.
+
+Calculations of loop flow by Spadaro, Antiochos, & Mariska (1991) where the effects of nonequilibrium ionization are included also seem to indicate that introducing the net redshift by continuous spicule flow through loops is difficult.
+
+The difference between the spicule and the nanoflare models are somewhat more subtle as both rely on heating and cooling gas cycles. The hypothesis differ in where energy is deposited. In spicule scenarios, energy is inserted toward the footpoints of loops, and the net redshift is obtained by considering the time scales of heating and cooling regions that the plasma is longer in the falling, cooling phase than in the rising, heating phase. This asymmetry gives a net observed downflow of the gas at transition region temperature. Emission from C IV favors gas that has a "cold" history. It is not clear that the additional time spent in the cooling phase is enough to cause a net redshift. The calculations presented here show the opposite effect, but it is difficult to discard the spicule hypothesis
+
+==== PAGE 13 ====
+
+No. 2, 1993                    REDSHIFT IN TRANSITION REGION LINES                    753
+
+without seeing a detailed account of its observational consequences.
+
+Episodically heated loops will, to remain in force and energy balance, adjust their mass content by alternately evaporating chromospheric plasma while being heated and by condensing matter onto the chromosphere while cooling. These processes lead to flows through the transition region. By themselves, these flows will not result in any significant net shift of transition region spectral lines. We have shown that a net redshift is possible to achieve if compressive waves are generated in the corona as a result of the heating by nanoflares. In addition to generating the slow mode waves studied in this paper, nanoflares also generate Alfven waves which will further broaden the line profiles. Fast-mode waves are also generated. These are reflected into regions of low Alfven speed and may also lead to modifications of the line profiles.
+
+I would like to thank Per Maltby for insightful discussions and a critical evaluation of this paper, without which it would have been much poorer. I would also like to thank Egil Leer and Phil Judge for reading and criticizing earlier versions of this manuscript.
+
+APPENDIX
+
+1. NUMERICAL METHOD
+
+The equations describing mass, momentum, and energy conservation as well as the ionizational state of the plasma are solved numerically by setting them on a discrete spatial and temporal grid. We have chosen to formulate the equations on an adaptive grid using the Reynolds transport theorem as outlined in Winkler, Norman, & Mihalas (1983). This allows us to resolve the transition region temperature gradient as well as to follow any shock propagation shocks or discontinuities in the solution. According to this formulation equations (1)–(4) may, in general, be written as
+
+d_t(ρAz) + d_z([ηu_{el}]) + (S Δz)^n = 0 .                    (A1)
+
+Here f represents the conserved quantity, S any sources or sinks, u_{el} = u - u_{grid} the difference between the material velocity and the grid velocity, while Δz is the size of a computational cell. The operators d_t and d_z work on the discrete quantities at a time step n and grid position i so that
+
+d_t ≡ (u_i^{n+1} - u_i^n)/Δt ,     d_z ≡ (u_{i+1}^n - u_i^n) ,                    (A2)
+
+where Δt is the length of the time step. The averages appearing in equations (A1) and (A2) are computed according to the Crank-Nicholson (or "θ") method so that at grid position i
+
+u^n ≡ θu_{i-1}^{n+1} + (1 - θ)u_i^n ,     0 ≤ θ ≤ 1 ,                    (A3)
+
+when computing the solution for time step n + 1. In order to maintain accuracy and stability particle and momentum fluxes (μ_{el}) are computed by the second-order upwind method of Van Leer (1974). This entails that the equations couple to the two nearest neighboring grid points on either side, leaving a block pentadiagonal system to be solved.
+
+The grid density "ρ_z (number of grid points per unit distance) is computed by the method of Dorfi & Drury (1987), which essentially sets
+
+ρ_z(z) ∝ R(z) ≡ √(1 + (z_σ d_z d)^2) ,                    (A4)
+
+where R is the required resolution, f again represents any quantity, z the distance and the subscript "av" some appropriate average of the subscripted variable. In practice, we include information on the variation of the second derivatives and the maximal allowed variation of the grid density with respect to space and time. Solving this equation simultaneously with the dynamic equations allows us to resolve and follow large gradients in the solutions as well as to resolve the transition region temperature gradient.
+
+The conservation equations along with the grid equation are solved via the conservation equations along with the grid equation are solved via the Newton-Raphson method, iterating until the calculated correction to our solution is less than some preset value – typically at a relative correction of 10^-6. To ensure a continuous solution we introduce artificial viscosity in equation (3). Following von Neumann & Richtmyer (1950) we write
+
+Q = {[3μ_l^2(∂u/∂z)^2 ,      for (∂u/∂z) < 0,
+    {0 ,                        for (∂u/∂z) ≥ 0,                    (A5)
+
+where μ_l is chosen to be some fraction of the average grid spacing. The artificial viscosity will give a shock thickness of order l_s while reproducing the correct jump in the dynamic variables, as well as the correct propagation speed of the shock. It turned out that in the models presented in this paper the numerical viscosity was unimportant in both the energy and momentum balance.
+
+When the system evolves in time compressive waves are generated. They propagate along the loop and should pass through the boundaries without reflection. We have implanted transparent boundary conditions by the method of Korevaar & Van Leer (1988): the physical variables are extrapolated outside the numerical grid using the characteristic variables. We find that the method gives a reflection of only a few percent of the outgoing wave energy, as long as the thermal conduction flux is not a dominant term in the energy equation. This condition is satisfied in the cool chromospheric plasma at the loop footpoints, and the boundaries do not significantly perturb our solutions.
+
+==== PAGE 14 ====
+
+754                                  HANSTEEN                                  Vol. 402
+
+The rate equations for elements other than hydrogen and helium couple to the dynamic equations mainly through the radiative loss term. A good approximation of the radiative loss term requires equations to be solved simultaneously from 4, for a time-independent precomputed radiative loss term, to 37, for a plasma considering of hydrogen, helium, oxygen, carbon, and neon, and thereafter, separately, the rate equations for the remaining elements. The radiative loss has been on the basis of the loss and density dependence to ensure good convergence and improve of the ion populations with the dynamic variables included when solving the dynamic equations. We find that 3 to 4 iterations are required at each time step.
+
+The length of each time step is determined on the basis of the last time step, the Courant condition at the boundaries, and the change in the variables from the last time step. We find that the shortest time steps occur when shock waves are passing through the boundaries. In these cases the grid points must track through the pulse structure instead of following it.
+
+REFERENCES
+
+Athay, S. M. V., & Pequignot, D. 1973, A&A, 25, 137
+———. 1976, A&A, 47, 32
+Avrett, E. H. 1981, The Quiet Chromosphere (London: Athlone)
+Athay, R. G. 1984, ApJ, 287, 412
+Athay, R. G., & Eder, J. A. 1989, ApJ, 346, 514
+Athay, R. G., & Holzer, T. E. 1982, ApJ, 255, 470
+Athay, R. G., & White, O. R. 1978, ApJ, 226, 1135
+Avrett, E. H. 1991, in Proc. Internat. Conf. Mechanisms of Chromospheric
+and Coronal Heating, ed. P. Ulmschneider, E. R. Priest, & R. Rosner
+(Berlin: Springer)
+Bao, Y., & Shibata, K. 1992, ApJ, 398, 365, 66
+Barrios, J. D. F., & Hrueckner, G. E. 1975 J. Opt. Soc. Am., 65, 13
+Bell, K. L., Gilbody, H. B., Hughes, J. G., Kennerly, R. J., & Smith, F. J. 1982,
+Atomic Data for Fusion, Pt. I (UKAEA Rep. (Abingdon,
+Oxfordshire: Culham Lab.)
+Bergal, J. E., & Mariska, J. T. 1991, ApJ, 383, 149
+Biserley, A., McWhirter, R. W. P., & Wilson, R. 1975 J. Phys. B: Atom. Molec.
+Phys., 11, 65
+Black, K. P. 1936, Proc. Roy. Soc. A, 156, 45
+Bruner, M. E. 1987, ApJ, 148, 833
+Dere, K. P., & Picadella de Feyrits, G. 1983, A&A, 119, 321
+Doscheck, G. A., & Norman, M. L. 1976, ApJ, 309, 394, 355, 700
+Dosches, G. A., Feldman, U., & Bohlin, J. D. 1976, ApJ, 205, L177
+Eisen, E. H. 1975, Sol. Phys. 45, 235
+Eriksen, G., & Maltby, P. 1967, ApJ, 148, 833
+Eriksen, D. R., & Picadella de Feyrits, G. 1983, A&A, 119, 321
+Fawcett, B. C., Peacock, N. J., & Stamp, M. F. 1992, At. Data Nucl. Data Tables, 47, 355-700
+Gouttebroype, P. 1989, A&A, 337, 536
+Grevesse, N. 1984, Phys. Scripta, 23, 4
+Goldsworthy, F. A. 1987, Astrophys. Quant. Absorption Data: Coll. Mechanics of Chromospheric and
+Coronal Heating, ed. P. Ulmschneider, E. R. Priest, & R. Rosner (Berlin:
+Springer)
+Hansteen, V. H. 1991, in Proc. Internat. Conf. Mechanisms of Chromospheric
+and Coronal Heating, ed. P. Ulmschneider, E. R. Priest, & R. Rosner
+(Berlin: Springer)
+Hansteen, V. H., & Maltby, P. 1990, B&A, 25, 1234
+Hassler, D. M., Rottman, G. J., & Orrall, Q. Q. 1991, ApJ, 372, 710
+Jordan, C., & Linsky, J. L. 1987, in Exploring the Universe with the IUE
+Satellite, ed. Y. Kondo (Dordrecht: Reidel), 259
+
+Jordan, C. & Wilson, R. 1971, in Physics of the Solar Corona, ed. C. J. Macris
+(Dordrecht: Reidel), 219
+Kuperus, M., & Tandberg-Hanssen, E. 1967, Sol. Phys. 5, 15
+Kuhn, N. P. M., & Poland, A. 1991, ApJ, 370, 763
+Landi, M. 1987, A&A Monographs-Rossi, R C 1990, A&A 82, 229
+Mariska, J. T., & Doyle, J. G. 1988, A&A, 290, 153
+McWhirter, A. N., & Craig, I. J. D. 1986, Nature, 324, 128
+———. 1987, ApJ, 321, 402
+McWhirter, R. W. P., & Wilson, R. 1974, J. Phys. B: Atom. Molec. Phys., 7,
+1435
+Mewe, R., Kaastra, J. S., & Liedahl, D. A. 1995, A&A in press; Mewe, R.,
+Merrill, M., & Zwaan, C. 1980 Electron
+Exitation Collision Strengths for Positive Atomic Ions: A Collection of
+Data (New York: Plenum) M S 1988 (New York: Wiley)
+Parker, E. N. 1988, Astrophysical Quantities (London: Athlone)
+———. 1991, in Proc. Miniworkshop on Physical Processes in the Solar Transition Region and Corona, ed. P. Maltby & E. Leer (Oslo: Inst. Theor.
+Astrophys.), 63
+Pneuman, G. W., & Kopp, R. A. 1977, A&A, 55, 305
+Poletto, G., & Kopp, R. A. 1986, ApJ, 308, 359
+Porter, J. G., Moore, R. L., Reichmann, E. J., Engvold, O., & Harvey, K. L.
+1987, ApJ, 323, 380
+Rosner, R., Tucker, W. H., & Vaiana, G. S. 1978, ApJ, 220, 643
+Samain, D. 1991, A&A, 244, 217
+Seaton, M. J. 1962, in Atomic and Molecular Processes, ed. D. R. Bates (New
+York: Academic), 374
+Shoun, U. 1987, Solar Institute for Plasma Physics Rep., No. 46
+———. 1992, ApJ, 390, 339
+Spadaro, D., Antiochos, S. K., & Mariska, J. T. 1991, ApJ, 382, 338
+Spielter, L. 1962, The Physics of Fully Ionized Gases (New York: Wiley)
+Sturrock, P. A. 1966, Nature, 211, 696
+———. 1991, in Proc. Miniworkshop on Physical Processes in the Solar Transition Region and Corona (Berlin: Springer) [?]
+Van Leer, B. 1974, J. Comput. Phys., 14, 361
+von Neumann, J., & Richtmyer, R. D. 1950, J. Appl. Phys., 21, 232
+Waljeski, T. L., Harman, M. L., & Mihalas, D. 1984, J. Quant. Spectros.
+[?], 31
+Zeitdowski, Ya. B., & Rauzer, Yu. P. 1967, Physics of Shock Waves and High
+Temperature Hydrodynamic Phenomena, Vol. II, ed. W. D. Hayes & R. F.
+Probstein, (New York: Academic)
+
+==== PAGE 15 ====
+
+[This page appears to be blank except for page number and copyright notice at the bottom]
+

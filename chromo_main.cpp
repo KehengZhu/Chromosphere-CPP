@@ -2,6 +2,7 @@
 #include "scenarios/scenario.hpp"
 
 #include <armadillo>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -20,20 +21,21 @@ int main(int argc, char** argv) {
     //                 ignored otherwise (pass "-" or "" for scenarios that don't use it)
     //   time_mult:    multiplier on the default total_time (default 1.0). Step
     //                 cap scales accordingly so a longer run is not truncated.
-    //   cooling:      "cooling" (Stage R, CL2012 optically-thick radiative
-    //                 cooling enabled) or "no-cooling" (default)
+    //   cooling:      "cooling" (Stage R: CL2012 optically-thick + optically-thin
+    //                 radiative cooling, enabled by DEFAULT) or "no-cooling"
     const std::string out_path      = (argc > 1) ? argv[1] : "outputs/output.txt";
     const std::string mode          = (argc > 2) ? argv[2] : "full";
     const std::string ioniz_arg     = (argc > 3) ? argv[3] : "ionization";
     const std::string scenario_name = (argc > 4) ? argv[4] : "model_c7";
     const std::string data_path     = (argc > 5) ? argv[5] : "";
     const float       time_mult     = (argc > 6) ? std::stof(argv[6]) : 1.0f;
-    const std::string cool_arg      = (argc > 7) ? argv[7] : "no-cooling";
+    const std::string cool_arg      = (argc > 7) ? argv[7] : "cooling";
     const bool explicit_only        = (mode == "explicit");
     const bool ionization_on        = (ioniz_arg != "no-ionization");
-    const bool cooling_on           = (cool_arg == "cooling");
+    const bool cooling_on           = (cool_arg != "no-cooling");
 
-    const float cfl = 0.25f;
+    float cfl = 0.25f;
+    if (const char* e = std::getenv("CHROMO_CFL")) { try { cfl = std::stof(e); } catch (...) {} }
 
     Scenario sc;
     try {
@@ -88,20 +90,22 @@ int main(int argc, char** argv) {
     // bounded (~500 frames per run) regardless of time_mult. Keeps render
     // time roughly constant when sweeping time_mult — animation length at
     // 30 fps is ~17 s independent of physical simulation duration.
-    const int frame_stride = std::max(50,
-        static_cast<int>(50.0f * std::max(1.0f, time_mult / 5.0f)));
+    const int frame_stride = std::max(10,
+        static_cast<int>(10.0f * std::max(1.0f, time_mult / 5.0f)));
     float     time         = 0.0f;
     int       step         = 0;
     write_frame(time, step);
 
     while (time < total_time && step < step_cap) {
+        grid.sim_time = time;   // expose current time to time-dependent terms (beam window)
         Vec dt = cal_dt_i(grid, xn);
         const float dt_avg = arma::mean(dt);
 
         if (step % 100 == 0) {
             std::cout << "[" << mode << "] step = " << step
                       << "  dt = " << dt_avg
-                      << "  time = " << time << std::endl;
+                      << "  time = " << time
+                      << "  T_c = " << grid.trac_cutoff_T << std::endl;
         }
 
         sc.update_bc(grid, xn);

@@ -3,6 +3,8 @@
 build/
 .DS_Store
 writeup-overleaf/
+docs/presentation-build/
+docs/latex-build/
 __pycache__/
 .venv/
 util/data/

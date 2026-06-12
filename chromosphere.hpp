@@ -111,6 +111,16 @@ struct Grid {
     // to true to activate.
     bool enable_radiative_cooling = false;
 
+    // Single-fluid limit ("neutrals off"). When true, the ion-neutral drag
+    // (Stage B) and T_i↔T_n equilibration (Stage C) rigidly slave the neutral
+    // fluid to the ions each step: V→U→V_cm (mass-weighted bulk velocity) and
+    // T_i→T_n→T_cm (heat-capacity-weighted bulk temperature). This is the exact
+    // infinite-coupling limit of the two-fluid equations — neutrals still carry
+    // mass and follow the ionization network, but have no independent dynamics,
+    // i.e. a single-fluid partially-ionized treatment. Default false = full
+    // two-fluid ("neutrals on"). Toggled at runtime by SINGLE_FLUID=1.
+    bool single_fluid = false;
+
     // Isotropic numerical thermal diffusivity χ_num [m²/s] added to the Stage D
     // conduction operator (Pandey et al. 2024 §3.3): an explicit ∂T/∂t = χ ∂²T/∂s²
     // term, realized as an additive face conductivity K_num = χ·C (C = heat
@@ -196,11 +206,35 @@ struct Grid {
     float beam_h_lo_km            = 1600.0f;
     float beam_h_hi_km            = 2000.0f;
 
+    // Self-consistent thick-target beam (Emslie 1978). When true, the fixed
+    // [h_lo,h_hi] deposition window is ignored: the beam is injected at the loop
+    // APEX (the maximum of φ_g — loop top for closed/full, coronal top for open),
+    // streams down each leg, and loses energy collisionally. The volumetric
+    // heating at column depth N (from the apex) is Q ∝ n_tot·(1+N/N_c)^{-δ/2},
+    // normalized so ∫Q ds = beam_flux (thick target: all energy absorbed). N_c is
+    // the stopping column of cutoff-energy electrons (N_c ∝ E_c²). As the loop
+    // fills with evaporated plasma the column rises, so the stopping depth moves UP
+    // the loop — the density feedback a fixed window cannot capture. Default off so
+    // model_flare / the test suite keep the fixed-window deposition.
+    bool  beam_thick_target       = false;
+    float beam_E_cut_keV          = 20.0f;   // low-energy cutoff E_c [keV]
+    float beam_delta              = 5.0f;    // injected power-law spectral index δ (>2)
+
     // When true, the outer boundary uses a transparent (Neumann) outflow on the
     // velocity instead of the slow Mach-0.05 cap, so a supersonic evaporation
     // upflow can leave the domain. Set by flare scenarios. Default false keeps
     // the C7 quiet-Sun Mach-capped outflow.
     bool  outer_free_outflow      = false;
+
+    // When true, the outer face is a reflecting symmetry plane rather than an
+    // outflow: the outer ghosts mirror the interior with V,U → −V,−U, so the net
+    // mass/momentum flux across the face is zero. This is the loop-apex condition
+    // for a CLOSED field line (one symmetric leg, footpoint→apex), where the
+    // evaporated plasma is confined and fills the loop. Open field lines leave
+    // this false and keep the (Neumann) coronal outflow. Set by pfss_ic from the
+    // [META] topology= key. Default false → unchanged outflow for all other
+    // scenarios. apply_open_bcs honors this on the outer block.
+    bool  outer_reflecting        = false;
 
     // Current simulation time [s], refreshed by the driver (chromo_main) each
     // step before advance_Euler_state so time-dependent terms (beam window) can

@@ -136,7 +136,12 @@ static void apply_drag_stage(const Grid& grid, Vec& prim_state, float dt) {
     const Vec mu    = rho_i % rho_n / rho_tot;
     const Vec lambda_drag = alpha % rho_tot / (rho_i % rho_n);
 
-    const Vec w_new = w_old / (1.0 + dt * lambda_drag);
+    // Single-fluid limit: rigidly lock the drift to zero (V→U→V_cm), the exact
+    // dt·λ_drag→∞ limit. The full relative kinetic energy 0.5·μ·w_old² is then
+    // thermalized below via dE_drag, conserving total momentum and energy.
+    const Vec w_new = grid.single_fluid
+                          ? Vec(arma::zeros<Vec>(w_old.n_elem))
+                          : Vec(w_old / (1.0 + dt * lambda_drag));
     const Vec V_new = V_cm + (rho_n / rho_tot) % w_new;
     const Vec U_new = V_cm - (rho_i / rho_tot) % w_new;
 
@@ -182,7 +187,10 @@ static void apply_temperature_stage(const Grid& grid, Vec& prim_state, float dt)
     const Vec lambda_T = beta % C_sum / (C_i % C_n);
 
     const Vec T_cm  = (C_i % T_i + C_n % T_n) / C_sum;
-    const Vec dT    = (T_i - T_n) / (1.0 + dt * lambda_T);
+    // Single-fluid limit: lock both temperatures to the common T_cm (dt·λ_T→∞).
+    const Vec dT    = grid.single_fluid
+                          ? Vec(arma::zeros<Vec>(T_i.n_elem))
+                          : Vec((T_i - T_n) / (1.0 + dt * lambda_T));
     const Vec T_i_new = T_cm + (C_n / C_sum) % dT;
     const Vec T_n_new = T_cm - (C_i / C_sum) % dT;
 

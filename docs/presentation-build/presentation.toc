@@ -1,5 +1,0 @@
-\beamer@sectionintoc {1}{Ionization \& Recombination Mechanisms}{3}{0}{1}
-\beamer@sectionintoc {2}{Photoionization}{7}{0}{2}
-\beamer@sectionintoc {3}{Rates in the C7 Atmosphere}{8}{0}{3}
-\beamer@sectionintoc {4}{Cooling}{9}{0}{4}
-\beamer@sectionintoc {5}{Chromospheric Evaporation}{11}{0}{5}

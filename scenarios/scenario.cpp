@@ -118,18 +118,34 @@ void apply_open_bcs(Grid& grid, const Vec& xn) {
         }
     }
 
-    // --- Outer outflow: pure Neumann on every variable --------------------
-    // ρ, T, V, U all zero-gradient at both outer ghosts. The boundary has no
-    // impedance — outgoing waves see a transparent face (no Rusanov-jump
-    // dissipation) and no externally-specified state on the incoming
-    // characteristic. Stable only when the IC is near HSE / steady-state;
-    // unstable for transient runs that need boundary damping.
+    // --- Outer face -------------------------------------------------------
+    // Default (open line / coronal top): pure Neumann outflow — ρ, T, V, U all
+    // zero-gradient at both outer ghosts. The boundary has no impedance —
+    // outgoing waves see a transparent face and no externally-specified state on
+    // the incoming characteristic. Stable only when the IC is near HSE /
+    // steady-state; transient runs that need boundary damping may go unstable.
+    //
+    // When grid.outer_reflecting (closed-loop apex): mirror cells ns-1, ns-2 with
+    // V,U → −V,−U so the face is a zero-flux symmetry plane — the evaporated
+    // plasma is confined and fills the loop. g_∥→0 at the apex, so the gravity
+    // potential is flat there and reusing phi_g_iph(ns-1) for both ghosts is exact
+    // to leading order.
     {
         float rho_i, rho_n, V, U, T_i, T_n;
         const float phi_g_out = grid.phi_g_iph(ns - 1);
         cell_prim(ns - 1, rho_i, rho_n, V, U, T_i, T_n);
-        pack_ghost(grid.outer_boundary0_i, rho_i, rho_n, V, U, T_i, T_n, phi_g_out);
-        pack_ghost(grid.outer_boundary1_i, rho_i, rho_n, V, U, T_i, T_n, phi_g_out);
+        if (grid.outer_reflecting) {
+            pack_ghost(grid.outer_boundary0_i, rho_i, rho_n, -V, -U, T_i, T_n, phi_g_out);
+            if (ns >= 2) {
+                cell_prim(ns - 2, rho_i, rho_n, V, U, T_i, T_n);
+                pack_ghost(grid.outer_boundary1_i, rho_i, rho_n, -V, -U, T_i, T_n, phi_g_out);
+            } else {
+                grid.outer_boundary1_i = grid.outer_boundary0_i;
+            }
+        } else {
+            pack_ghost(grid.outer_boundary0_i, rho_i, rho_n, V, U, T_i, T_n, phi_g_out);
+            pack_ghost(grid.outer_boundary1_i, rho_i, rho_n, V, U, T_i, T_n, phi_g_out);
+        }
     }
 
     grid.broadcast();

@@ -25,6 +25,12 @@ namespace chromosphere {
 arma::uword pfss_peek_ns(const std::string& data_path);
 
 /// Populate the Grid from the file and return the initial conserved state.
+///
+/// Opt-in flare mode (env PFSS_FLARE=1): overlay the model_flare beam-heating
+/// physics (Fisher et al. 1985 explosive evaporation) on this field line —
+/// forces ionization + radiative cooling, adds numerical diffusivity / TRAC /
+/// RTV q(T), and switches on the nonthermal beam. Beam knobs share the FLARE_*
+/// env names with model_flare_ic. Default (unset) leaves the scenario unchanged.
 Vec pfss_ic(Grid& grid, const std::string& data_path);
 
 /// Refresh ghost cells via `apply_open_bcs`: inner reflecting wall, outer

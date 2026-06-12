@@ -410,12 +410,42 @@ inline Vec beam_heating_rate(const Grid& grid, const Vec& n_i, const Vec& n_n) {
     }
     if (g <= 0.0f) return Q;
 
+    const Vec  ds   = grid.ds_i;                    // [m]
+    const Vec  ntot = n_i + n_n;                    // [m^-3], collisional target
+
+    // --- Self-consistent thick-target deposition (Emslie 1978) ----------------
+    // Inject at the loop apex (max φ_g) and attenuate down each leg by collisional
+    // stopping. An electron of energy E stops at column N_stop ∝ E²; for an
+    // injected power-law (index δ, cutoff E_c) the heating per unit volume at
+    // column depth N (from the apex) is Q ∝ n_tot · N^{-δ/2} for N>N_c, flattening
+    // to Q ∝ n_tot for N≪N_c (the full beam still in flight). We use the smooth
+    // form (1+N/N_c)^{-δ/2} and normalize to ∫Q ds = beam_flux (thick target).
+    // The column N(s) = ∫n_tot ds is recomputed from the CURRENT state every call,
+    // so as evaporation fills the loop the stopping depth migrates UP the loop —
+    // the feedback the fixed window misses.
+    if (grid.beam_thick_target) {
+        const Vec phi_g = 0.5f * (grid.phi_g_imh + grid.phi_g_iph);
+        const arma::uword a = phi_g.index_max();    // apex = potential maximum
+        Vec N = arma::zeros<Vec>(grid.ns);          // column depth from apex [m^-2]
+        for (arma::uword i = a; i-- > 0; )          // apex → inner footpoint
+            N(i) = N(i + 1) + 0.5f * (ntot(i + 1) * ds(i + 1) + ntot(i) * ds(i));
+        for (arma::uword i = a + 1; i < grid.ns; ++i)   // apex → outer footpoint
+            N(i) = N(i - 1) + 0.5f * (ntot(i) * ds(i) + ntot(i - 1) * ds(i - 1));
+        // N_c[m^-2] ≈ 2.0e21 · (E_c/keV)²  (stopping column of cutoff electrons,
+        // ≈ 2e17 cm^-2 keV^-2 for Coulomb log ~20).
+        const float N_c = 2.0e21f * grid.beam_E_cut_keV * grid.beam_E_cut_keV;
+        const float p   = 0.5f * grid.beam_delta;       // δ/2
+        Vec w = ntot % arma::pow(1.0f + N / N_c, -p);
+        const float norm = arma::dot(w, ds);
+        if (norm <= 0.0f) return Q;
+        Q = (grid.beam_flux * g / norm) * w;            // W m^-3, ∫Q ds = beam_flux·g
+        return Q;
+    }
+
     // Deposition window: cells whose center height (absolute km, C7 base =
     // 1003 km) lies in [beam_h_lo_km, beam_h_hi_km] — the upper chromosphere
     // below the TR. Weight ∝ n_tot (thick-target: densest reachable layer
     // absorbs the most).
-    const Vec  ds   = grid.ds_i;                    // [m]
-    const Vec  ntot = n_i + n_n;                    // [m^-3]
     const float H_BASE_KM = 1.003e3f;               // C7 base offset (chromo_main)
     Vec  w = arma::zeros<Vec>(grid.ns);
     float h_lo = 0.0f;

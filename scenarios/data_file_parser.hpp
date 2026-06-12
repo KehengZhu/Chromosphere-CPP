@@ -32,6 +32,9 @@ struct ScenarioDataFile {
     float       g_si        = 274.0f;
     float       B_outer_T   = 0.0f;
     float       phi_g_offset_Jpkg = 0.0f;
+    // Field-line topology. "closed" ⇒ the outer face is the loop apex (reflecting
+    // symmetry BC); anything else (default "open") ⇒ coronal outflow at the top.
+    std::string topology    = "open";
 
     // CELLS, all length ns.
     Vec ds_m;

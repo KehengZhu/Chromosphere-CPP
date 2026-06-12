@@ -70,6 +70,7 @@ bool parse_meta_block(std::ifstream& in, ScenarioDataFile& out, std::string& nex
         else if (k == "g_si")               { out.g_si = parse_float(v, "META g_si"); }
         else if (k == "B_outer_T")          { out.B_outer_T = parse_float(v, "META B_outer_T"); }
         else if (k == "phi_g_offset_Jpkg")  { out.phi_g_offset_Jpkg = parse_float(v, "META phi_g_offset"); }
+        else if (k == "topology")           { out.topology = v; }
         // unknown keys are silently ignored — keeps the format extensible.
     }
     next_section.clear();

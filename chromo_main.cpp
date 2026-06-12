@@ -49,6 +49,11 @@ int main(int argc, char** argv) {
     grid.init(sc.peek_ns(), cfl);
     grid.enable_ionization = ionization_on;
     grid.enable_radiative_cooling = cooling_on;
+    // "neutrals off" experiment: SINGLE_FLUID=1 slaves neutrals to the ion fluid
+    // (single-fluid limit). Default (unset/0) is the full two-fluid model.
+    if (const char* e = std::getenv("SINGLE_FLUID")) {
+        try { grid.single_fluid = (std::stof(e) != 0.0f); } catch (...) {}
+    }
     Vec xn = sc.ic(grid);
 
     const float c_s_target = 2.0e4f; // m/s, ion sound speed scale (writeup §4)

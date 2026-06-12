@@ -1,6 +1,6 @@
 # Separate Electron Temperature (T_e ≠ T_i) — Implementation Plan
 
-**Status:** proposed / not yet implemented. The ν_ei coefficient and the beam-energy partition convention should be locked against Bradshaw 2006 and Manchester 2012 (see References) before coding.
+**Status:** ✅ implemented (runtime toggle `ENABLE_TE=1`; default off reproduces the single-temperature baseline bit-for-bit). See **§7 Implementation notes** below for the as-built design, which differs from the original §2 sketch in one structural choice (total-energy + electron-energy split rather than proton-only `E_I`). The ν_ei coefficient is the NRL/Spitzer energy-equilibration rate (`physics.hpp::nu_ei`).
 
 ## 1. Motivation
 
@@ -98,3 +98,56 @@ Already in library:
 - Al Shidi et al. 2019 — SWMF two-fluid MHD.
 
 Foundational transport coefficients (ν_ei, κ_e, κ_i): Spitzer 1962; Braginskii 1965; NRL Plasma Formulary.
+
+## 7. Implementation notes (as built)
+
+The model is implemented behind `Grid::enable_Te` (env `ENABLE_TE=1`), carrying the
+7th variable always and slaving electrons to ions when off. One structural choice
+differs from the §2 sketch and is worth recording:
+
+**Total-energy + electron-energy split (not proton-only `E_I`).** Rather than
+redefining `cons::E_I` as proton-only energy with momentum carrying `p_e + p_i`,
+`E_I` keeps its original meaning — the **total charged-fluid energy** (protons +
+electrons + bulk KE + gravity) — and the new `cons::E_E` carries the electron
+internal energy `ε_e = (3/2) p_e`. The proton temperature is *derived*,
+`T_i = (p_total − p_e)/(n_i k_B)`, with `p_total = ⅔(E_I − KE − φ)` exactly as
+before. This is the standard two-temperature MHD formulation (AWSoM/BATSRUS,
+Sokolov 2021) and has two decisive advantages over the proton-only form:
+
+1. **Exact baseline reproduction.** The conservative MUSCL/Rusanov flux, the
+   pressure-area + gravity source, the sound speed, and `cal_dt_i` all read
+   `p_total` (= the old `p_i`), so they are byte-for-byte unchanged. `E_E` never
+   feeds back into `E_I`/momentum/ρ, so `ENABLE_TE=0` reproduces the
+   single-temperature run to **0.000e+00** relative error (verified over a full
+   flare run, not merely round-off).
+2. **Exact total-energy conservation.** Every source stage that moves energy
+   between pools updates `E_E` and mirrors the same Δ into `E_I`, so the protons
+   (`p_total − p_e`) absorb exactly the complement — no separate proton-energy
+   bookkeeping that could drift.
+
+As-built mapping of the four "physics changes that matter" (§2.46):
+
+- **Electron energy equation** — `E_E` advects at `V` (flux `ε_e V`, `flux.cpp`)
+  with explicit compression work `−p_e ∇·V` (`cal_source_state`, gated on
+  `enable_Te`); the complementary `−p_proton ∇·V` is automatic via `E_I`.
+- **Beam → electrons** — `apply_beam_heating_stage` routes all `Q_beam` into the
+  electron pool (true path); `cal_dt_i` caps Δt on `ε_e` so the onset spike is
+  bounded. Single-T path keeps the heat-capacity charged/neutral split.
+- **κ_e on T_e** — `apply_conduction_stage` is parametrized: it conducts
+  `T_charged` with `C = 3 n_i k_B` (single-T) or `T_e` with `C_e = 1.5 n_i k_B`
+  (three-T, κ_i ≈ κ_e/43 dropped); TRAC keys off the conducted temperature.
+- **Radiation & χ_H → electrons** — `apply_radiative_cooling_stage` drains the
+  electron pool; `apply_ionization_stage` attributes the χ_H ionization
+  cost/return to electrons (thermal/KE inheritance stays with the protons).
+- **ν_ei equilibration** — Stage C generalizes the 2-way `T_charged ↔ T_n`
+  point-implicit relaxation to a **symmetric 3×3** `(T_e, T_i, T_n)` solve with
+  pairwise conductances `g_ei = C_e ν_ei`, `g_en = C_e ν_en`, `g_in = β` (the
+  original ion–neutral β, now proton↔neutral). `physics.hpp::nu_ei` is the
+  Spitzer/NRL energy rate `≈ 2.03×10⁻⁴³ n_e lnΛ /(k_B T_e)^{3/2}` (fast in the
+  dense chromosphere, slow at the tenuous loop-top → decoupling).
+
+**Verification.** Tests stay green (5926). `ENABLE_TE=0` ≡ baseline (Δ = 0).
+`ENABLE_TE=1` on the 2024-08-01 PFSS event lines is stable and shows T_e running
+up to ~6× T_i in the beam-heated footpoints/loop-top during the impulsive onset,
+relaxing toward T_e = T_i as the loop fills and ν_ei speeds up — the predicted
+beam-onset / low-density decoupling. Movies in `util/visualization/event_20240801_*_Te.mp4`.

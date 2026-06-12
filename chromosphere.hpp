@@ -21,26 +21,41 @@ typedef arma::Col<float> Vec;
 // State indices
 // ============================================================================
 
-const arma::uword num_of_eq = 6;
+const arma::uword num_of_eq = 7;
 
 // Conserved-variable indices (writeup eq 61).
+//
+// Three-temperature extension (docs/electron_temperature_plan.md): a 7th
+// variable E_E carries the electron internal energy. To keep the change a
+// clean, energy-conserving generalization, E_I retains its original meaning —
+// the TOTAL charged-fluid energy (protons + electrons + bulk KE + gravity) —
+// so the conservative MUSCL/Rusanov flux, gravity/area source, and sound speed
+// are byte-for-byte unchanged. The proton temperature is then a *derived*
+// quantity, T_i = (p_total − p_e)/(n_i k_B), and the electron temperature is
+// T_e = p_e/(n_i k_B) with p_e = ⅔ E_E. This "total-energy + electron-energy"
+// split is the standard two-temperature MHD formulation (AWSoM/BATSRUS;
+// Sokolov 2021) and guarantees ENABLE_TE=0 reproduces the single-temperature
+// baseline exactly (E_E never feeds back into E_I / momentum / ρ).
 namespace cons {
     const arma::uword RHO_I = 0; // ion mass density       ρ_i
     const arma::uword RHO_N = 1; // neutral mass density   ρ_n
     const arma::uword MOM_I = 2; // ion momentum density   ρ_i V
     const arma::uword MOM_N = 3; // neutral momentum dens. ρ_n U
-    const arma::uword E_I   = 4; // ion total energy       e_i
+    const arma::uword E_I   = 4; // TOTAL charged energy   e_i (protons+electrons+KE+φ)
     const arma::uword E_N   = 5; // neutral total energy   e_n
+    const arma::uword E_E   = 6; // electron internal energy ε_e = (3/2) p_e
 }
 
-// Primitive-variable indices.
+// Primitive-variable indices. P_I is the TOTAL charged pressure (p_proton+p_e);
+// P_E is the electron partial pressure. Proton pressure = P_I − P_E (derived).
 namespace prim {
     const arma::uword RHO_I = 0;
     const arma::uword RHO_N = 1;
     const arma::uword V     = 2;
     const arma::uword U     = 3;
-    const arma::uword P_I   = 4;
+    const arma::uword P_I   = 4;  // total charged pressure p_proton + p_e
     const arma::uword P_N   = 5;
+    const arma::uword P_E   = 6;  // electron partial pressure p_e
 }
 
 // Used by ip1/im1/...: SLICE means "treat input as one scalar field of length ns",
@@ -120,6 +135,24 @@ struct Grid {
     // i.e. a single-fluid partially-ionized treatment. Default false = full
     // two-fluid ("neutrals on"). Toggled at runtime by SINGLE_FLUID=1.
     bool single_fluid = false;
+
+    // Separate electron temperature T_e ≠ T_i (docs/electron_temperature_plan.md).
+    // The 7th conserved variable E_E (electron internal energy) is ALWAYS carried;
+    // this flag only decides whether the electrons evolve independently:
+    //   * enable_Te = false (default): the single-temperature baseline. Every
+    //     stage runs the original code path on the combined charged pool
+    //     (P_I = total charged pressure, "T_i" = T_charged = p_total/(2 n_i k_B)),
+    //     and at the end of each step E_E is slaved to ½ the charged thermal
+    //     energy so that T_e ≡ T_i is reported. E_E never feeds back, so this
+    //     reproduces the pre-T_e physics to round-off (cf. SINGLE_FLUID).
+    //   * enable_Te = true: the three-temperature model (T_e, T_i, T_n). The
+    //     beam deposits into electrons, Spitzer κ_e conducts on T_e, the
+    //     optically-thin radiation and the χ_H ionization cost are electron-pool
+    //     terms, and a 3-way point-implicit ν_ei/ν_en/ν_in relaxation (Stage C)
+    //     equilibrates the three temperatures. Decoupling (T_e ≠ T_i) appears at
+    //     the beam-driven onset and the tenuous loop-top where ν_ei is slow
+    //     (Bradshaw 2006; Manchester 2012). Toggled at runtime by ENABLE_TE=1.
+    bool enable_Te = false;
 
     // Isotropic numerical thermal diffusivity χ_num [m²/s] added to the Stage D
     // conduction operator (Pandey et al. 2024 §3.3): an explicit ∂T/∂t = χ ∂²T/∂s²

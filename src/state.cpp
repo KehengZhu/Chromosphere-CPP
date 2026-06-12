@@ -101,12 +101,15 @@ Vec cons2prim(const Grid& grid, const Vec& cons_state) {
     const Vec rhoU_n = get_scalar(grid, cons_state, cons::MOM_N);
     const Vec e_i    = get_scalar(grid, cons_state, cons::E_I);
     const Vec e_n    = get_scalar(grid, cons_state, cons::E_N);
+    const Vec e_e    = get_scalar(grid, cons_state, cons::E_E);
 
     const Vec V     = rhoV_i / rho_i;
     const Vec U     = rhoU_n / rho_n;
     const Vec phi_g = 0.5 * (grid.phi_g_imh + grid.phi_g_iph);
+    // p_i is the TOTAL charged pressure (protons + electrons); see cons::E_I note.
     const Vec p_i   = 2.0/3.0 * e_i - 1.0/3.0 * rho_i % V % V - 2.0/3.0 * rho_i % phi_g;
     const Vec p_n   = 2.0/3.0 * e_n - 1.0/3.0 * rho_n % U % U - 2.0/3.0 * rho_n % phi_g;
+    const Vec p_e   = 2.0/3.0 * e_e;   // electron partial pressure (no KE / gravity)
 
     prim_state += scalar_to(grid, rho_i, prim::RHO_I);
     prim_state += scalar_to(grid, rho_n, prim::RHO_N);
@@ -114,6 +117,7 @@ Vec cons2prim(const Grid& grid, const Vec& cons_state) {
     prim_state += scalar_to(grid, U,     prim::U);
     prim_state += scalar_to(grid, p_i,   prim::P_I);
     prim_state += scalar_to(grid, p_n,   prim::P_N);
+    prim_state += scalar_to(grid, p_e,   prim::P_E);
     return prim_state;
 }
 
@@ -125,12 +129,16 @@ Vec prim2cons(const Grid& grid, const Vec& prim_state) {
     const Vec U     = get_scalar(grid, prim_state, prim::U);
     const Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
     const Vec p_n   = get_scalar(grid, prim_state, prim::P_N);
+    const Vec p_e   = get_scalar(grid, prim_state, prim::P_E);
 
     const Vec rhoV_i = rho_i % V;
     const Vec rhoU_n = rho_n % U;
     const Vec phi_g  = 0.5 * (grid.phi_g_imh + grid.phi_g_iph);
+    // E_I is the TOTAL charged energy (p_i already includes the electron pressure
+    // p_e); E_E carries the electron internal energy alone. See cons::E_I note.
     const Vec e_i    = 3.0/2.0 * p_i + 0.5 * rho_i % V % V + rho_i % phi_g;
     const Vec e_n    = 3.0/2.0 * p_n + 0.5 * rho_n % U % U + rho_n % phi_g;
+    const Vec e_e    = 3.0/2.0 * p_e;
 
     cons_state += scalar_to(grid, rho_i,  cons::RHO_I);
     cons_state += scalar_to(grid, rho_n,  cons::RHO_N);
@@ -138,6 +146,7 @@ Vec prim2cons(const Grid& grid, const Vec& prim_state) {
     cons_state += scalar_to(grid, rhoU_n, cons::MOM_N);
     cons_state += scalar_to(grid, e_i,    cons::E_I);
     cons_state += scalar_to(grid, e_n,    cons::E_N);
+    cons_state += scalar_to(grid, e_e,    cons::E_E);
     return cons_state;
 }
 

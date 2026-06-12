@@ -102,6 +102,7 @@ void apply_open_bcs(Grid& grid, const Vec& xn) {
                         + 0.5f * rho_i * V_g * V_g + rho_i * phi_g_g;
         ob(cons::E_N)   = 1.5f * k_b * n_n * T_n
                         + 0.5f * rho_n * U_g * U_g + rho_n * phi_g_g;
+        ob(cons::E_E)   = 1.5f * k_b * n_i * T_i;   // electron internal energy (T_e = T_i)
     };
 
     // --- Inner reflecting wall (mirror cells 0 and 1) ----------------------

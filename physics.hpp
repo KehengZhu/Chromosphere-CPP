@@ -34,10 +34,17 @@ inline Vec trac_broadening_factor(const Grid& grid, const Vec& T) {
     return eps;
 }
 
-/// Electron heat conductivity in SI units (writeup eq 53).
+/// Electron heat conductivity in SI units (writeup eq 53). The Spitzer e–i
+/// numerator (9.2048e-12) is unchanged; the n_n T_e² term in the denominator
+/// carries the electron–neutral collision frequency ν_en = σ_en n_n √(8k_BT_e/πm_e),
+/// and its coefficient scales with σ_en. We use the accurate quantum-mechanical
+/// (Krstic & Schultz) e–H cross section σ_en ≈ 2.5e-19 m² at chromospheric
+/// energies, tabulated by Vranjes & Krstic (2013, A&A 554 A22, Fig. 4 / Eq. 3),
+/// ≈8× the earlier ad-hoc value (3.5609e-12 → 2.836e-11). e–n matters only
+/// where n_n ≳ 10²–10³ n_e (dense lower chromosphere); κ_n dominates there.
 inline Vec kappa_e(const Vec& n_e, const Vec& n_n, const Vec& T_e) {
     return (9.2048e-12f * n_e % arma::pow(T_e, 2.5)
-            / (n_e + 3.5609e-12f * n_n % T_e % T_e));
+            / (n_e + 2.836e-11f * n_n % T_e % T_e));
 }
 
 /// Neutral heat conductivity in SI units (writeup eq 59).
@@ -54,6 +61,61 @@ inline Vec nu_in(const Grid& grid, const Vec& n_n, const Vec& T_i, const Vec& T_
     return (2.0f * bohr_r) * (2.0f * bohr_r) * n_n
          % arma::sqrt(arma::abs(8.0f * static_cast<float>(arma::datum::pi)
                                 * grid.k_b * (T_i + T_n) / grid.m_i));
+}
+
+/// Coulomb logarithm lnΛ_ei for electron–ion collisions (NRL Plasma Formulary).
+/// Two regimes about T_e = 10 Z² eV (≈ 1.16×10⁵ K for hydrogen), in cgs/eV:
+///   T_e < 10 eV:  lnΛ = 23 − ln(n_e^{1/2} T_e^{-3/2})
+///   T_e > 10 eV:  lnΛ = 24 − ln(n_e^{1/2} / T_e)
+/// (n_e in cm⁻³, T_e in eV, Z = 1). Clamped to [5,30] so the rate below stays
+/// well-behaved over the full chromosphere→flare range.
+inline Vec coulomb_log_ei(const Vec& n_e, const Vec& T_e) {
+    constexpr float k_b_eV = 8.617333262e-5f;          // eV/K
+    const Vec ne_cm3 = arma::clamp(n_e, 1.0f, arma::datum::inf) * 1.0e-6f;
+    const Vec T_eV   = k_b_eV * arma::clamp(T_e, 1.0f, arma::datum::inf);
+    const Vec sqrt_ne = arma::sqrt(ne_cm3);
+    Vec lnL(n_e.n_elem);
+    for (arma::uword i = 0; i < n_e.n_elem; ++i) {
+        const float t = T_eV(i);
+        lnL(i) = (t < 10.0f)
+               ? 23.0f - std::log(sqrt_ne(i) * std::pow(t, -1.5f))
+               : 24.0f - std::log(sqrt_ne(i) / t);
+    }
+    return arma::clamp(lnL, 5.0f, 30.0f);
+}
+
+/// Electron–ion temperature equilibration frequency ν_ei [s⁻¹] such that
+/// dT_e/dt = ν_ei (T_i − T_e). Spitzer (1962) / NRL Plasma Formulary energy
+/// relaxation in the m_e ≪ m_i, T_i m_e/m_i ≪ T_e limit:
+///   ν_ei = (8√(2π)/3) · m_e^{1/2} e⁴ /(m_p (4πε₀)²) · n_e lnΛ /(k_B T_e)^{3/2}
+///        ≈ 2.030×10⁻⁴³ · n_e lnΛ /(k_B T_e)^{3/2}   (SI; the bracket evaluated
+/// for hydrogen Z=1). This is the load-bearing decoupling parameter
+/// (docs/electron_temperature_plan.md): ν_ei ∝ n_e T_e^{-3/2} is fast (T_e≈T_i)
+/// in the dense cool chromosphere (~4×10³ s⁻¹) and slow (decoupling) at the hot
+/// tenuous loop-top / flare onset (~4×10⁻² s⁻¹ at n_e=10¹⁵, T_e=10⁶ K), matching
+/// Bradshaw (2006) and Manchester (2012).
+inline Vec nu_ei(const Grid& grid, const Vec& n_e, const Vec& T_e) {
+    constexpr float C_ei = 2.030e-43f;
+    const Vec kT = grid.k_b * arma::clamp(T_e, 1.0f, arma::datum::inf);
+    return C_ei * n_e % coulomb_log_ei(n_e, T_e) / arma::pow(kT, 1.5f);
+}
+
+/// Electron–neutral temperature equilibration frequency ν_en [s⁻¹] such that
+/// dT_e/dt = ν_en (T_n − T_e). Elastic light-on-heavy energy transfer carries a
+/// fraction 2 m_e/m_n of the energy per collision, so ν_en = (2 m_e/m_n) ν_en^coll
+/// where ν_en^coll is the electron–neutral COLLISION frequency. We use the same
+/// ν_en^coll = 1.55×10⁻¹⁵ n_n √T_e [SI] adopted for the electron heat conductivity
+/// κ_e (kappa_e above), built from the accurate quantum-mechanical (Krstic &
+/// Schultz) e–H cross section σ_en ≈ 2.5×10⁻¹⁹ m² at chromospheric energies,
+/// tabulated by Vranjes & Krstic (2013, A&A 554 A22, Fig. 4 / Eq. 3). So the
+/// three-temperature equilibration and the conduction closure use one consistent,
+/// physically-accurate e–n cross-section. Sub-dominant to ν_ei wherever the gas is
+/// appreciably ionized, but it equilibrates T_e to T_n deep in the weakly-ionized
+/// chromosphere where n_n ≫ n_e.
+inline Vec nu_en(const Grid& grid, const Vec& n_n, const Vec& T_e) {
+    const Vec nu_en_coll = 1.55e-15f * n_n
+                         % arma::sqrt(arma::clamp(T_e, 1.0f, arma::datum::inf));
+    return (2.0f * grid.m_e / grid.m_n) * nu_en_coll;
 }
 
 /// Hydrogen electron-impact ionization rate coefficient S_i(T_e) [m^3/s].

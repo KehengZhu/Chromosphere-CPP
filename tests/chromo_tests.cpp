@@ -107,6 +107,10 @@ static Vec setup_uniform(Grid& grid, arma::uword n_cells,
         prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::U))     = 0.0f;
         prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::P_I))   = ni_val * 2.0f * grid.k_b * Ti_val; // writeup eq 38
         prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::P_N))   = nn_val * grid.k_b * Tn_val;
+        // Electron partial pressure p_e = n_e k_B T_e with T_e = T_i (= ½ P_I), so
+        // the state is self-consistent for the 7-variable (T_e ≠ T_i) model. With
+        // ENABLE_TE off this matches the value advance_Euler_state slaves each step.
+        prim(arma::sub2ind(arma::size(n_cells, num_of_eq), i, prim::P_E))   = ni_val * grid.k_b * Ti_val;
     }
     Vec cons = prim2cons(grid, prim);
 
@@ -239,7 +243,9 @@ static void test_kappa_e_eq53() {
     Vec ke = kappa_e(ne_v, nn_v, Te_v);
 
     const double num = 9.2048e-12 * (double)ne_val * std::pow((double)Te, 2.5);
-    const double den = (double)ne_val + 3.5609e-12 * (double)nn_val * (double)Te * (double)Te;
+    // e–n term coefficient uses the accurate Krstic & Schultz e–H cross section
+    // (Vranjes & Krstic 2013): σ_en ≈ 2.5e-19 m² → 2.836e-11 (was 3.5609e-12).
+    const double den = (double)ne_val + 2.836e-11 * (double)nn_val * (double)Te * (double)Te;
     EXPECT_REL(ke(0), num / den, 1e-3);
 
     EXPECT_TRUE(ke(0) > 0.02f && ke(0) < 0.05f);
@@ -868,6 +874,7 @@ static void test_stage_e_conserves_rho_tot_per_cell() {
                 prim(arma::sub2ind(sz, cell, prim::U))     = 0.0f;
                 prim(arma::sub2ind(sz, cell, prim::P_I))   = n_i * 2.0f * grid.k_b * T;
                 prim(arma::sub2ind(sz, cell, prim::P_N))   = n_n *        grid.k_b * T;
+                prim(arma::sub2ind(sz, cell, prim::P_E))   = n_i *        grid.k_b * T;  // p_e = ½ P_I
                 cell_label[cell] = {T, f_old};
                 ++cell;
             }

@@ -211,6 +211,8 @@ Vec model_c7_ic(Grid& grid) {
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::MOM_N)) = 0.0f;
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::E_I))   = 1.5f * grid.k_b * n_e * 2.0f * T + n_e * grid.m_i * phi_g;
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::E_N))   = 1.5f * grid.k_b * n_n * T       + n_n * grid.m_n * phi_g;
+        // Electron internal energy ε_e = (3/2) p_e with T_e = T at IC (no KE/φ).
+        xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::E_E))   = 1.5f * grid.k_b * n_e * T;
     }
 
     // Outer ghost cells: the fixed lower-TR reservoir. Both ghosts hold the
@@ -233,6 +235,7 @@ Vec model_c7_ic(Grid& grid) {
             ob(cons::MOM_N) = 0.0f;
             ob(cons::E_I)   = 1.5f * grid.k_b * kOuterNeTr * 2.0f * kOuterTtr + kOuterNeTr * grid.m_i * phi_g_outer;
             ob(cons::E_N)   = 1.5f * grid.k_b * kOuterNnTr *        kOuterTtr + kOuterNnTr * grid.m_n * phi_g_outer;
+            ob(cons::E_E)   = 1.5f * grid.k_b * kOuterNeTr *        kOuterTtr;
         }
     }
 
@@ -254,6 +257,7 @@ Vec model_c7_ic(Grid& grid) {
         grid.inner_boundary0_i(cons::MOM_N) = 0.0f;
         grid.inner_boundary0_i(cons::E_I)   = 1.5f * grid.k_b * n_e * 2.0f * T + n_e * grid.m_i * phi_g_inner;
         grid.inner_boundary0_i(cons::E_N)   = 1.5f * grid.k_b * n_n * T       + n_n * grid.m_n * phi_g_inner;
+        grid.inner_boundary0_i(cons::E_E)   = 1.5f * grid.k_b * n_e * T;
         grid.inner_boundary1_i = grid.inner_boundary0_i;
 
         kInnerRhoIPinned = n_e * grid.m_i;
@@ -443,6 +447,7 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
                               + 0.5f * rho_i * V_g * V_g + rho_i * phi_g_out;
             ob(cons::E_N)   = 1.5f * k_b * n_n *        T_n_in
                               + 0.5f * rho_n * U_g * U_g + rho_n * phi_g_out;
+            ob(cons::E_E)   = 1.5f * k_b * n_i *        T_i_in;   // T_e = T_charged ghost
         };
         cap_ghost(grid.outer_boundary0_i);
         cap_ghost(grid.outer_boundary1_i);
@@ -469,6 +474,7 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
         ob0(cons::MOM_N) = 0.0f;                  // U = 0 reservoir
         ob0(cons::E_I)   = 1.5f * kInnerPiGhost + rho_i_g * phi_g_inner;
         ob0(cons::E_N)   = 1.5f * kInnerPnGhost + rho_n_g * phi_g_inner;
+        ob0(cons::E_E)   = 0.5f * 1.5f * kInnerPiGhost;   // p_e = ½ p_total ⇒ T_e = T_i
         grid.inner_boundary1_i = ob0;
     }
 

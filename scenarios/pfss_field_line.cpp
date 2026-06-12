@@ -51,6 +51,8 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
             = 1.5f * grid.k_b * n_e * 2.0f * T + n_e * grid.m_i * phi_g;
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::E_N))
             = 1.5f * grid.k_b * n_n * T       + n_n * grid.m_n * phi_g;
+        xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::E_E))
+            = 1.5f * grid.k_b * n_e * T;       // electron internal energy, T_e = T
     }
 
     // Ghost cells. φ_g convention matches model_c7_ic (and rhs.cpp:154,178):
@@ -67,6 +69,7 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
         ob(cons::MOM_N) = 0.0f;
         ob(cons::E_I)   = 1.5f * grid.k_b * n_e * 2.0f * T_eff + n_e * grid.m_i * phi_g_eff;
         ob(cons::E_N)   = 1.5f * grid.k_b * n_n * T_eff       + n_n * grid.m_n * phi_g_eff;
+        ob(cons::E_E)   = 1.5f * grid.k_b * n_e * T_eff;       // T_e = T_eff at the ghost
     };
 
     const float phi_g_outer = grid.phi_g_iph(grid.ns - 1);

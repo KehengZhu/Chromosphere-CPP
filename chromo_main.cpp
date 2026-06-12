@@ -54,6 +54,12 @@ int main(int argc, char** argv) {
     if (const char* e = std::getenv("SINGLE_FLUID")) {
         try { grid.single_fluid = (std::stof(e) != 0.0f); } catch (...) {}
     }
+    // Separate electron temperature T_e ≠ T_i (docs/electron_temperature_plan.md).
+    // ENABLE_TE=1 switches on the three-temperature model; default (unset/0) is
+    // the single-temperature baseline that reproduces the pre-T_e physics.
+    if (const char* e = std::getenv("ENABLE_TE")) {
+        try { grid.enable_Te = (std::stof(e) != 0.0f); } catch (...) {}
+    }
     Vec xn = sc.ic(grid);
 
     const float c_s_target = 2.0e4f; // m/s, ion sound speed scale (writeup §4)

@@ -30,13 +30,18 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state) {
         const Vec rho_n = get_scalar(grid, prim, prim::RHO_N);
         const Vec p_i   = get_scalar(grid, prim, prim::P_I);
         const Vec p_n   = get_scalar(grid, prim, prim::P_N);
+        const Vec p_e   = get_scalar(grid, prim, prim::P_E);
         const Vec n_i   = rho_i / grid.m_i;
         const Vec n_n   = rho_n / grid.m_n;
         const Vec Q     = beam_heating_rate(grid, n_i, n_n);   // W/m^3
         const float Qmax = Q.max();
         if (Qmax > 0.0f) {
             const float BEAM_HEAT_CFL = 0.1f;
-            const Vec eps = 1.5f * (p_i + p_n);               // total thermal energy density
+            // Three-T: the beam deposits into electrons alone, so the heating
+            // timescale that matters is ε_e/Q (a much smaller pool). Single-T:
+            // the deposited heat is shared, so use the total thermal energy.
+            const Vec eps = grid.enable_Te ? Vec(1.5f * p_e)
+                                           : Vec(1.5f * (p_i + p_n));
             // dt ≤ BEAM_HEAT_CFL · min(ε/Q) over cells receiving the beam.
             Vec tau = eps / arma::clamp(Q, 1.0e-30f, arma::datum::inf);
             // Only constrain where the beam actually deposits (Q>0).
@@ -75,8 +80,12 @@ static void broadcast_dt(Grid& grid, const Vec& dt_i) {
 float compute_trac_cutoff_T(const Grid& grid, const Vec& prim_state) {
     const Vec rho_i = get_scalar(grid, prim_state, prim::RHO_I);
     const Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
+    const Vec p_e   = get_scalar(grid, prim_state, prim::P_E);
     const Vec n_i   = rho_i / grid.m_i;
-    const Vec T     = p_i / (2.0f * n_i * grid.k_b);   // T_e = T_i
+    // TRAC broadens the (electron) heat-conduction operator, so it keys off the
+    // temperature that drives it: T_e in the three-T model, T_charged otherwise.
+    const Vec T     = grid.enable_Te ? Vec(p_e / (n_i * grid.k_b))
+                                     : Vec(p_i / (2.0f * n_i * grid.k_b));
 
     const float Tpeak    = arma::max(T);
     const float Tc_upper = std::max(0.2f * Tpeak, grid.trac_T_chrom);
@@ -123,6 +132,7 @@ static void apply_drag_stage(const Grid& grid, Vec& prim_state, float dt) {
     Vec U     = get_scalar(grid, prim_state, prim::U);
     Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
     Vec p_n   = get_scalar(grid, prim_state, prim::P_N);
+    const Vec p_e = get_scalar(grid, prim_state, prim::P_E);   // carried untouched
 
     const Vec n_i   = rho_i / grid.m_i;
     const Vec n_n   = rho_n / grid.m_n;
@@ -151,6 +161,10 @@ static void apply_drag_stage(const Grid& grid, Vec& prim_state, float dt) {
     const Vec p_i_new = p_i + (2.0f / 3.0f) * f_i * dE_drag;
     const Vec p_n_new = p_n + (2.0f / 3.0f) * f_n * dE_drag;
 
+    // Frictional heating goes to the combined charged pool (P_I = total charged
+    // pressure); with the electron pressure P_E carried unchanged through this
+    // stage, the heat lands on the protons (p_proton = P_I − P_E) — ion–neutral
+    // friction does not heat electrons. P_E is preserved verbatim.
     prim_state.zeros();
     prim_state += scalar_to(grid, rho_i,   prim::RHO_I);
     prim_state += scalar_to(grid, rho_n,   prim::RHO_N);
@@ -158,6 +172,7 @@ static void apply_drag_stage(const Grid& grid, Vec& prim_state, float dt) {
     prim_state += scalar_to(grid, U_new,   prim::U);
     prim_state += scalar_to(grid, p_i_new, prim::P_I);
     prim_state += scalar_to(grid, p_n_new, prim::P_N);
+    prim_state += scalar_to(grid, p_e,     prim::P_E);
 }
 
 // ----------------------------------------------------------------------------
@@ -172,38 +187,106 @@ static void apply_temperature_stage(const Grid& grid, Vec& prim_state, float dt)
     Vec U     = get_scalar(grid, prim_state, prim::U);
     Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
     Vec p_n   = get_scalar(grid, prim_state, prim::P_N);
+    Vec p_e   = get_scalar(grid, prim_state, prim::P_E);
 
     const Vec n_i   = rho_i / grid.m_i;
     const Vec n_n   = rho_n / grid.m_n;
-    const Vec T_i   = p_i / (2.0 * n_i * grid.k_b);
-    const Vec T_n   = p_n / (n_n * grid.k_b);
+
+    if (!grid.enable_Te) {
+        // ---- Single-temperature baseline (unchanged 2-way T_charged ↔ T_n) ----
+        const Vec T_i   = p_i / (2.0 * n_i * grid.k_b);   // T_charged
+        const Vec T_n   = p_n / (n_n * grid.k_b);
+
+        const Vec alpha = rho_i % nu_in(grid, n_n, T_i, T_n);
+        const Vec C_i = 3.0 * n_i * grid.k_b;
+        const Vec C_n = 1.5 * n_n * grid.k_b;
+        const Vec C_sum = C_i + C_n;
+
+        const Vec beta = 3.0 * grid.k_b * alpha / (grid.m_i + grid.m_n);
+        const Vec lambda_T = beta % C_sum / (C_i % C_n);
+
+        const Vec T_cm  = (C_i % T_i + C_n % T_n) / C_sum;
+        // Single-fluid limit: lock both temperatures to the common T_cm (dt·λ_T→∞).
+        const Vec dT    = grid.single_fluid
+                              ? Vec(arma::zeros<Vec>(T_i.n_elem))
+                              : Vec((T_i - T_n) / (1.0 + dt * lambda_T));
+        const Vec T_i_new = T_cm + (C_n / C_sum) % dT;
+        const Vec T_n_new = T_cm - (C_i / C_sum) % dT;
+
+        const Vec p_i_new = 2.0 * n_i * grid.k_b % T_i_new;
+        const Vec p_n_new =       n_n * grid.k_b % T_n_new;
+
+        prim_state.zeros();
+        prim_state += scalar_to(grid, rho_i,   prim::RHO_I);
+        prim_state += scalar_to(grid, rho_n,   prim::RHO_N);
+        prim_state += scalar_to(grid, V,       prim::V);
+        prim_state += scalar_to(grid, U,       prim::U);
+        prim_state += scalar_to(grid, p_i_new, prim::P_I);
+        prim_state += scalar_to(grid, p_n_new, prim::P_N);
+        prim_state += scalar_to(grid, p_e,     prim::P_E);
+        return;
+    }
+
+    // ---- Three-temperature point-implicit relaxation (T_e, T_i, T_n) --------
+    // Generalizes the 2-way solve to a symmetric 3×3 backward-Euler relaxation
+    // with three pairwise conductances g_ab [W m⁻³ K⁻¹] (g_ab = g_ba ⇒ energy
+    // conserved exactly): electron–ion g_ei = C_e ν_ei, electron–neutral
+    // g_en = C_e ν_en, ion–neutral g_in = 3 k_B α/(m_i+m_n) (the same β as the
+    // 2-way solve, now connecting protons↔neutrals only — electrons reach the
+    // neutrals through the separate ν_en channel). Heat capacities split the
+    // old combined charged C = 3 n_i k_B into equal electron and proton halves.
+    const Vec p_proton = p_i - p_e;                       // derived proton pressure
+    const Vec T_e = p_e      / (n_i * grid.k_b);
+    const Vec T_i = p_proton / (n_i * grid.k_b);
+    const Vec T_n = p_n      / (n_n * grid.k_b);
+
+    const Vec C_e = 1.5 * n_i * grid.k_b;
+    const Vec C_i = 1.5 * n_i * grid.k_b;
+    const Vec C_n = 1.5 * n_n * grid.k_b;
 
     const Vec alpha = rho_i % nu_in(grid, n_n, T_i, T_n);
-    const Vec C_i = 3.0 * n_i * grid.k_b;
-    const Vec C_n = 1.5 * n_n * grid.k_b;
-    const Vec C_sum = C_i + C_n;
+    const Vec g_in  = 3.0 * grid.k_b * alpha / (grid.m_i + grid.m_n);
+    const Vec g_ei  = C_e % nu_ei(grid, n_i, T_e);
+    const Vec g_en  = C_e % nu_en(grid, n_n, T_e);
 
-    const Vec beta = 3.0 * grid.k_b * alpha / (grid.m_i + grid.m_n);
-    const Vec lambda_T = beta % C_sum / (C_i % C_n);
+    Vec T_e_new(grid.ns), T_i_new(grid.ns), T_n_new(grid.ns);
+    for (arma::uword k = 0; k < grid.ns; ++k) {
+        // Symmetric 3×3 system M·[T_e,T_i,T_n]ᵀ = [C_e T_e, C_i T_i, C_n T_n]ᵀ.
+        //   M_ee = C_e + dt(g_ei+g_en),  M_ei = -dt g_ei,  M_en = -dt g_en
+        //   M_ii = C_i + dt(g_ei+g_in),  M_in = -dt g_in
+        //   M_nn = C_n + dt(g_en+g_in)
+        const float ge = g_ei(k), gn = g_en(k), gi = g_in(k);
+        const float a11 = C_e(k) + dt*(ge+gn), a12 = -dt*ge, a13 = -dt*gn;
+        const float a22 = C_i(k) + dt*(ge+gi), a23 = -dt*gi;
+        const float a33 = C_n(k) + dt*(gn+gi);
+        const float b1 = C_e(k)*T_e(k), b2 = C_i(k)*T_i(k), b3 = C_n(k)*T_n(k);
+        // Solve via cofactor expansion (symmetric, diagonally dominant ⇒ regular).
+        const float c11 =  a22*a33 - a23*a23;
+        const float c12 = -(a12*a33 - a23*a13);
+        const float c13 =  a12*a23 - a22*a13;
+        const float c22 =  a11*a33 - a13*a13;
+        const float c23 = -(a11*a23 - a12*a13);
+        const float c33 =  a11*a22 - a12*a12;
+        const float det = a11*c11 + a12*c12 + a13*c13;
+        const float inv = (std::fabs(det) > 0.0f) ? 1.0f/det : 0.0f;
+        T_e_new(k) = inv*(c11*b1 + c12*b2 + c13*b3);
+        T_i_new(k) = inv*(c12*b1 + c22*b2 + c23*b3);
+        T_n_new(k) = inv*(c13*b1 + c23*b2 + c33*b3);
+    }
 
-    const Vec T_cm  = (C_i % T_i + C_n % T_n) / C_sum;
-    // Single-fluid limit: lock both temperatures to the common T_cm (dt·λ_T→∞).
-    const Vec dT    = grid.single_fluid
-                          ? Vec(arma::zeros<Vec>(T_i.n_elem))
-                          : Vec((T_i - T_n) / (1.0 + dt * lambda_T));
-    const Vec T_i_new = T_cm + (C_n / C_sum) % dT;
-    const Vec T_n_new = T_cm - (C_i / C_sum) % dT;
-
-    const Vec p_i_new = 2.0 * n_i * grid.k_b % T_i_new;
-    const Vec p_n_new =       n_n * grid.k_b % T_n_new;
+    const Vec p_e_new      = n_i * grid.k_b % T_e_new;
+    const Vec p_proton_new = n_i * grid.k_b % T_i_new;
+    const Vec p_n_new      = n_n * grid.k_b % T_n_new;
+    const Vec p_i_new      = p_proton_new + p_e_new;      // total charged pressure
 
     prim_state.zeros();
-    prim_state += scalar_to(grid, rho_i,   prim::RHO_I);
-    prim_state += scalar_to(grid, rho_n,   prim::RHO_N);
-    prim_state += scalar_to(grid, V,       prim::V);
-    prim_state += scalar_to(grid, U,       prim::U);
-    prim_state += scalar_to(grid, p_i_new, prim::P_I);
-    prim_state += scalar_to(grid, p_n_new, prim::P_N);
+    prim_state += scalar_to(grid, rho_i,    prim::RHO_I);
+    prim_state += scalar_to(grid, rho_n,    prim::RHO_N);
+    prim_state += scalar_to(grid, V,        prim::V);
+    prim_state += scalar_to(grid, U,        prim::U);
+    prim_state += scalar_to(grid, p_i_new,  prim::P_I);
+    prim_state += scalar_to(grid, p_n_new,  prim::P_N);
+    prim_state += scalar_to(grid, p_e_new,  prim::P_E);
 }
 
 // ----------------------------------------------------------------------------
@@ -283,6 +366,26 @@ static Vec ghost_extended_T(const Grid& grid,
     return T;
 }
 
+// Electron-temperature variant of ghost_extended_T for the three-temperature
+// conduction path. The electron internal energy E_E carries NO kinetic or
+// gravitational part, so T_e = (2/3 E_E)/(n_i k_B) = p_e/(n_i k_B) directly —
+// no KE/φ subtraction. Ghost values come from the shifted cubes' E_E and ρ_i.
+static Vec ghost_extended_Te(const Grid& grid, const Vec& cons_state,
+                             Vec& T_ghost_inner_out, Vec& T_ghost_outer_out) {
+    auto Te_of = [&](const Vec& cs) {
+        const Vec rho_i = get_scalar(grid, cs, cons::RHO_I);
+        const Vec e_e   = get_scalar(grid, cs, cons::E_E);
+        const Vec n_i   = rho_i / grid.m_i;
+        return Vec((2.0f / 3.0f) * e_e / (n_i * grid.k_b));
+    };
+    const Vec T     = Te_of(cons_state);
+    const Vec T_ip1 = Te_of(ip1(grid, cons_state));
+    const Vec T_im1 = Te_of(im1(grid, cons_state));
+    T_ghost_outer_out = T_ip1.tail(1);
+    T_ghost_inner_out = T_im1.head(1);
+    return T;
+}
+
 static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) {
     // Conduction operates on temperatures; rebuild cons once to reuse the
     // existing ip1/im1 ghost machinery, then convert back.
@@ -294,11 +397,22 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     const Vec n_i = rho_i / grid.m_i;
     const Vec n_n = rho_n / grid.m_n;
 
+    // The "charged row" conducts either the combined charged temperature
+    // T_charged = p_total/(2 n_i k_B) with heat capacity 3 n_i k_B (single-T
+    // baseline) or the electron temperature T_e = p_e/(n_i k_B) with heat
+    // capacity 1.5 n_i k_B (three-temperature model). Spitzer κ_e ∝ T^{5/2} is
+    // evaluated at whichever temperature drives the row; the neutral row is
+    // identical in both. The proton conduction κ_i ≈ κ_e/43 is dropped (plan §3).
+    const bool  Te_on = grid.enable_Te;
+    const float cfac  = Te_on ? 1.5f : 3.0f;   // C_charged = cfac · n_i k_B
+    const Vec   p_i_orig = get_scalar(grid, prim_state, prim::P_I);
+    const Vec   p_e_orig = get_scalar(grid, prim_state, prim::P_E);
+
     Vec T_ghost_in_i, T_ghost_out_i, T_ghost_in_n, T_ghost_out_n;
-    Vec T_i = ghost_extended_T(grid, cons_state,
-                               cons::RHO_I, cons::MOM_I, cons::E_I,
-                               2.0f * grid.k_b, grid.m_i,
-                               T_ghost_in_i, T_ghost_out_i);
+    Vec T_i = Te_on
+        ? ghost_extended_Te(grid, cons_state, T_ghost_in_i, T_ghost_out_i)
+        : ghost_extended_T(grid, cons_state, cons::RHO_I, cons::MOM_I, cons::E_I,
+                           2.0f * grid.k_b, grid.m_i, T_ghost_in_i, T_ghost_out_i);
     Vec T_n = ghost_extended_T(grid, cons_state,
                                cons::RHO_N, cons::MOM_N, cons::E_N,
                                grid.k_b, grid.m_n,
@@ -326,18 +440,18 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     // cells from the unshifted cube; use the shifted cubes here for the K_e
     // and K_n inputs.
     Vec T_ghost_unused_a, T_ghost_unused_b;
-    Vec T_i_ip1_full = ghost_extended_T(grid, cons_ip1,
-                                        cons::RHO_I, cons::MOM_I, cons::E_I,
-                                        2.0f * grid.k_b, grid.m_i,
-                                        T_ghost_unused_a, T_ghost_unused_b);
+    Vec T_i_ip1_full = Te_on
+        ? ghost_extended_Te(grid, cons_ip1, T_ghost_unused_a, T_ghost_unused_b)
+        : ghost_extended_T(grid, cons_ip1, cons::RHO_I, cons::MOM_I, cons::E_I,
+                           2.0f * grid.k_b, grid.m_i, T_ghost_unused_a, T_ghost_unused_b);
     Vec T_n_ip1_full = ghost_extended_T(grid, cons_ip1,
                                         cons::RHO_N, cons::MOM_N, cons::E_N,
                                         grid.k_b, grid.m_n,
                                         T_ghost_unused_a, T_ghost_unused_b);
-    Vec T_i_im1_full = ghost_extended_T(grid, cons_im1,
-                                        cons::RHO_I, cons::MOM_I, cons::E_I,
-                                        2.0f * grid.k_b, grid.m_i,
-                                        T_ghost_unused_a, T_ghost_unused_b);
+    Vec T_i_im1_full = Te_on
+        ? ghost_extended_Te(grid, cons_im1, T_ghost_unused_a, T_ghost_unused_b)
+        : ghost_extended_T(grid, cons_im1, cons::RHO_I, cons::MOM_I, cons::E_I,
+                           2.0f * grid.k_b, grid.m_i, T_ghost_unused_a, T_ghost_unused_b);
     Vec T_n_im1_full = ghost_extended_T(grid, cons_im1,
                                         cons::RHO_N, cons::MOM_N, cons::E_N,
                                         grid.k_b, grid.m_n,
@@ -359,8 +473,10 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     // existing backward-Euler tridiagonal into an unconditionally-stable solve
     // for the combined Spitzer + isotropic-diffusion operator at no extra cost.
     const float chi = grid.numerical_diffusivity;
-    const Vec Knum_iph_i = (1.5f * grid.k_b * chi) * (n_i + n_i_ip1);
-    const Vec Knum_imh_i = (1.5f * grid.k_b * chi) * (n_i + n_i_im1);
+    // K_num = χ · C_face. Charged-row capacity is cfac·n_i k_B (cfac = 3 single-T,
+    // 1.5 three-T), so the face value is 0.5·cfac·k_B·(n_i + n_i_shift).
+    const Vec Knum_iph_i = (0.5f * cfac * grid.k_b * chi) * (n_i + n_i_ip1);
+    const Vec Knum_imh_i = (0.5f * cfac * grid.k_b * chi) * (n_i + n_i_im1);
     const Vec Knum_iph_n = (0.75f * grid.k_b * chi) * (n_n + n_n_ip1);
     const Vec Knum_imh_n = (0.75f * grid.k_b * chi) * (n_n + n_n_im1);
 
@@ -379,7 +495,7 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     // ----- ion (charged) row ----- K_ion_total = κ_e (κ_i is zero in this code)
     const Vec K_face_iph_i = 0.5 * (Kb + Kb_ip1) + Knum_iph_i;
     const Vec K_face_imh_i = 0.5 * (Kb + Kb_im1) + Knum_imh_i;
-    const Vec C_i = 3.0 * n_i * grid.k_b;
+    const Vec C_i = cfac * n_i * grid.k_b;
     const Vec g_iph_i = grid.B_i / grid.ds_i % (K_face_iph_i / grid.B_iph) / ds_iph;
     const Vec g_imh_i = grid.B_i / grid.ds_i % (K_face_imh_i / grid.B_imh) / ds_imh;
     Vec R_coef_i = dt * g_iph_i / C_i;
@@ -453,8 +569,19 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     }
 
     // Rebuild pressures and store back into prim_state.
-    const Vec p_i_new = 2.0 * n_i * grid.k_b % T_i_new2;
-    const Vec p_n_new =       n_n * grid.k_b % T_n_new;
+    const Vec p_n_new = n_n * grid.k_b % T_n_new;
+    Vec p_i_new, p_e_new;
+    if (!Te_on) {
+        // Single-T baseline: T_i_new2 is the combined charged temperature.
+        p_i_new = 2.0 * n_i * grid.k_b % T_i_new2;        // total charged pressure
+        p_e_new = p_e_orig;                               // carried (re-slaved later)
+    } else {
+        // Three-T: T_i_new2 is the electron temperature. Only electrons conducted,
+        // so the total charged pressure shifts by exactly the electron pressure
+        // change (protons unchanged); E_I stays the energy-conserving total.
+        p_e_new = n_i * grid.k_b % T_i_new2;
+        p_i_new = p_i_orig + (p_e_new - p_e_orig);
+    }
     const Vec V = get_scalar(grid, prim_state, prim::V);
     const Vec U = get_scalar(grid, prim_state, prim::U);
 
@@ -465,6 +592,7 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     prim_state += scalar_to(grid, U,       prim::U);
     prim_state += scalar_to(grid, p_i_new, prim::P_I);
     prim_state += scalar_to(grid, p_n_new, prim::P_N);
+    prim_state += scalar_to(grid, p_e_new, prim::P_E);
 }
 
 // ----------------------------------------------------------------------------
@@ -481,10 +609,16 @@ void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt) 
     const Vec rho_i = get_scalar(grid, prim_state, prim::RHO_I);
     const Vec rho_n = get_scalar(grid, prim_state, prim::RHO_N);
     const Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
+    const Vec p_e   = get_scalar(grid, prim_state, prim::P_E);
 
     const Vec n_i = rho_i / grid.m_i;
     const Vec n_n = rho_n / grid.m_n;
-    const Vec T_e = p_i / (2.0f * n_i * grid.k_b);   // T_e = T_i under quasi-neutrality
+    // Radiation is an electron-pool loss (Λ ∝ n_e and the bound-level excitation
+    // is electron-collisional). Single-T baseline: cool the combined charged pool
+    // at T_charged = p_total/(2 n_i k_B). Three-T: cool the electron pool at the
+    // true T_e = p_e/(n_i k_B), and mirror the loss into the total energy P_I.
+    const Vec T_e = grid.enable_Te ? Vec(p_e / (n_i * grid.k_b))
+                                   : Vec(p_i / (2.0f * n_i * grid.k_b));
 
     // Total radiative sink: optically-thick chromospheric (CL2012, H/Ca/Mg) plus
     // optically-thin TR/coronal losses n_e n_H Λ(T). The two are stitched by a
@@ -499,12 +633,19 @@ void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt) 
     if (grid.enable_trac) Q_thin /= trac_broadening_factor(grid, T_e);
     const Vec Q   = radiative_loss_thick(grid, n_i, n_n, T_e)    // W/m^3, +ve = cooling
                   + Q_thin;
-    const Vec eps = 1.5f * p_i;                                  // thermal energy density
+    // Pool that radiates: combined charged (single-T) or electron-only (three-T).
+    const Vec p_pool = grid.enable_Te ? p_e : p_i;
+    const Vec eps = 1.5f * p_pool;                              // thermal energy density
     // Backward-Euler relaxation: ε^{n+1} = ε^n / (1 + Δt Q/ε^n) with Q frozen.
     const Vec denom = 1.0f + dt * Q / arma::clamp(eps, 1.0e-30f, arma::datum::inf);
-    const Vec p_i_new = p_i / arma::clamp(denom, 1.0e-6f, arma::datum::inf);
-
-    prim_state += scalar_to(grid, p_i_new - p_i, prim::P_I);
+    const Vec p_pool_new = p_pool / arma::clamp(denom, 1.0e-6f, arma::datum::inf);
+    const Vec dp = p_pool_new - p_pool;
+    if (grid.enable_Te) {
+        prim_state += scalar_to(grid, dp, prim::P_E);   // electrons radiate
+        prim_state += scalar_to(grid, dp, prim::P_I);   // mirror into total energy
+    } else {
+        prim_state += scalar_to(grid, dp, prim::P_I);
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -585,12 +726,28 @@ void apply_flare_floor_stage(const Grid& grid, Vec& prim_state) {
         }
     }
 
+    // Electron pressure (three-T only): keep T_e in (0, T_MAX] and p_e < p_i so the
+    // derived proton pressure p_proton = p_i − p_e stays positive. Single-T leaves
+    // P_E untouched (re-slaved at end of step).
+    Vec p_e = get_scalar(grid, prim_state, prim::P_E);
+    if (grid.enable_Te) {
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            const float n_i_i = rho_i(i) / m_i;
+            const float p_e_cap = n_i_i * (k_b * T_MAX);     // T_e ≤ T_MAX
+            if (p_e(i) < P_FLOOR)            p_e(i) = P_FLOOR;
+            if (p_e(i) > p_e_cap)            p_e(i) = p_e_cap;
+            if (p_e(i) > p_i(i) - P_FLOOR)   p_e(i) = p_i(i) - P_FLOOR;
+            if (p_e(i) < P_FLOOR)            p_e(i) = P_FLOOR;
+        }
+    }
+
     prim_state += scalar_to(grid, rho_i - get_scalar(grid, prim_state, prim::RHO_I), prim::RHO_I);
     prim_state += scalar_to(grid, rho_n - get_scalar(grid, prim_state, prim::RHO_N), prim::RHO_N);
     prim_state += scalar_to(grid, V     - get_scalar(grid, prim_state, prim::V),     prim::V);
     prim_state += scalar_to(grid, U     - get_scalar(grid, prim_state, prim::U),     prim::U);
     prim_state += scalar_to(grid, p_i   - get_scalar(grid, prim_state, prim::P_I),   prim::P_I);
     prim_state += scalar_to(grid, p_n   - get_scalar(grid, prim_state, prim::P_N),   prim::P_N);
+    prim_state += scalar_to(grid, p_e   - get_scalar(grid, prim_state, prim::P_E),   prim::P_E);
 }
 
 // ----------------------------------------------------------------------------
@@ -623,10 +780,27 @@ void apply_beam_heating_stage(const Grid& grid, Vec& prim_state, float dt) {
     Vec Q_beam = beam_heating_rate(grid, n_i, n_n);   // W/m^3, +ve = heating
     if (grid.enable_trac) {
         const Vec p_i = get_scalar(grid, prim_state, prim::P_I);
-        const Vec T_e = p_i / (2.0f * n_i * k_b);
+        const Vec p_e = get_scalar(grid, prim_state, prim::P_E);
+        const Vec T_e = grid.enable_Te ? Vec(p_e / (n_i * k_b))
+                                       : Vec(p_i / (2.0f * n_i * k_b));
         Q_beam /= trac_broadening_factor(grid, T_e);
     }
-    // Shared temperature rise: ΔT = Δt Q / (C_i + C_n), C_i = 3 n_i k, C_n = 1.5 n_n k.
+    if (grid.enable_Te) {
+        // Three-temperature: the thick-target beam deposits its energy into the
+        // ambient ELECTRONS (Q_beam → ε_e). The subsequent ν_ei equilibration
+        // (Stage C, next step) shares it with protons/neutrals; until then T_e can
+        // run well above T_i at the impulsive onset — the decoupling the plan
+        // targets. The total energy P_I gains the same Δε so E_I stays the
+        // conserved total. (cal_dt_i caps Δt on the electron pool so the spike is
+        // bounded.) ΔT_e = Δt Q /(1.5 n_i k_B); Δp_e = (2/3)·1.5 n_i k_B ΔT_e = Δt Q.
+        const Vec dp_e = (2.0f / 3.0f) * dt * Q_beam;     // = (2/3) Δε_e
+        prim_state += scalar_to(grid, dp_e, prim::P_E);
+        prim_state += scalar_to(grid, dp_e, prim::P_I);
+        return;
+    }
+    // Single-temperature baseline: share Q_beam between the charged and neutral
+    // pools by heat capacity so both gain the SAME ΔT (essential in the weakly
+    // ionized chromosphere; see header note). ΔT = Δt Q / (C_i + C_n).
     const Vec C_i  = 3.0f * n_i * k_b;
     const Vec C_n  = 1.5f * n_n * k_b;
     const Vec dT   = (dt * Q_beam) / (C_i + C_n);
@@ -697,11 +871,12 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     const Vec U     = get_scalar(grid, prim_state, prim::U);
     const Vec p_i   = get_scalar(grid, prim_state, prim::P_I);
     const Vec p_n   = get_scalar(grid, prim_state, prim::P_N);
+    const Vec p_e_old = get_scalar(grid, prim_state, prim::P_E);
 
     const float m = grid.m_i;  // m_i = m_n for hydrogen
     const Vec n_i = rho_i / m;
     const Vec n_n = rho_n / m;
-    const Vec T_i = p_i / (2.0 * n_i * grid.k_b);   // T_e = T_i under quasi-neutrality
+    const Vec T_i = p_i / (2.0 * n_i * grid.k_b);   // rate temperature (T_charged proxy)
     const Vec T_n = p_n / (n_n * grid.k_b);
 
     // Rate coefficients at lagged T_e (Route B network).
@@ -841,6 +1016,21 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
         if (p_n_new(i) < p_floor) p_n_new(i) = p_floor;
     }
 
+    // Electron pressure. Single-T baseline: carry it (re-slaved each step). Three-T:
+    // the χ_H ionization cost is an ELECTRON-pool term (collisional ionization drains
+    // χ_H from the free electrons; three-body recombination returns it) — already in
+    // the total-energy dE_i above, so attributing it to P_E leaves the protons
+    // (p_proton = P_I − P_E) carrying only the thermal/KE exchange with the neutrals.
+    Vec p_e_new = p_e_old;
+    if (grid.enable_Te) {
+        const Vec chi_eps = -(Gamma_coll + Gamma_mlvl - Gamma_rec_3b) * grid.chi_H_J;
+        p_e_new = p_e_old + (2.0f / 3.0f) * chi_eps;
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            if (p_e_new(i) < p_floor)                 p_e_new(i) = p_floor;
+            if (p_e_new(i) > p_i_new(i) - p_floor)    p_e_new(i) = p_i_new(i) - p_floor;
+        }
+    }
+
     prim_state.zeros();
     prim_state += scalar_to(grid, rho_i_new, prim::RHO_I);
     prim_state += scalar_to(grid, rho_n_new, prim::RHO_N);
@@ -848,6 +1038,7 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     prim_state += scalar_to(grid, U_new,     prim::U);
     prim_state += scalar_to(grid, p_i_new,   prim::P_I);
     prim_state += scalar_to(grid, p_n_new,   prim::P_N);
+    prim_state += scalar_to(grid, p_e_new,   prim::P_E);
 }
 
 // ----------------------------------------------------------------------------
@@ -890,6 +1081,17 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     // column well-conditioned (ρ_n→0). No-op for steady scenarios.
     if (grid.enable_beam_heating) {
         apply_flare_floor_stage(grid, prim);
+    }
+
+    // Single-temperature limit: slave the electron pool to half the charged
+    // thermal energy (p_e = ½ p_total ⇒ T_e ≡ T_i = T_charged). E_E is the 7th
+    // variable that is always carried but, with ENABLE_TE=0, never feeds back —
+    // this overwrite makes the reported T_e equal T_i to round-off and recovers
+    // the pre-T_e single-temperature baseline exactly.
+    if (!grid.enable_Te) {
+        const Vec p_i = get_scalar(grid, prim, prim::P_I);
+        const Vec p_e = get_scalar(grid, prim, prim::P_E);
+        prim += scalar_to(grid, 0.5f * p_i - p_e, prim::P_E);
     }
 
     return prim2cons(grid, prim);

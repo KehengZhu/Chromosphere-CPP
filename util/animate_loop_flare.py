@@ -128,12 +128,26 @@ def read_frames(path):
 
 
 def primitives(xn, phi_g):
+    """Return ni, nn, v, Ti, Te.
+
+    p_i (col 4) is the TOTAL charged pressure (protons + electrons). For a
+    7-variable (T_e ≠ T_i) run, col 6 is the electron internal energy ε_e, so
+    p_e = 2/3 ε_e and the proton pressure is p_i − p_e; then T_e = p_e/(n_i k_B)
+    and T_i = (p_i − p_e)/(n_i k_B). For a 6-variable run (single temperature)
+    T_e ≡ T_i = p_i/(2 n_i k_B)."""
     ni = xn[:, 0] / m_i
     nn = xn[:, 1] / m_n
     v = xn[:, 2] / xn[:, 0]
     p_i = 2/3*xn[:, 4] - 1/3*xn[:, 0]*v*v - 2/3*xn[:, 0]*phi_g
-    Ti = p_i / (2.0 * ni * k_b)
-    return ni, nn, v, Ti
+    if xn.shape[1] >= 7:
+        p_e = 2.0/3.0 * xn[:, 6]
+        p_p = np.maximum(p_i - p_e, 1e-30)
+        Te = p_e / (ni * k_b)
+        Ti = p_p / (ni * k_b)
+    else:
+        Ti = p_i / (2.0 * ni * k_b)
+        Te = Ti
+    return ni, nn, v, Ti, Te
 
 
 def thick_target_Q(ni, nn, ds, phi_g):
@@ -233,7 +247,7 @@ def region_layout(Ti0, x, topology, Stot):
     return seps, labels, None
 
 
-def _render_frame(k, tmpdir, xMm, t, Ti, V, ni, nn, ds_arr, phi_arr,
+def _render_frame(k, tmpdir, xMm, t, Ti, Te, V, ni, nn, ds_arr, phi_arr,
                   kd, kp, xticks, seps, labels, apex_x, xlabel, vlabel, title_prefix):
     import matplotlib
     matplotlib.use("Agg")
@@ -251,8 +265,17 @@ def _render_frame(k, tmpdir, xMm, t, Ti, V, ni, nn, ds_arr, phi_arr,
     fig.suptitle(f"{title_prefix}   t = {t:6.2f} s    [{phase}]", fontsize=13, color=pcol)
     a_T, a_V, a_n, a_f = ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1]
 
-    a_T.semilogy(xMm, np.clip(Ti, T_MIN, T_MAX), color="crimson", lw=1.4)
-    a_T.set_ylabel(r"$T_i$ [K]"); a_T.set_ylim(T_MIN, T_MAX)
+    # Electron (dodgerblue dashed) vs proton/ion (crimson solid) temperature.
+    # They overlie each other where ν_ei is fast (dense chromosphere, relaxed
+    # corona) and split where the beam dumps into the electrons (onset) or the
+    # gas is too tenuous to equilibrate (loop-top) — the three-temperature physics.
+    have_Te = not np.allclose(Te, Ti, rtol=1e-4)
+    a_T.semilogy(xMm, np.clip(Te, T_MIN, T_MAX), color="dodgerblue", lw=1.5,
+                 ls="--", label=r"$T_e$" if have_Te else r"$T_e=T_i$")
+    a_T.semilogy(xMm, np.clip(Ti, T_MIN, T_MAX), color="crimson", lw=1.4,
+                 label=r"$T_i$")
+    a_T.set_ylabel(r"$T$ [K]"); a_T.set_ylim(T_MIN, T_MAX)
+    a_T.legend(loc="upper right", fontsize=8, ncol=2, framealpha=0.7)
 
     a_V.plot(xMm, V / 1e3, color="C0", lw=1.4); a_V.axhline(0, color="k", lw=0.6)
     a_V.set_ylabel(vlabel); a_V.set_ylim(V_MIN, V_MAX)
@@ -347,7 +370,7 @@ def main():
           f"t<= {frames[-1][0]:.1f} s")
 
     kd, kp, xticks = build_transform(xmax, topology)
-    _ni0, _nn0, _v0, Ti0 = primitives(frames[0][1], phi_g)
+    _ni0, _nn0, _v0, Ti0, _Te0 = primitives(frames[0][1], phi_g)
     seps, labels, apex_x = region_layout(Ti0, xMm, topology, xmax)
     sep_str = ", ".join(f"{s:.2f}" for s in seps)
     print(f"  region separators [Mm]: {sep_str}" + (f"; apex @ {apex_x:.1f}" if apex_x else ""))
@@ -368,8 +391,8 @@ def main():
 
     args = []
     for k, (t, xn) in enumerate(playback):
-        ni, nn, v, Ti = primitives(xn, phi_g)
-        args.append((k, xMm, t, Ti, v, ni, nn, ds, phi_g, kd, kp, xticks,
+        ni, nn, v, Ti, Te = primitives(xn, phi_g)
+        args.append((k, xMm, t, Ti, Te, v, ni, nn, ds, phi_g, kd, kp, xticks,
                      seps, labels, apex_x, xlabel, vlabel, title_prefix))
     save_frames_parallel(_render_frame, args, out, fps=30)
 

@@ -65,9 +65,9 @@ def _render_frame(k, tmpdir, xx, pf_k, t_f, pe_k, t_e, nF, ylims):
 def main():
     full_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "build", "output_full.txt")
     expl_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "..", "build", "output_explicit.txt")
-    out_path  = sys.argv[3] if len(sys.argv) > 3 else os.path.join(HERE, "visualization", "model_c7_compare.mp4")
+    out_path  = sys.argv[3] if len(sys.argv) > 3 else os.path.join(HERE, "..", "visualization", "model_c7_compare.mp4")
     fps       = int(sys.argv[4]) if len(sys.argv) > 4 else 15
-    os.makedirs(os.path.join(HERE, "visualization"), exist_ok=True)
+    os.makedirs(os.path.join(HERE, "..", "visualization"), exist_ok=True)
 
     xx_f, frames_f = read_frames(full_path)
     xx_e, frames_e = read_frames(expl_path)

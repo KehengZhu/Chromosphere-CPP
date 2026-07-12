@@ -13,7 +13,9 @@
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{siunitx}
-\graphicspath{{writeup-overleaf/}{../util/visualization/}}
+% Movies are linked (not embedded): a first-frame poster with a run: launch action
+% (hyperref, auto-loaded by beamer) opens the .mp4 in the system default video player.
+\graphicspath{{writeup-overleaf/}{../visualization/}}
 
 % compact reference macro
 \newcommand{\cit}[1]{{\scriptsize\color{gray}[#1]}}
@@ -241,7 +243,7 @@
   \begin{columns}[T]
   \begin{column}{0.52\textwidth}
     \centering
-    \includegraphics[width=\linewidth]{heat-conductivities-c7-narrow-range.jpg}
+    \includegraphics[width=\linewidth]{heat-conductivities-c7-narrow-range.png}
   \end{column}
   \begin{column}{0.48\textwidth}\footnotesize
     Boundary must lie in the \alert{electron-conduction regime} (RTV $q(T)$ valid).
@@ -316,6 +318,86 @@
 \end{frame}
 
 % =====================================================================
+\section{Extended Boundary: PFSS Field Lines in the Corona}
+% =====================================================================
+\begin{frame}{The truncated column: why we outgrow this boundary}
+  Old upper BC at the lower TR ($h\approx2153$\,km): three corona-derived closures
+  \cit{Rosner et al.\ 1978; Bradshaw \& Emslie 2020}
+  \[
+    \rho(T)\propto\frac1T,\qquad
+    V=M\,c_s(T)\ (M\!\le\!0.05),\qquad
+    q=\frac{2}{7}\frac{\kappa_0 T_\mathrm{cor}^{7/2}}{L}\approx90\,\mathrm{W\,m^{-2}}
+  \]
+  \begin{itemize}\setlength\itemsep{4pt}
+    \item $q=\text{const}$ — prescribed, not a dynamic corona; stable only for $q\in[{\sim}30,90]\,\mathrm{W\,m^{-2}}$
+    \item open top $\rho V>0$: the evaporation cycle $\oint$ never closes (no filling / draining)
+    \item $B=\text{const}\Rightarrow A=\text{const}$ (no geometry);\ \ $\rho_n/\rho\to0$ (stiff TR $\to$ slaving + TRAC)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Extend the domain along observed PFSS field lines}
+  Full loop $s\in[0,L]$, boundaries at the \alert{photosphere}; geometry from a PFSS
+  extrapolation of AR\,13768. \cit{Schrijver \& De Rosa 2003}
+  \[
+    B(s)\,A(s)=\text{const}\ \Rightarrow\ A(s)\propto\frac{1}{|B(s)|},\qquad
+    \text{closed: }\partial_s X|_\mathrm{apex}=0,\quad \text{open: outflow top}
+  \]
+  Self-consistent thick-target beam injected at the apex \cit{Brown 1971; Emslie 1978}:
+  \[
+    \phi(s)\propto n_\mathrm{tot}(s)\Big(1+\frac{N(s)}{N_c}\Big)^{-\delta/2},\quad
+    N(s)=\!\int_\mathrm{apex}^{s}\!\! n_\mathrm{tot}\,ds',\quad
+    N_c=\frac{E_c^{2}}{2K}
+  \]
+  $\Rightarrow$ corona resolved; beam heats \emph{both} feet (two-ribbon), loop fills self-consistently.
+\end{frame}
+
+\begin{frame}{Three temperatures: $T_e \neq T_i \neq T_n$}
+  Add the electron internal energy $\varepsilon_e=\tfrac32 p_e$ (advected at $V$):
+  \begin{align*}
+    \partial_t\varepsilon_e+\partial_s(\varepsilon_e V)+p_e\,\partial_s V
+      &=\partial_s(\kappa_e\,\partial_s T_e)+Q_\mathrm{beam}-n_e n_H\Lambda(T_e)\\
+      &\quad-\chi_H\dot{n}_\mathrm{ion}+\nu_{ei}C_e(T_i-T_e)+\nu_{en}C_e(T_n-T_e)
+  \end{align*}
+  \[
+    \kappa_e\propto T_e^{5/2},\qquad
+    \nu_{ei}\propto\frac{n_e\ln\Lambda}{T_e^{3/2}},\qquad
+    \nu_{ei}\!\to\!\infty\ (\texttt{ENABLE\_TE=0})\Rightarrow T_e=T_i
+  \]
+  \begin{itemize}\setlength\itemsep{2pt}
+    \item beam $\to$ electrons; slow $\nu_{ei}$ at the tenuous loop-top $\Rightarrow T_e\sim3\text{--}8\,T_i$ (onset)
+    \item dense chromosphere: $\nu_{ei}$ large $\Rightarrow T_e\to T_i$ as the loop fills
+  \end{itemize}
+  \cit{Spitzer 1962; Bradshaw 2006; Manchester 2012; Sokolov 2021}
+\end{frame}
+
+% =====================================================================
+\section{Evolution Movies}
+% =====================================================================
+\begin{frame}{Closed loop — AR\,13768, 101\,Mm (3-temperature)}
+  \centering
+  \href{run:event_20240801_c05_101Mm_Te.mp4}{%
+    \includegraphics[width=8.4cm]{poster_c05_closed.jpg}}
+  \begin{itemize}\scriptsize\setlength\itemsep{1pt}
+    \item apex-injected beam $\to$ \alert{symmetric} footpoint heating; explosive upflow fills the loop
+    \item $T_e$ runs above $T_i$ at onset; condensation downflow at the feet
+    \item plotted vs.\ arc length $[\,$foot~A $\mid$ apex $\mid$ foot~B$\,]$, split axis
+  \end{itemize}
+  \cit{click the figure to open the movie in your default video player}
+\end{frame}
+
+\begin{frame}{Open field line — AR\,13768, 80\,Mm (3-temperature)}
+  \centering
+  \href{run:event_20240801_o00_1040Mm_Te.mp4}{%
+    \includegraphics[width=8.4cm]{poster_o00_open.jpg}}
+  \begin{itemize}\scriptsize\setlength\itemsep{1pt}
+    \item single footpoint, \alert{open} coronal top; evaporated flow streams up the open line
+    \item $T_e\!\gg\!T_i$ persists longer — low density keeps $\nu_{ei}$ slow
+    \item plotted vs.\ height (sub-Mm chromosphere zoomed, corona compressed)
+  \end{itemize}
+  \cit{click the figure to open the movie in your default video player}
+\end{frame}
+
+% =====================================================================
 \begin{frame}[allowframebreaks]{Key references}
   \scriptsize
   \begin{itemize}
@@ -333,6 +415,17 @@
     \item Leenaarts et al.\ 2007, \emph{A\&A} 473, 625 — NEQ hydrogen ionization.
     \item Klimchuk et al.\ 2008 — optically-thin coronal loss function.
     \item Drawin 1968, \emph{Z.\ Phys.} 211, 404; Cretu et al.\ 2022, \emph{Phys.\ Rev.\ A} — neutral/molecular channels.
+    \item Rosner, Tucker \& Vaiana 1978, \emph{ApJ} 220, 643 — static-loop scaling; TR-base boundary.
+    \item Johnston et al.\ 2019, \emph{ApJL} 873, L22; 2020, \emph{A\&A} 635, A168 — TRAC adaptive TR conduction.
+    \item Bradshaw \& Emslie 2020, \emph{ApJ} 904, 141 — dynamic-loop scaling; outflow $V(T)$ boundary.
+    \item Pandey et al.\ 2024, \emph{A\&A} — discrete-HSE base + numerical diffusion.
+    \item Brown 1971, \emph{Sol.\ Phys.} 18, 489; Emslie 1978, \emph{ApJ} 224, 241 — thick-target electron beam.
+    \item Schrijver \& De Rosa 2003, \emph{Sol.\ Phys.} 212, 165; Arge et al.\ 2010 — PFSS extrapolation; ADAPT--GONG maps.
+    \item Bradshaw, Cargill et al.\ 2006, \emph{A\&A} 458, 987 — separate $e$/ion temperatures + evaporation.
+    \item Manchester et al.\ 2012, \emph{ApJ} 756, 81 — two-temperature ($e$/$p$) model; low-density decoupling.
+    \item Russell et al.\ 2025, \emph{ApJL} — flare ion temperatures ($T_i\gg T_e$ at onset).
+    \item Sokolov et al.\ 2021, \emph{ApJ} 908, 172 — two-temperature MHD (AWSoM) formulation.
+    \item Spitzer 1962; Braginskii 1965; NRL Formulary — transport coefficients ($\nu_{ei},\kappa_e$).
   \end{itemize}
 \end{frame}
 

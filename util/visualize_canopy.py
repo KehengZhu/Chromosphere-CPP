@@ -318,8 +318,8 @@ def render_movie(args, xx_sim, frames_sim, fps=15):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim-output", default="out_canopy.txt")
-    ap.add_argument("--out-png", default="util/visualization/canopy_geometry_evolution.png")
-    ap.add_argument("--out-mp4", default="util/visualization/canopy_evolution.mp4")
+    ap.add_argument("--out-png", default="visualization/canopy_geometry_evolution.png")
+    ap.add_argument("--out-mp4", default="visualization/canopy_evolution.mp4")
     ap.add_argument("--top-height-km", type=float, default=986.0,
                     help="vertical extent of the flux-tube render (Mm)")
     ap.add_argument("--fps", type=int, default=15)

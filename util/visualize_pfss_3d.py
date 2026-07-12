@@ -390,7 +390,7 @@ def main():
     ap.add_argument("--b-max", type=float, default=75.0)
     ap.add_argument("--fp-lat-window", type=float, nargs=2, default=[-15.0, 15.0])
     ap.add_argument("--fp-lon-window", type=float, nargs=2, default=[0.0, 360.0])
-    ap.add_argument("--out-dir", default=os.path.join(HERE, "visualization"))
+    ap.add_argument("--out-dir", default=os.path.join(HERE, "..", "visualization"))
     ap.add_argument("--frames", type=int, default=72, help="rotation movie frame count")
     ap.add_argument("--fps", type=int, default=24)
     ap.add_argument("--no-movie", action="store_true")

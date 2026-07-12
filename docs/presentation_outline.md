@@ -26,3 +26,13 @@ BC, IC, deposited electron energy
 ## evolution
 show evolution and explain results
 explain neutral profile oscillation
+
+## Extended BC: PFSS field lines in Corona
+previous BC doesn't work well: list disadvantages
+explain setups of extending field lines to corona
+3 temperatures
+
+## evolution movies
+show event_20240801 closed and open movies.
+find a way to insert mp4 into pdf so video can play on Adobe acrobat
+

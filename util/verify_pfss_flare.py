@@ -80,7 +80,7 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     ctrl = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "outputs", "pfss_lineA_control.txt")
     expl = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "..", "outputs", "pfss_lineA_flare.txt")
-    out = sys.argv[3] if len(sys.argv) > 3 else os.path.join(here, "visualization", "pfss_lineA_flare_verify.png")
+    out = sys.argv[3] if len(sys.argv) > 3 else os.path.join(here, "..", "visualization", "pfss_lineA_flare_verify.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     h, f_c = read_frames(ctrl)

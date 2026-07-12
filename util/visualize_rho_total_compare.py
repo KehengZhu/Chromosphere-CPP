@@ -177,7 +177,7 @@ def main():
     ap.add_argument("--fps", type=int, default=24)
     args = ap.parse_args()
 
-    viz_dir = os.path.join(HERE, "visualization")
+    viz_dir = os.path.join(HERE, "..", "visualization")
     os.makedirs(viz_dir, exist_ok=True)
     out_png = args.out_png or os.path.join(viz_dir, "pfss_10x_rho_total_compare.png")
     out_mp4 = args.out_mp4 or os.path.join(viz_dir, "pfss_10x_rho_total_compare.mp4")

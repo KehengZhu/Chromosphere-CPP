@@ -70,7 +70,7 @@ def main():
     dat = sys.argv[1] if len(sys.argv) > 1 else "scenarios/data/loop_closed_test.dat"
     ctrl = sys.argv[2] if len(sys.argv) > 2 else "outputs/loop_closed_quiet.txt"
     expl = sys.argv[3] if len(sys.argv) > 3 else "outputs/loop_closed_flare.txt"
-    out = "util/visualization/loop_flare_verify.png"
+    out = "visualization/loop_flare_verify.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     ds, phi_g, h = parse_dat(dat)

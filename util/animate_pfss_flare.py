@@ -123,7 +123,7 @@ def _render_frame(k, tmpdir, H, t, Ti, V, ni, nn, tmax):
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     in_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "outputs", "pfss_lineA_flare.txt")
-    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "visualization", "pfss_lineA_flare_evolution.mp4")
+    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "..", "visualization", "pfss_lineA_flare_evolution.mp4")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     H, frames = read_frames(in_path)

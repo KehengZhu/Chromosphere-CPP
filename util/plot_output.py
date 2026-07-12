@@ -41,6 +41,8 @@ def read_frames(path):
         t   = float(toks[3])
         stp = int(toks[6])
         i += 1
+        if i + ns > len(raw):
+            break  # truncated final frame (e.g. run crashed mid-write); discard it
         data = np.zeros((ns, neq))
         for j in range(ns):
             data[j, :] = np.fromstring(raw[i + j], sep=" ")
@@ -64,15 +66,15 @@ def primitives(xn):
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     in_path  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "build", "output.txt")
-    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "visualization", "model_c7_snapshot.png")
-    os.makedirs(os.path.join(here, "visualization"), exist_ok=True)
+    out_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "..", "visualization", "chromo_snapshot.png")
+    os.makedirs(os.path.join(here, "..", "visualization"), exist_ok=True)
 
     xx, frames = read_frames(in_path)
     t_final, step_final, xn = frames[-1]
     ni, nn, v, u, p_i, p_n, Ti, Tn = primitives(xn)
 
     fig, axes = plt.subplots(2, 4, figsize=(15, 7))
-    fig.suptitle(f"Chromosphere — Model C7 final state (t = {t_final:.1f} s, step {step_final})")
+    fig.suptitle(f"Chromosphere column — final state (t = {t_final:.1f} s, step {step_final})")
 
     panels = [
         (axes[0, 0], nn,  r"$n_n$ (m$^{-3}$)", "log"),

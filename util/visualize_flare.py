@@ -2,7 +2,7 @@
 """Visualize explosive chromospheric evaporation (model_flare scenario).
 
 Reads chromo_main output for the explosive and gentle-control beam runs and
-produces, into util/visualization/:
+produces, into visualization/:
 
   1. flare_height_time.png  — height–time diagrams of T_i and v for the
      explosive run (the classic evaporation plot): the conductive/heating front,
@@ -22,7 +22,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT  = os.path.join(HERE, "visualization")
+OUT  = os.path.join(HERE, "..", "visualization")
 os.makedirs(OUT, exist_ok=True)
 
 m_i = 1.6726219e-27

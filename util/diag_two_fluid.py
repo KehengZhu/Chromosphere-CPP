@@ -153,7 +153,7 @@ def main():
         ax[1].set_title("temperature split |T_i-T_n|/T_i")
         fig.colorbar(im1, ax=ax[1])
         fig.tight_layout()
-        png = f"util/visualization/two_fluid_diag_{tag}.png"
+        png = f"visualization/two_fluid_diag_{tag}.png"
         fig.savefig(png, dpi=120)
         print(f"  wrote {png}")
     except Exception as e:

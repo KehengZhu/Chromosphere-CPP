@@ -18,13 +18,16 @@
 #include "../physics.hpp"
 #include "../scenarios/analytic_canopy.hpp"
 #include "../scenarios/data_file_parser.hpp"
+#include "../scenarios/mesh.hpp"
 #include "../scenarios/model_c7.hpp"
+#include "../scenarios/model_column.hpp"
 #include "../scenarios/pfss_field_line.hpp"
 #include "../scenarios/scenario.hpp"
 
 #include <armadillo>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -180,6 +183,34 @@ static void test_flux_lim_is_minmod() {
     EXPECT_NEAR(out(3), 1.0f, 1e-6);
     EXPECT_NEAR(out(4), 1.0f, 1e-6);
     EXPECT_NEAR(out(5), 0.0f, 1e-6);
+}
+
+static void test_flux_lim_mc3() {
+    // MC3 / Koren limiter (BATSRUS 'mc3'), asymmetric third-order (β=2):
+    //   φ₊(r) = max(0, min(2r, 2, (2r+1)/3))    ['+'/right-face terms]
+    //   φ₋(r) = max(0, min(2r, 2, (r+2)/3))     ['−'/left-face  terms]
+    Vec r(7);
+    r(0) = -1.0f; r(1) = 0.0f; r(2) = 0.5f; r(3) = 1.0f;
+    r(4) = 2.0f;  r(5) = 10.0f;
+    r(6) = std::numeric_limits<float>::quiet_NaN();
+
+    Vec p = flux_lim_mc3_plus(r, 2.0f);
+    EXPECT_NEAR(p(0), 0.0f,        1e-6);   // r<0 (sign disagreement) ⇒ 0
+    EXPECT_NEAR(p(1), 0.0f,        1e-6);
+    EXPECT_NEAR(p(2), 2.0f/3.0f,   1e-6);   // (2·0.5+1)/3
+    EXPECT_NEAR(p(3), 1.0f,        1e-6);   // full slope at r=1
+    EXPECT_NEAR(p(4), 5.0f/3.0f,   1e-6);   // (2·2+1)/3
+    EXPECT_NEAR(p(5), 2.0f,        1e-6);   // β cap
+    EXPECT_NEAR(p(6), 0.0f,        1e-6);   // NaN ⇒ 0
+
+    Vec m = flux_lim_mc3_minus(r, 2.0f);
+    EXPECT_NEAR(m(0), 0.0f,        1e-6);
+    EXPECT_NEAR(m(1), 0.0f,        1e-6);
+    EXPECT_NEAR(m(2), 5.0f/6.0f,   1e-6);   // (0.5+2)/3
+    EXPECT_NEAR(m(3), 1.0f,        1e-6);   // matches φ₊ at r=1 (symmetric there)
+    EXPECT_NEAR(m(4), 4.0f/3.0f,   1e-6);   // (2+2)/3
+    EXPECT_NEAR(m(5), 2.0f,        1e-6);   // β cap
+    EXPECT_NEAR(m(6), 0.0f,        1e-6);
 }
 
 static void test_cons_prim_roundtrip() {
@@ -1376,6 +1407,70 @@ static void test_model_c7_bc_discrete_hse_inner_mach_capped_outer() {
     EXPECT_REL(grid.outer_boundary0_i(cons::RHO_I), rho_i_L, 1e-5);
 }
 
+// "New explanation" model_c7 upper BC, HYBRID form (tr_jump_bc=true,
+// docs/gentle_evaporation_downflow.md): turns on well_balanced and imposes at the
+// top face a hydrostatic ghost pressure + EOS ghost density with a CONTINUOUS
+// ghost temperature (T_ghost0 = a·T_top, a=b=1 defaults — no jump). The coronal
+// heat keeps entering via the imposed Neumann flux q(T) (NOT a Dirichlet T-jump,
+// which over-conducts on the coarse grid), so impose_outer_heat_flux is left
+// tracking enable_radiative_cooling rather than forced off.
+static void test_model_c7_tr_jump_bc() {
+    Grid grid;
+    grid.init(100, 0.25f);
+    Vec xn = model_c7_ic(grid, /*extended=*/false, /*tr_jump_bc=*/true);
+    const auto sz = arma::size(grid.ns, num_of_eq);
+
+    // IC turns on the hybrid BC + well_balanced; the imposed flux is untouched
+    // (it tracks cooling — off here in the default-constructed grid).
+    EXPECT_TRUE(grid.c7_tr_jump_bc);
+    EXPECT_TRUE(grid.well_balanced);
+    EXPECT_TRUE(grid.impose_outer_heat_flux == grid.enable_radiative_cooling);
+
+    const arma::uword nl = grid.ns - 1;
+    const float ds        = grid.ds_i(nl);
+    const float phi_g_out = grid.phi_g_iph(nl);
+
+    // Decode an interior cell's ion pressure / density / temperature (cons2prim).
+    auto cell_piT = [&](arma::uword i, float& p_i, float& rho_i, float& T_i) {
+        rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
+        const float V     = xn(arma::sub2ind(sz, i, cons::MOM_I)) / rho_i;
+        const float E_i   = xn(arma::sub2ind(sz, i, cons::E_I));
+        const float phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
+        p_i = 2.0f/3.0f * E_i - 1.0f/3.0f * rho_i * V * V - 2.0f/3.0f * rho_i * phi_g;
+        T_i = p_i / (2.0f * (rho_i / grid.m_i) * grid.k_b);
+    };
+    float p_i_top, rho_i_top, T_top, p_i_2, rho_i_2, T_2;
+    cell_piT(nl, p_i_top, rho_i_top, T_top);
+    cell_piT(nl - 1, p_i_2, rho_i_2, T_2);
+
+    model_c7_update_bc(grid, xn);
+
+    // Decode the ghost ion pressure / temperature (V=0 expected at relaxation IC).
+    auto ghost_pi_T = [&](const Vec& ob, float& p_i, float& T_i) {
+        const float rho_i = ob(cons::RHO_I);
+        const float V     = ob(cons::MOM_I) / rho_i;
+        p_i = 2.0f/3.0f * (ob(cons::E_I) - 0.5f * rho_i * V * V - rho_i * phi_g_out);
+        T_i = p_i / (2.0f * (rho_i / grid.m_i) * grid.k_b);   // p_i = 2 n_i k T
+    };
+    float p_i_g0, T_i_g0, p_i_g1, T_i_g1;
+    ghost_pi_T(grid.outer_boundary0_i, p_i_g0, T_i_g0);
+    ghost_pi_T(grid.outer_boundary1_i, p_i_g1, T_i_g1);
+
+    // (2) CONTINUOUS ghost temperature (a=b=1 ⇒ both ghosts at the top-cell T).
+    EXPECT_REL(T_i_g0, T_top, 1e-3);
+    EXPECT_REL(T_i_g1, T_top, 1e-3);
+
+    // (1) hydrostatic ghost pressure: (p_2 − p_ghost0)/(2Δs) = ρ_top g.
+    EXPECT_REL(p_i_g0, p_i_2 - 2.0f * ds * rho_i_top * grid.g, 1e-3);
+
+    // (3) EOS density at the imposed (p, T): n_i = p_i / (2 k T).
+    const float n_i_g0 = grid.outer_boundary0_i(cons::RHO_I) / grid.m_i;
+    EXPECT_REL(n_i_g0, p_i_g0 / (2.0f * grid.k_b * T_i_g0), 1e-3);
+
+    // Electron energy packs T_e = T_i (ε_e = ¾ p_i).
+    EXPECT_REL(grid.outer_boundary0_i(cons::E_E), 0.75f * p_i_g0, 1e-3);
+}
+
 // TRAC broadening factor ε(T): 1 outside [T_b, T_c), (T_c/T)^{5/2} inside, and
 // the conservation property κ'=κε is constant (=κ(T_c)) so κ'Λ' = κΛ.
 static void test_trac_broadening_conserves_kappa_lambda() {
@@ -1536,6 +1631,416 @@ static void test_beam_heating_partitions_by_heat_capacity() {
     }
 }
 
+// Ambient coronal heating: footpoint-anchored exponential H(s) = E0·exp(−d/s_H),
+// one-sided from the inner footpoint (open / half loop) or two-sided (full loop),
+// plus the optional Phase-3 time ramp. Verifies the spatial shape, the full-loop
+// symmetry, the ramp, and the disabled = identically-zero baseline.
+static void test_coronal_heating_rate_profile() {
+    Grid grid;
+    grid.init(10, 0.25f);
+    grid.ds_i.fill(1.0e4f);                 // 10 km cells; arc centers 5,15,..,95 km
+    grid.B_i.ones(); grid.B_imh.ones(); grid.B_iph.ones();
+    grid.dinvB_ds_i.zeros(); grid.phi_g_imh.zeros(); grid.phi_g_iph.zeros();
+    grid.broadcast();
+
+    // Disabled → identically zero (clean baseline for steady scenarios / tests).
+    EXPECT_TRUE(arma::max(coronal_heating_rate(grid)) == 0.0f);
+
+    grid.enable_coronal_heating = true;
+    grid.coronal_heat_E0 = 1.0e-3f;         // W/m^3
+    grid.coronal_heat_sH = 2.0e4f;          // 20 km scale length
+    grid.coronal_heat_s0 = 0.0f;
+
+    // One-sided: max at the inner footpoint, monotonically decaying upward.
+    Vec H = coronal_heating_rate(grid);
+    EXPECT_REL(H(0), 1.0e-3f * std::exp(-5.0e3f / 2.0e4f), 1e-4);
+    for (arma::uword i = 1; i < 10; ++i) EXPECT_TRUE(H(i) < H(i - 1));
+
+    // Two-sided (full loop): symmetric about the apex, minimum at the center.
+    grid.coronal_heat_two_sided = true;
+    Vec H2 = coronal_heating_rate(grid);
+    EXPECT_REL(H2(0), H2(9), 1e-4);         // both footpoints equal
+    EXPECT_REL(H2(4), H2(5), 1e-4);         // cells straddling the apex (the minimum)
+    EXPECT_TRUE(H2(4) < H2(0) && H2(5) < H2(9));
+
+    // Phase-3 ramp: amp = 1 before t_on, → enhance after t_on + ramp.
+    grid.coronal_heat_two_sided = false;
+    grid.coronal_heat_enhance = 3.0f;
+    grid.coronal_heat_t_on    = 2.0f;
+    grid.coronal_heat_ramp    = 1.0f;
+    grid.sim_time = 0.0f;
+    EXPECT_REL(coronal_heating_rate(grid)(0), H(0), 1e-4);          // pre-ramp = steady
+    grid.sim_time = 5.0f;
+    EXPECT_REL(coronal_heating_rate(grid)(0), 3.0f * H(0), 1e-4);   // fully ramped ×3
+}
+
+// Ambient coronal heating stage shares the deposited energy by heat capacity in
+// the single-T baseline so both fluids gain the SAME ΔT = Δt H / (C_i + C_n),
+// mirroring the beam-heating partition (apply_coronal_heating_stage).
+static void test_coronal_heating_partitions_by_heat_capacity() {
+    Grid grid;
+    grid.init(4, 0.25f);
+    grid.ds_i.fill(1.0e4f);
+    grid.B_i.ones(); grid.B_imh.ones(); grid.B_iph.ones();
+    grid.dinvB_ds_i.zeros(); grid.phi_g_imh.zeros(); grid.phi_g_iph.zeros();
+    grid.broadcast();
+    grid.enable_coronal_heating = true;
+    grid.enable_trac     = false;
+    grid.coronal_heat_E0 = 1.0e-3f;
+    grid.coronal_heat_sH = 1.0e9f;          // ≫ grid ⇒ ~uniform heating
+
+    const float ni = 1.0e16f, nn = 5.0e16f, T0 = 6.0e3f;
+    Vec prim(grid.n_state, arma::fill::zeros);
+    const auto sz = arma::size(4, num_of_eq);
+    for (arma::uword i = 0; i < 4; ++i) {
+        prim(arma::sub2ind(sz, i, prim::RHO_I)) = ni * grid.m_i;
+        prim(arma::sub2ind(sz, i, prim::RHO_N)) = nn * grid.m_n;
+        prim(arma::sub2ind(sz, i, prim::P_I))   = 2.0f * ni * grid.k_b * T0;
+        prim(arma::sub2ind(sz, i, prim::P_N))   =        nn * grid.k_b * T0;
+    }
+
+    const float dt = 1.0f;
+    Vec Q = coronal_heating_rate(grid);
+    apply_coronal_heating_stage(grid, prim, dt);
+
+    for (arma::uword i = 0; i < 4; ++i) {
+        const float pi = prim(arma::sub2ind(sz, i, prim::P_I));
+        const float pn = prim(arma::sub2ind(sz, i, prim::P_N));
+        const float Ti = pi / (2.0f * ni * grid.k_b);
+        const float Tn = pn /        (nn * grid.k_b);
+        const float dTi = Ti - T0, dTn = Tn - T0;
+        EXPECT_REL(dTi, dTn, 1e-3);                             // equal ΔT both fluids
+        const float C = (3.0f * ni + 1.5f * nn) * grid.k_b;     // total heat capacity
+        EXPECT_REL(dTi, dt * Q(i) / C, 1e-3);                   // = Δt H / (C_i+C_n)
+    }
+}
+
+// =========================================================================
+// Static local-refinement mesh builder
+// =========================================================================
+
+static void test_mesh_disabled_is_uniform() {
+    // factor 1 ⇒ refinement off ⇒ exact k·coarse_ds grid.
+    RefineParams rp;  // defaults: factor 1
+    const double L = 1000.0e3;  // 1000 km
+    const arma::uword nc = 250;
+    const std::vector<double> f = build_static_mesh_faces(L, nc, rp);
+    EXPECT_TRUE(f.size() == nc + 1);
+    const double ds = L / static_cast<double>(nc);
+    for (arma::uword k = 0; k <= nc; ++k)
+        EXPECT_NEAR(f[k], ds * static_cast<double>(k), 1.0e-3);
+    EXPECT_NEAR(f.back(), L, 1.0e-6);
+}
+
+static void test_mesh_refined_diagnostic_profile() {
+    // Documented diagnostic profile: 4×, 0–700 km, 100 km transition.
+    RefineParams rp; rp.factor = 4.0; rp.s_lo_km = 0.0; rp.s_hi_km = 700.0; rp.transition_km = 100.0;
+    const double L = 1303.0e3;
+    const arma::uword nc = 2000;
+    const std::vector<double> f = build_static_mesh_faces(L, nc, rp);
+    const double coarse_ds = L / static_cast<double>(nc);
+
+    // Exact domain endpoints.
+    EXPECT_NEAR(f.front(), 0.0, 1.0e-9);
+    EXPECT_NEAR(f.back(),  L,   1.0e-6);
+
+    // Exact 700 km and 800 km faces exist.
+    double d700 = 1.0e30, d800 = 1.0e30;
+    for (double x : f) { d700 = std::min(d700, std::fabs(x - 700.0e3));
+                         d800 = std::min(d800, std::fabs(x - 800.0e3)); }
+    EXPECT_NEAR(d700, 0.0, 1.0e-3);
+    EXPECT_NEAR(d800, 0.0, 1.0e-3);
+
+    // Strictly positive widths; adjacent ratio ≤ 1.1 everywhere.
+    double max_ratio = 1.0;
+    bool all_pos = true;
+    for (arma::uword i = 0; i + 1 < f.size(); ++i) {
+        const double w = f[i + 1] - f[i];
+        if (!(w > 0.0)) all_pos = false;
+        if (i > 0) {
+            const double wp = f[i] - f[i - 1];
+            const double r  = std::max(w / wp, wp / w);
+            max_ratio = std::max(max_ratio, r);
+        }
+    }
+    EXPECT_TRUE(all_pos);
+    EXPECT_TRUE(max_ratio <= 1.1 + 1.0e-6);
+
+    // ×4 fine spacing in the refined region (first cell) and retained outer
+    // coarse spacing (last cell).
+    const double fine_w = f[1] - f[0];
+    const double outer_w = f.back() - f[f.size() - 2];
+    EXPECT_REL(fine_w, coarse_ds / 4.0, 0.02);
+    EXPECT_REL(outer_w, coarse_ds, 0.02);
+}
+
+static void test_refine_params_env_aliases() {
+    // ISO_REFINE_* override GRID_REFINE_*; both parsed. Restore env after.
+    setenv("GRID_REFINE_FACTOR", "2", 1);
+    setenv("GRID_REFINE_S_HI_KM", "500", 1);
+    RefineParams g = refine_params_from_env(/*iso_alias=*/false);
+    EXPECT_NEAR(g.factor, 2.0, 1e-9);
+    EXPECT_NEAR(g.s_hi_km, 500.0, 1e-9);
+    setenv("ISO_REFINE_FACTOR", "4", 1);
+    RefineParams a = refine_params_from_env(/*iso_alias=*/true);
+    EXPECT_NEAR(a.factor, 4.0, 1e-9);       // ISO_ override
+    EXPECT_NEAR(a.s_hi_km, 500.0, 1e-9);    // falls through to GRID_
+    unsetenv("GRID_REFINE_FACTOR"); unsetenv("GRID_REFINE_S_HI_KM"); unsetenv("ISO_REFINE_FACTOR");
+}
+
+// =========================================================================
+// Irregular-grid metric caches + manufactured operator tests
+// =========================================================================
+
+// Build an ns-cell state on a non-uniform cell-width array. B = 1; gravity via a
+// constant g populating φ_g from arc length. Interior ρ,T uniform; ghosts pinned
+// to the matching end cell so a constant state is a discrete fixed point.
+static Vec setup_irregular(Grid& grid, const std::vector<float>& ds,
+                           float ni_val, float nn_val, float Ti_val, float Tn_val) {
+    grid.init(static_cast<arma::uword>(ds.size()), 0.25f);
+    grid.B_imh.fill(1.0f); grid.B_iph.fill(1.0f); grid.B_i.fill(1.0f);
+    grid.dinvB_ds_i.zeros();
+    float s = 0.0f;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        grid.ds_i(i) = ds[i];
+        grid.phi_g_imh(i) = 0.0f;
+        grid.phi_g_iph(i) = 0.0f;
+        s += ds[i];
+    }
+    grid.broadcast();
+
+    Vec prim(grid.n_state, arma::fill::zeros);
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        prim(arma::sub2ind(sz, i, prim::RHO_I)) = ni_val * grid.m_i;
+        prim(arma::sub2ind(sz, i, prim::RHO_N)) = nn_val * grid.m_n;
+        prim(arma::sub2ind(sz, i, prim::P_I))   = ni_val * 2.0f * grid.k_b * Ti_val;
+        prim(arma::sub2ind(sz, i, prim::P_N))   = nn_val * grid.k_b * Tn_val;
+        prim(arma::sub2ind(sz, i, prim::P_E))   = ni_val * grid.k_b * Ti_val;
+    }
+    Vec cons = prim2cons(grid, prim);
+    for (arma::uword k = 0; k < num_of_eq; ++k) {
+        grid.inner_boundary0_i(k) = cons(arma::sub2ind(sz, 0, k));
+        grid.inner_boundary1_i(k) = cons(arma::sub2ind(sz, 0, k));
+        grid.outer_boundary0_i(k) = cons(arma::sub2ind(sz, grid.ns - 1, k));
+        grid.outer_boundary1_i(k) = cons(arma::sub2ind(sz, grid.ns - 1, k));
+    }
+    return cons;
+}
+
+// A graded, strictly non-uniform width list (fine base → coarse top).
+static std::vector<float> graded_widths() {
+    std::vector<float> ds;
+    float w = 100.0f;
+    for (int i = 0; i < 20; ++i) { ds.push_back(w); w *= 1.08f; }
+    return ds;
+}
+
+static void test_metric_caches_center_to_center() {
+    Grid grid;
+    const std::vector<float> ds = graded_widths();
+    setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    EXPECT_TRUE(!grid.uniform_mesh);
+    // ds_iph_i / ds_imh_i = mean of adjacent widths, mirrored at the ends.
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const float dsp1 = (i + 1 < grid.ns) ? ds[i + 1] : ds[i];
+        const float dsm1 = (i > 0) ? ds[i - 1] : ds[i];
+        EXPECT_REL(grid.ds_iph_i(i), 0.5f * (ds[i] + dsp1), 1e-5);
+        EXPECT_REL(grid.ds_imh_i(i), 0.5f * (dsm1 + ds[i]), 1e-5);
+    }
+    // Cell centers accumulate half-widths.
+    float s = 0.0f;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        EXPECT_REL(grid.s_i(i), s + 0.5f * ds[i], 1e-5);
+        s += ds[i];
+    }
+    EXPECT_REL(grid.s_face(grid.ns), s, 1e-5);
+}
+
+static void test_irregular_uniform_state_preserved() {
+    // A constant (V=0, uniform ρ,p, gravity-free) state has zero explicit RHS on
+    // a non-uniform mesh — the metric MUSCL must reproduce constants exactly.
+    Grid grid;
+    Vec cons = setup_irregular(grid, graded_widths(), 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    grid.dt_state.fill(1.0e-6f);   // small predictor step
+    Vec R = rhs_explicit_state(grid, cons);
+    EXPECT_TRUE(!R.has_nan());
+    EXPECT_NEAR(arma::max(arma::abs(R)), 0.0, 1e-3);
+}
+
+static void test_irregular_linear_pressure_gradient() {
+    // Linear charged pressure p_i(s) = p0 + b·s, V=0, gravity-free, constant ρ.
+    // The metric MUSCL reconstructs each face exactly, so the momentum RHS in the
+    // interior equals the analytic −dp/ds = −b. (A uniform-spacing reconstruction
+    // would recover the WRONG gradient on this irregular grid.)
+    Grid grid;
+    const std::vector<float> ds = graded_widths();
+    setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    const float p0 = 1.0f, b = 3.0e-6f;    // Pa, Pa/m
+    const float rho_i = 2.0e17f * grid.m_i, rho_n = 1.0e19f * grid.m_n;
+    Vec prim(grid.n_state, arma::fill::zeros);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const float pI = p0 + b * grid.s_i(i);
+        prim(arma::sub2ind(sz, i, prim::RHO_I)) = rho_i;
+        prim(arma::sub2ind(sz, i, prim::RHO_N)) = rho_n;
+        prim(arma::sub2ind(sz, i, prim::P_I))   = pI;
+        prim(arma::sub2ind(sz, i, prim::P_N))   = 0.5f * pI;
+        prim(arma::sub2ind(sz, i, prim::P_E))   = 0.5f * pI;
+    }
+    Vec cons = prim2cons(grid, prim);
+    // Linearly-continued ghosts so the boundary stencil is consistent too.
+    auto ghost = [&](float s_ghost) {
+        Vec pr(grid.n_state, arma::fill::zeros);
+        const float pI = p0 + b * s_ghost;
+        pr(arma::sub2ind(sz, 0, prim::RHO_I)) = rho_i; pr(arma::sub2ind(sz, 0, prim::RHO_N)) = rho_n;
+        pr(arma::sub2ind(sz, 0, prim::P_I)) = pI; pr(arma::sub2ind(sz, 0, prim::P_N)) = 0.5f * pI;
+        pr(arma::sub2ind(sz, 0, prim::P_E)) = 0.5f * pI;
+        Vec c = prim2cons(grid, pr);
+        Vec g(num_of_eq); for (arma::uword k = 0; k < num_of_eq; ++k) g(k) = c(arma::sub2ind(sz, 0, k));
+        return g;
+    };
+    grid.inner_boundary0_i = ghost(grid.s_i(0) - grid.ds_imh_i(0));
+    grid.inner_boundary1_i = ghost(grid.s_i(0) - 2.0f * grid.ds_imh_i(0));
+    grid.outer_boundary0_i = ghost(grid.s_i(grid.ns - 1) + grid.ds_iph_i(grid.ns - 1));
+    grid.outer_boundary1_i = ghost(grid.s_i(grid.ns - 1) + 2.0f * grid.ds_iph_i(grid.ns - 1));
+    grid.dt_state.fill(1.0e-9f);   // suppress predictor O(dt²)
+    Vec R = rhs_explicit_state(grid, cons);
+    // Interior cells only (fully-interior stencil).
+    for (arma::uword i = 3; i + 3 < grid.ns; ++i)
+        EXPECT_REL(R(arma::sub2ind(sz, i, cons::MOM_I)), -b, 5e-3);
+}
+
+static void test_irregular_cfl_selection() {
+    Grid grid;
+    const std::vector<float> ds = graded_widths();
+    Vec cons = setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    Vec dt   = cal_dt_i(grid, cons);
+    Vec maxv = cal_max_v_i(grid, cons);
+    Vec ratio(grid.ns);
+    for (arma::uword i = 0; i < grid.ns; ++i) ratio(i) = grid.ds_i(i) / maxv(i);
+    const float expected = grid.CFL * arma::min(ratio);
+    EXPECT_REL(dt(0), expected, 1e-3);
+    for (arma::uword i = 0; i < grid.ns; ++i)
+        EXPECT_TRUE(dt(i) * maxv(i) / grid.ds_i(i) <= grid.CFL + 1e-6f);
+}
+
+static void test_irregular_conduction_conserves_energy() {
+    // Non-uniform mesh, V=U=0, T_i=T_n a linear ramp, matched (flat) ghosts so
+    // there is no boundary flux. The conservative conduction term then telescopes
+    // to zero: Σ (C_i + C_n)·ds_i/B_i ≈ 0. This exercises the width-weighted
+    // series-resistance face conductivity and the center-to-center distances.
+    Grid grid;
+    const std::vector<float> ds = graded_widths();
+    setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 1.0e4f, 1.0e4f);
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    const float ni = 2.0e17f, nn = 1.0e19f;
+    Vec prim(grid.n_state, arma::fill::zeros);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const float T = 1.0e4f + 200.0f * static_cast<float>(i);   // linear ramp
+        prim(arma::sub2ind(sz, i, prim::RHO_I)) = ni * grid.m_i;
+        prim(arma::sub2ind(sz, i, prim::RHO_N)) = nn * grid.m_n;
+        prim(arma::sub2ind(sz, i, prim::P_I))   = ni * 2.0f * grid.k_b * T;
+        prim(arma::sub2ind(sz, i, prim::P_N))   = nn * grid.k_b * T;
+        prim(arma::sub2ind(sz, i, prim::P_E))   = ni * grid.k_b * T;
+    }
+    Vec cons = prim2cons(grid, prim);
+    for (arma::uword k = 0; k < num_of_eq; ++k) {   // flat (matched) ghosts ⇒ zero boundary flux
+        grid.inner_boundary0_i(k) = cons(arma::sub2ind(sz, 0, k));
+        grid.inner_boundary1_i(k) = cons(arma::sub2ind(sz, 0, k));
+        grid.outer_boundary0_i(k) = cons(arma::sub2ind(sz, grid.ns - 1, k));
+        grid.outer_boundary1_i(k) = cons(arma::sub2ind(sz, grid.ns - 1, k));
+    }
+    Vec RI = rhs_implicit_state(grid, cons);
+    float net = 0.0f, scale = 0.0f;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const float cE = RI(arma::sub2ind(sz, i, cons::E_I)) + RI(arma::sub2ind(sz, i, cons::E_N));
+        net   += cE * grid.ds_i(i) / grid.B_i(i);
+        scale += std::fabs(cE) * grid.ds_i(i) / grid.B_i(i);
+    }
+    EXPECT_TRUE(scale > 0.0f);                        // conduction actually active
+    EXPECT_TRUE(std::fabs(net) <= 1e-4f * scale);     // conserved to round-off
+}
+
+static void test_irregular_boundary_hse() {
+    // Boundary/interior HSE consistency on a REFINED (non-uniform) mesh: model_column
+    // always uses equilibrium-reference well-balancing, so the hydrostatic C7 IC is an
+    // EXACT discrete steady state and one full step leaves V = 0 to round-off — even at
+    // the fine base cells whose HSE ghost is built with the actual center-to-ghost
+    // distance ds_i(0). A mis-set ghost weight or wrong metric reconstruction would
+    // break the fixed point.
+    setenv("ISO_REFINE_FACTOR", "4", 1);
+    setenv("ISO_REFINE_S_HI_KM", "700", 1);
+    setenv("ISO_REFINE_TRANSITION_KM", "100", 1);
+    Grid grid; grid.init(200, 0.25f);
+    Vec xn = model_column_ic(grid);
+    EXPECT_TRUE(!grid.uniform_mesh);
+    Vec dt = cal_dt_i(grid, xn);
+    model_column_update_bc(grid, xn);
+    Vec out = advance_Euler_state(grid, xn, dt);
+    EXPECT_TRUE(!out.has_nan());
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    float vmax = 0.0f;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const float v = out(arma::sub2ind(sz, i, cons::MOM_I)) /
+                        out(arma::sub2ind(sz, i, cons::RHO_I));
+        vmax = std::max(vmax, std::fabs(v));
+    }
+    EXPECT_TRUE(vmax < 1.0e-2f);   // exact V=0 fixed point on the irregular mesh
+    unsetenv("ISO_REFINE_FACTOR"); unsetenv("ISO_REFINE_S_HI_KM"); unsetenv("ISO_REFINE_TRANSITION_KM");
+}
+
+static void test_uniform_regression_refinement_unset() {
+    // With refinement UNSET, model_column builds a uniform grid and the step is
+    // bitwise-reproducible (deterministic) — the regression guard that the static-mesh
+    // machinery is a no-op on the uniform path (the best-WB reconstruction is always on).
+    unsetenv("ISO_REFINE_FACTOR"); unsetenv("GRID_REFINE_FACTOR");
+    auto run_once = [&]() {
+        Grid grid; grid.init(200, 0.25f);
+        Vec xn = model_column_ic(grid);
+        Vec dt = cal_dt_i(grid, xn);
+        model_column_update_bc(grid, xn);
+        Vec out = advance_Euler_state(grid, xn, dt);
+        return std::make_pair(grid.uniform_mesh, out);
+    };
+    auto a = run_once();
+    auto b = run_once();
+    EXPECT_TRUE(a.first);                                  // uniform_mesh detected
+    EXPECT_TRUE(!a.second.has_nan());
+    EXPECT_TRUE(a.second.n_elem == b.second.n_elem);
+    EXPECT_TRUE(arma::approx_equal(a.second, b.second, "absdiff", 0.0));  // bitwise identical
+}
+
+static void test_refined_mesh_ic_runs() {
+    // End-to-end: model_column with the refinement profile builds a larger,
+    // non-uniform grid (finer at the base), and a full semi-implicit step stays
+    // finite with velocities small (HSE-consistent refined boundary).
+    setenv("ISO_REFINE_FACTOR", "4", 1);
+    setenv("ISO_REFINE_S_LO_KM", "0", 1);
+    setenv("ISO_REFINE_S_HI_KM", "700", 1);
+    setenv("ISO_REFINE_TRANSITION_KM", "100", 1);
+    Grid grid; grid.init(200, 0.25f);
+    Vec xn = model_column_ic(grid);
+    EXPECT_TRUE(grid.ns > 200);            // refinement added lower-domain cells
+    EXPECT_TRUE(!grid.uniform_mesh);
+    EXPECT_TRUE(grid.ds_i.min() > 0.0f);
+    EXPECT_REL(arma::min(grid.ds_i), arma::max(grid.ds_i) / 4.0f, 0.05);  // fine ≈ coarse/4
+    Vec dt = cal_dt_i(grid, xn);
+    model_column_update_bc(grid, xn);
+    Vec out = advance_Euler_state(grid, xn, dt);
+    EXPECT_TRUE(!out.has_nan());
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    float vmax = 0.0f;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const float rho_i = out(arma::sub2ind(sz, i, cons::RHO_I));
+        const float mom_i = out(arma::sub2ind(sz, i, cons::MOM_I));
+        vmax = std::max(vmax, std::fabs(mom_i / rho_i));
+    }
+    EXPECT_TRUE(vmax < 1.0e3f);             // no boundary blowup on the first step
+    unsetenv("ISO_REFINE_FACTOR");
+    unsetenv("ISO_REFINE_S_LO_KM"); unsetenv("ISO_REFINE_S_HI_KM"); unsetenv("ISO_REFINE_TRANSITION_KM");
+}
+
 // ----------------------------------------------------------------------------
 
 int main() {
@@ -1544,6 +2049,7 @@ int main() {
     RUN(test_scalar_to_get_scalar_inverse);
     RUN(test_ip1_im1_interior_shift);
     RUN(test_flux_lim_is_minmod);
+    RUN(test_flux_lim_mc3);
     RUN(test_cons_prim_roundtrip);
 
     RUN(test_pressure_relation_eq38);
@@ -1584,10 +2090,27 @@ int main() {
     RUN(test_apply_open_bcs_outer_velocity_halving_pattern);
     RUN(test_open_bcs_stability_under_model_c7);
     RUN(test_model_c7_bc_discrete_hse_inner_mach_capped_outer);
+    RUN(test_model_c7_tr_jump_bc);
     RUN(test_trac_broadening_conserves_kappa_lambda);
     RUN(test_trac_cutoff_detection_and_limiter);
     RUN(test_beam_heating_rate_profile);
     RUN(test_beam_heating_partitions_by_heat_capacity);
+    RUN(test_coronal_heating_rate_profile);
+    RUN(test_coronal_heating_partitions_by_heat_capacity);
+
+    // Static local refinement: mesh builder, metric caches, irregular-grid
+    // manufactured operators, and the refinement-unset regression.
+    RUN(test_mesh_disabled_is_uniform);
+    RUN(test_mesh_refined_diagnostic_profile);
+    RUN(test_refine_params_env_aliases);
+    RUN(test_metric_caches_center_to_center);
+    RUN(test_irregular_uniform_state_preserved);
+    RUN(test_irregular_linear_pressure_gradient);
+    RUN(test_irregular_cfl_selection);
+    RUN(test_irregular_conduction_conserves_energy);
+    RUN(test_irregular_boundary_hse);
+    RUN(test_uniform_regression_refinement_unset);
+    RUN(test_refined_mesh_ic_runs);
 
     std::cout << "\n===== Summary =====\n";
     std::cout << "Passed: " << g_pass << "\n";

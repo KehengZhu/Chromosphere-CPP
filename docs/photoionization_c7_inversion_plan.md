@@ -63,7 +63,7 @@ An inversion makes C7 a fixed point **only of the rate network used in the inver
 Adopt Chae Eqs. 20–22 ($R_{ki}, C_{ik}, C_{ki}$) as the Stage-E coefficients, and set $P_\mathrm{phot}$ by inverting Eq. 25 on C7. C7 becomes an *exact* fixed point of the 2-level equilibrium; inverted $P_\mathrm{phot}$ should match Chae's FAL-C Table 1 up to the FAL-C↔C7 atmosphere difference. Cost: replaces Voronov/Hummer with Cox-2000/ground-recomb coefficients (a step *down* in recombination fidelity — ground-state only, no Rydberg ladder, no case-B).
 
 ### Route B — our-network-consistent (recommended)
-Keep Voronov $S_i$ + Hummer $\alpha_r$, **add three-body $\alpha_c$** (Hinnov/Stevefelt — already coded in `util/visualization/plot_c7_ioniz_recomb_rates.py`) and its detailed-balance partner $S_\mathrm{CR}=\alpha_c\Phi/n_e$ (formulation §2.1b / §3.3 option 2), then set $P_\mathrm{phot}$ by inverting our network on C7:
+Keep Voronov $S_i$ + Hummer $\alpha_r$, **add three-body $\alpha_c$** (Hinnov/Stevefelt — already coded in `visualization/plot_c7_ioniz_recomb_rates.py`) and its detailed-balance partner $S_\mathrm{CR}=\alpha_c\Phi/n_e$ (formulation §2.1b / §3.3 option 2), then set $P_\mathrm{phot}$ by inverting our network on C7:
 
 $$P_\mathrm{phot}(z) = \frac{n_i^+}{n_n}\Big[\alpha_r(T)\,n_e + \alpha_c(T,n_e)\,n_e\Big]\;-\;\Big[S_i(T) + S_\mathrm{CR}(T,n_e)\Big]\,n_e$$
 
@@ -93,5 +93,5 @@ This closes the gap at the dense base by construction **and** keeps the better r
 - `scenarios/model_c7.cpp` — replace the `photoionization_rate_chae` population with the Eq.-25 inversion + blend.
 - `src/integrators.cpp` — cubic Stage-E update + $\chi_H$ energy bookkeeping for the new collisional channels.
 - `tests/chromo_tests.cpp` — split the assertion by equilibrium vs NEQ region.
-- `util/visualization/plot_c7_ioniz_recomb_rates.py` — overplot inverted-C7 $P_\mathrm{phot}$ vs Chae FAL-C Table 1 (validation).
+- `visualization/plot_c7_ioniz_recomb_rates.py` — overplot inverted-C7 $P_\mathrm{phot}$ vs Chae FAL-C Table 1 (validation).
 - `docs/ionization_recombination_formulation.md` §2.2 + writeup `main.tex`/`paper.tex` §3.1 — document the C7-context inversion and the equilibrium/NEQ split.

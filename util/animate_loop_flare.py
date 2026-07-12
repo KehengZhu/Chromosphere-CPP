@@ -23,17 +23,17 @@ Examples:
 # Closed ensemble loop
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 python3 util/animate_loop_flare.py \
   scenarios/data/event_ensemble/c05_101Mm.dat outputs/event_ensemble/c05_101Mm.txt \
-  util/visualization/event_ensemble_c05_101Mm_closed.mp4
+  visualization/event_ensemble_c05_101Mm_closed.mp4
 
 # Open ensemble line
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 python3 util/animate_loop_flare.py \
   scenarios/data/event_ensemble/o00_1040Mm.dat outputs/event_ensemble/o00_1040Mm.txt \
-  util/visualization/event_ensemble_o00_1040Mm_open.mp4
+  visualization/event_ensemble_o00_1040Mm_open.mp4
 
 # Event starter (full loop, AR 13768)
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 python3 util/animate_loop_flare.py \
   scenarios/data/event_20240801_AR13768.dat outputs/event_20240801_AR13768_flare.txt \
-  util/visualization/event_20240801_AR13768_flare.mp4
+  visualization/event_20240801_AR13768_flare.mp4
 
 """
 import os
@@ -64,7 +64,7 @@ BEAM_DELTA = float(os.environ.get("FLARE_DELTA", 5.0))    # spectral index δ
 T_MIN, T_MAX = 3.0e3, 5.0e7
 V_MIN, V_MAX = -700.0, 1300.0
 N_MIN, N_MAX = 1.0e11, 1.0e20
-MAX_FRAMES = 500
+MAX_FRAMES = int(os.environ.get("ANIM_MAX_FRAMES", "500"))
 
 # Split x-axis: keep this much arc/height near EACH footpoint at full (zoomed) scale,
 # then allocate the plot width so the chromosphere(+TR) gets CHROMO_PLOT_FRAC of it and
@@ -262,7 +262,7 @@ def _render_frame(k, tmpdir, xMm, t, Ti, Te, V, ni, nn, ds_arr, phi_arr,
     fig, ax = plt.subplots(2, 2, figsize=(12.5, 8), sharex=True)
     phase = "PRE-BEAM" if t < T_ON else ("BEAM ON" if t <= T_OFF else "POST-BEAM")
     pcol = {"PRE-BEAM": "0.4", "BEAM ON": "orangered", "POST-BEAM": "navy"}[phase]
-    fig.suptitle(f"{title_prefix}   t = {t:6.2f} s    [{phase}]", fontsize=13, color=pcol)
+    fig.suptitle(f"{title_prefix}   t = {t:6.2f} s    [{phase}]", fontsize=13, color=pcol, y=0.98)
     a_T, a_V, a_n, a_f = ax[0, 0], ax[0, 1], ax[1, 0], ax[1, 1]
 
     # Electron (dodgerblue dashed) vs proton/ion (crimson solid) temperature.
@@ -328,7 +328,9 @@ def _render_frame(k, tmpdir, xMm, t, Ti, Te, V, ni, nn, ds_arr, phi_arr,
         a_T.text(0.015, 0.93, "beam: thick-target (orange = deposition Q)",
                  transform=a_T.transAxes, fontsize=7.5, color="darkorange")
 
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    fig.tight_layout(
+        # rect=[0, 0, 1, 0.93]
+                     )
     fig.savefig(os.path.join(tmpdir, f"frame_{k:06d}.png"), dpi=110)
     plt.close(fig)
 
@@ -336,7 +338,7 @@ def _render_frame(k, tmpdir, xMm, t, Ti, Te, V, ni, nn, ds_arr, phi_arr,
 def main():
     dat = sys.argv[1] if len(sys.argv) > 1 else "scenarios/data/loop_full_fine.dat"
     flare = sys.argv[2] if len(sys.argv) > 2 else "outputs/loop_full_flare.txt"
-    out = sys.argv[3] if len(sys.argv) > 3 else "util/visualization/loop_full_flare_evolution.mp4"
+    out = sys.argv[3] if len(sys.argv) > 3 else "visualization/loop_full_flare_evolution.mp4"
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     meta = read_meta(dat)
@@ -363,7 +365,44 @@ def main():
     if len(sys.argv) > 4:
         t_cap = float(sys.argv[4])
         frames = [f for f in frames if f[0] <= t_cap]
-    if len(frames) > MAX_FRAMES:
+    uniform_pre = uniform_post = 0
+    if os.environ.get("ANIM_UNIFORM_TIME"):
+        # Resample at uniform SIMULATION-TIME spacing, with an optional per-phase
+        # speed-up. The dump writes a frame every N steps, but dt grows ~10x once the
+        # flare relaxes, so index-based sampling crowds nearly all frames into the early
+        # phase and the long cooling tail flashes past (the movie looks like it stops
+        # early). We lay down a uniform-in-sim-time TARGET grid and snap each target to
+        # its nearest dump frame; sparse dump regions just repeat, so the movie holds
+        # there and plays the whole span at an even rate.
+        #
+        # Screen time per sim-second in a phase is ∝ 1/speed, so we allocate target
+        # frames per phase ∝ Δt/speed:
+        #   * pre-beam + beam-on (t ≤ T_OFF): ANIM_SPEED_PRE  (default 1x)
+        #   * post-beam          (t >  T_OFF): ANIM_SPEED_POST (default 1x; 2 ⇒ 2x faster)
+        # Both = 1 reduces to a single uniform grid over the whole span.
+        speed_pre  = float(os.environ.get("ANIM_SPEED_PRE", 1.0))
+        speed_post = float(os.environ.get("ANIM_SPEED_POST", 1.0))
+        times = np.array([f[0] for f in frames])
+        t0, tN = float(times[0]), float(times[-1])
+        tb = min(max(T_OFF, t0), tN)                          # pre/post boundary, clamped
+        w_pre  = max(tb - t0, 0.0) / speed_pre
+        w_post = max(tN - tb, 0.0) / speed_post
+        wtot = w_pre + w_post
+        if wtot <= 0.0:
+            targets = np.array([t0])
+        else:
+            n_pre = int(round(MAX_FRAMES * w_pre / wtot)) if w_pre > 0 else 0
+            n_pre = min(n_pre, MAX_FRAMES)
+            n_post = MAX_FRAMES - n_pre
+            tgt_pre  = np.linspace(t0, tb, n_pre, endpoint=False) if n_pre > 0 else np.empty(0)
+            tgt_post = np.linspace(tb, tN, n_post) if n_post > 0 else np.empty(0)
+            targets = np.concatenate([tgt_pre, tgt_post])
+            uniform_pre, uniform_post = len(tgt_pre), len(tgt_post)
+        hi = np.clip(np.searchsorted(times, targets), 0, len(frames) - 1)
+        lo = np.clip(hi - 1, 0, len(frames) - 1)
+        nearest = np.where(np.abs(times[lo] - targets) <= np.abs(times[hi] - targets), lo, hi)
+        frames = [frames[int(i)] for i in nearest]
+    elif len(frames) > MAX_FRAMES:
         idx = np.linspace(0, len(frames) - 1, MAX_FRAMES).round().astype(int)
         frames = [frames[i] for i in idx]
     print(f"{flare}: topology={topology}, {len(xMm)} cells, {len(frames)} frames, "
@@ -375,26 +414,35 @@ def main():
     sep_str = ", ".join(f"{s:.2f}" for s in seps)
     print(f"  region separators [Mm]: {sep_str}" + (f"; apex @ {apex_x:.1f}" if apex_x else ""))
 
-    # Phase-dependent playback speed (the movie stitches at a constant fps, so retime
-    # by repeating / dropping frames): pre-beam + beam-on play 2x SLOWER (each frame
-    # held twice); post-beam plays 1.5x FASTER (keep 2 of every 3 frames).
-    playback, post_i = [], 0
-    for fr in frames:
-        if fr[0] <= T_OFF:                     # pre-beam + beam-on
-            playback += [fr, fr]
-        else:                                  # post-beam
-            if post_i % 3 != 2:                # drop every 3rd → 1.5x faster
-                playback.append(fr)
-            post_i += 1
-    print(f"  retimed: {len(frames)} -> {len(playback)} playback frames "
-          f"(pre/beam 2x slower, post-beam 1.5x faster)")
+    if os.environ.get("ANIM_UNIFORM_TIME"):
+        playback = frames   # already even in sim-time; skip phase-dependent retiming
+        sp_pre  = os.environ.get("ANIM_SPEED_PRE", "1")
+        sp_post = os.environ.get("ANIM_SPEED_POST", "1")
+        print(f"  uniform-time: {len(playback)} frames over "
+              f"[{frames[0][0]:.1f}, {frames[-1][0]:.1f}] s "
+              f"(pre/beam {uniform_pre}f @{sp_pre}x | post-beam {uniform_post}f @{sp_post}x)")
+    else:
+        # Phase-dependent playback speed (the movie stitches at a constant fps, so retime
+        # by repeating / dropping frames): pre-beam + beam-on play 2x SLOWER (each frame
+        # held twice); post-beam plays 1.5x FASTER (keep 2 of every 3 frames).
+        playback, post_i = [], 0
+        for fr in frames:
+            if fr[0] <= T_OFF:                     # pre-beam + beam-on
+                playback += [fr, fr]
+            else:                                  # post-beam
+                if post_i % 3 != 2:                # drop every 3rd → 1.5x faster
+                    playback.append(fr)
+                post_i += 1
+        print(f"  retimed: {len(frames)} -> {len(playback)} playback frames "
+              f"(pre/beam 2x slower, post-beam 1.5x faster)")
 
     args = []
     for k, (t, xn) in enumerate(playback):
         ni, nn, v, Ti, Te = primitives(xn, phi_g)
         args.append((k, xMm, t, Ti, Te, v, ni, nn, ds, phi_g, kd, kp, xticks,
                      seps, labels, apex_x, xlabel, vlabel, title_prefix))
-    save_frames_parallel(_render_frame, args, out, fps=30)
+    fps = int(os.environ.get("ANIM_FPS", "30"))   # playback frame rate (env-tunable)
+    save_frames_parallel(_render_frame, args, out, fps=fps)
 
 
 if __name__ == "__main__":

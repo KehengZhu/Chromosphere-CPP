@@ -1,11 +1,33 @@
 #include "scenario.hpp"
 #include "analytic_canopy.hpp"
 #include "model_c7.hpp"
+#include "model_column.hpp"
 #include "model_flare.hpp"
 #include "pfss_field_line.hpp"
 
 #include <stdexcept>
 #include <cstdlib>
+#include <string>
+
+namespace {
+// Set an environment variable only if the user has not already set it — used to
+// apply a scenario "preset" (default env knobs) that the user can still override.
+void set_env_default(const char* key, const char* value) {
+    setenv(key, value, /*overwrite=*/0);
+}
+
+// Grid resolution for the unified column scenario: a resolved corona (ISO_CORONA)
+// needs more cells than the chromosphere-only default. ISO_NS overrides.
+arma::uword column_peek_ns() {
+    auto set = [](const char* k) {
+        const char* e = std::getenv(k);
+        return e && std::string(e) != "0" && !std::string(e).empty();
+    };
+    arma::uword ns = set("ISO_CORONA") ? 1000 : 600;
+    if (const char* e = std::getenv("ISO_NS")) { try { ns = std::stoul(e); } catch (...) {} }
+    return ns;
+}
+} // namespace
 
 namespace chromosphere {
 
@@ -15,7 +37,12 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
 
     if (name == "model_c7") {
         sc.peek_ns   = []() -> arma::uword { return 100; };
-        sc.ic        = [](Grid& g) { return model_c7_ic(g); };
+        // "New explanation" upper BC (docs/gentle_evaporation_downflow.md):
+        // well-balanced reconstruction + hydrostatic ghost pressure + imposed
+        // TR temperature jump (downward q(T) via the Stage-D Dirichlet ghost-T)
+        // + EOS ghost density. tr_jump_bc=true is exclusive to this bare scenario
+        // — model_flare / analytic_canopy / model_gentle keep the RTV reservoir.
+        sc.ic        = [](Grid& g) { return model_c7_ic(g, /*extended=*/false, /*tr_jump_bc=*/true); };
         sc.update_bc = [](Grid& g, const Vec& xn) { model_c7_update_bc(g, xn); };
         return sc;
     }
@@ -30,6 +57,29 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
         };
         sc.ic        = [](Grid& g) { return model_flare_ic(g); };
         sc.update_bc = [](Grid& g, const Vec& xn) { model_flare_update_bc(g, xn); };
+        return sc;
+    }
+    // The unified field-aligned chromosphere→corona column scenario (the DEFAULT).
+    // "model_isentropic" is a backward-compatibility alias for the old name.
+    // "model_gentle" is a preset: the documented stable full-physics resolved-corona
+    //   gentle conduction-driven evaporation configuration (iso_corona_full) —
+    //   resolved corona + radiative sink + two-fluid + ionization, conduction on. The
+    //   base is raised to h = 1003 km (model_c7's validated floor): the Stage-E n²
+    //   channel counts and the radiative loss overflow float32 at photospheric density
+    //   (n ~ 1e23 ⇒ n² ≫ FLT_MAX). All are env defaults the user can still override.
+    if (name == "model_column" || name == "model_isentropic" || name == "model_gentle") {
+        if (name == "model_gentle") {
+            set_env_default("ISO_CORONA",     "1");
+            set_env_default("ISO_H_BASE",     "1003");
+            set_env_default("ISO_HEAT_FLUX",  "1");
+            set_env_default("ISO_COOLING",    "1");
+            set_env_default("ISO_IONIZATION", "1");
+            set_env_default("ISO_TWO_FLUID",  "1");
+            set_env_default("ISO_NS",         "600");
+        }
+        sc.peek_ns   = []() { return column_peek_ns(); };
+        sc.ic        = [](Grid& g) { return model_column_ic(g); };
+        sc.update_bc = [](Grid& g, const Vec& xn) { model_column_update_bc(g, xn); };
         return sc;
     }
     if (name == "analytic_canopy") {
@@ -77,10 +127,10 @@ void apply_open_bcs(Grid& grid, const Vec& xn) {
         const float phi_g_cell = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
         // cons2prim convention (state.cpp): p_i = 2 n_i k_b T_i with electron
         // quasi-neutrality folded in, p_n = n_n k_b T_n.
-        const float p_i = 2.0f/3.0f * E_i - 1.0f/3.0f * rho_i * V * V
-                         - 2.0f/3.0f * rho_i * phi_g_cell;
-        const float p_n = 2.0f/3.0f * E_n - 1.0f/3.0f * rho_n * U * U
-                         - 2.0f/3.0f * rho_n * phi_g_cell;
+        const float p_i = grid.gm1() * E_i - grid.half_gm1() * rho_i * V * V
+                         - grid.gm1() * rho_i * phi_g_cell;
+        const float p_n = grid.gm1() * E_n - grid.half_gm1() * rho_n * U * U
+                         - grid.gm1() * rho_n * phi_g_cell;
         const float n_i = rho_i / m_i;
         const float n_n = rho_n / m_n;
         T_i = p_i / (2.0f * n_i * k_b);
@@ -98,11 +148,11 @@ void apply_open_bcs(Grid& grid, const Vec& xn) {
         ob(cons::RHO_N) = rho_n;
         ob(cons::MOM_I) = rho_i * V_g;
         ob(cons::MOM_N) = rho_n * U_g;
-        ob(cons::E_I)   = 1.5f * k_b * n_i * 2.0f * T_i
+        ob(cons::E_I)   = grid.inv_gm1() * k_b * n_i * 2.0f * T_i
                         + 0.5f * rho_i * V_g * V_g + rho_i * phi_g_g;
-        ob(cons::E_N)   = 1.5f * k_b * n_n * T_n
+        ob(cons::E_N)   = grid.inv_gm1() * k_b * n_n * T_n
                         + 0.5f * rho_n * U_g * U_g + rho_n * phi_g_g;
-        ob(cons::E_E)   = 1.5f * k_b * n_i * T_i;   // electron internal energy (T_e = T_i)
+        ob(cons::E_E)   = grid.inv_gm1() * k_b * n_i * T_i;   // electron internal energy (T_e = T_i)
     };
 
     // --- Inner reflecting wall (mirror cells 0 and 1) ----------------------

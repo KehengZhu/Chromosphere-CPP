@@ -2,7 +2,7 @@
 """Evolution frames for the explosive chromospheric evaporation run.
 
 Reads the refined (500-cell) model_flare output and produces, into
-util/visualization/:
+visualization/:
 
   1. flare_evolution_frames.png — a frame strip: rows = (T_i, v, densities),
      columns = selected times anchored on the physical events of the run
@@ -28,7 +28,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "visualization")
+OUT = os.path.join(HERE, "..", "visualization")
 os.makedirs(OUT, exist_ok=True)
 
 m_i = 1.6726219e-27

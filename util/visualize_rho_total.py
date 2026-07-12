@@ -153,7 +153,7 @@ def main():
     args = ap.parse_args()
 
     stem = os.path.splitext(os.path.basename(args.input))[0]
-    viz_dir = os.path.join(HERE, "visualization")
+    viz_dir = os.path.join(HERE, "..", "visualization")
     os.makedirs(viz_dir, exist_ok=True)
     out_png = args.png or os.path.join(viz_dir, f"{stem}_rho_total.png")
     out_mp4 = args.mp4 or os.path.join(viz_dir, f"{stem}_rho_total.mp4")

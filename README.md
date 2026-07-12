@@ -175,9 +175,10 @@ and `sub2ind`, none of which require LAPACK/BLAS.
 
 ## Run
 
-`chromo_main` defaults: `ns = 100`, `CFL = 0.25`, Model C7 initial condition
-([docs/Keheng_s_chromosphere.pdf](docs/Keheng_s_chromosphere.pdf) Table 1).
-Runs until `t = 10·L/Cs ≈ 474 s` or 10000 steps, whichever comes first.
+`chromo_main` defaults: `CFL = 0.25` and the `model_column` scenario (the unified
+field-aligned chromosphere→corona column — real Model C7 IC with the validated
+well-balanced numerics always on; `ns = 600`). Runs until `t = 10·L/Cs` or 10000
+steps, whichever comes first.
 
 ### CLI
 
@@ -192,7 +193,7 @@ Each argument is positional and optional; defaults are shown in parentheses.
 | `output_path` | 1 | any path | `outputs/output.txt` | snapshot file (line 1 = `ns num_of_eq`; line 2 = cumulative heights in km; then `# t = T step = S` markers each followed by `ns` rows of conserved variables) |
 | `mode`        | 2 | `full` \| `explicit` | `full` | `full` = semi-implicit driver (Stage A explicit, B drag, C T-equil, D conduction). `explicit` zeroes `R_I` and runs pure explicit Euler |
 | `ionization`  | 3 | `ionization` \| `no-ionization` | `ionization` | toggles Stage E (Voronov 1997 ionization + Hummer 1994 recombination) |
-| `scenario`    | 4 | `model_c7` \| `analytic_canopy` \| `pfss_field_line` | `model_c7` | which IC + BC pair to dispatch (see [Scenarios](#scenarios)) |
+| `scenario`    | 4 | `model_column` \| `model_c7` \| `model_flare` \| `analytic_canopy` \| `pfss_field_line` | `model_column` | which IC + BC pair to dispatch (see [Scenarios](#scenarios)). `model_isentropic` and `model_gentle` are backward-compat aliases of `model_column` (the latter applies the resolved-corona full-physics gentle preset) |
 | `data_path`   | 5 | path to `.dat` \| `""` | `""` | required for tabulated scenarios (`pfss_field_line`); ignored otherwise |
 | `time_mult`   | 6 | float | `1.0` | multiplier on the default total simulation time `10·L/Cs`. Step cap scales with this so longer runs aren't truncated |
 
@@ -201,8 +202,11 @@ A companion `outputs/output.log` is appended with the configured `total_time`.
 ### Examples
 
 ```sh
-# Default: Model C7, semi-implicit, ionization ON
+# Default: the unified model_column (real C7 IC, well-balanced numerics), ionization ON
 build/chromo_main
+
+# The quiet-Sun Model C7 baseline scenario (shared C7 atmosphere library)
+build/chromo_main outputs/out_c7.txt full ionization model_c7
 
 # Ionization OFF baseline for comparison
 build/chromo_main outputs/out_c7_off.txt full no-ionization model_c7
@@ -235,6 +239,19 @@ Other ready-made viz scripts in `util/`: `visualize_rho_total.py`,
 `visualize_pfss_lines_evolution.py`, `plot_output.py` (last-frame 8-panel
 snapshot).
 
+### Split conduction-to-hydro diagnostic
+
+Set `ISO_DIAG_COND_HYDRO=1` for an opt-in CSV snapshot around every Stage-D
+conduction solve. It writes `outputs/iso_cond_hydro_diagnostic.csv` by default;
+set `ISO_DIAG_COND_HYDRO_OUT=outputs/<name>.csv` to avoid collisions in a
+resolution sweep and `ISO_DIAG_COND_HYDRO_EVERY=N` to record every Nth
+conduction call. Each row contains the cell-center height, pre/post Stage-D
+charged, neutral, electron, and total pressures, their `dp_cond`, the
+before/after/difference explicit momentum RHSs, and velocity/mass flux. The
+RHS comparison is specifically a **split conduction-to-hydro coupling
+diagnostic**; it does not modify the simulation and is entirely off when the
+environment variable is unset.
+
 ## Scenarios
 
 A *scenario* fixes the field-line geometry, initial conditions, and per-step
@@ -242,7 +259,7 @@ boundary update rule. Scenarios share a single `Grid` (cells, B-field profile,
 φ_g, ghost buffers) and a single dispatcher:
 
 ```cpp
-auto sc = make_scenario(name, data_path);   // "model_c7" | "analytic_canopy" | "pfss_field_line"
+auto sc = make_scenario(name, data_path);   // "model_column" (default) | "model_c7" | "model_flare" | "analytic_canopy" | "pfss_field_line"
 Grid grid;
 grid.init(sc.peek_ns(), cfl);
 grid.enable_ionization = true;
@@ -256,6 +273,40 @@ The shared `apply_open_bcs` helper in [scenarios/scenario.cpp](scenarios/scenari
 provides the default open-hyperbolic BC (inner reflecting wall + outer pure-Neumann
 outflow); individual scenarios call it then overwrite ghosts that need scenario-specific
 treatment.
+
+### `model_column` (default)
+
+Source: [scenarios/model_column.cpp](scenarios/model_column.cpp).
+
+The unified field-aligned chromosphere→corona column — the merge of the former
+`model_c7` (as a testbed), `model_gentle`, and `model_isentropic`. A single straight
+field line (B = 1, gravity on) initialized from the real Model C7 atmosphere (via
+`c7_full_profile` in the C7 library) with the density re-integrated hydrostatically
+for a clean V ≈ 0 start and a realistic frozen ionization profile.
+
+- **Numerics (always on, no toggles):** the validated "bestwb" configuration —
+  well-balanced explicit reconstruction, log-space MUSCL, the MC3/Koren limiter
+  (β = 2), equilibrium-reference δ-form well-balancing, and an inner discrete-HSE
+  reservoir well-balanced through both ghosts (pressure and density). These hold a
+  hydrostatic column at V ≈ 0 to round-off, so any flow is physical.
+- **Modes / drivers (env-selected physics):** resolved corona (`ISO_CORONA`);
+  conduction via a top ghost-T jump (`ISO_TJUMP_A/_B`, `ISO_T_TOP`), an imposed
+  Neumann coronal flux with a ramp (`ISO_QFLUX*`), ambient volumetric coronal
+  heating H(s) (`ISO_CHEAT*`), or a one-time IC coronal superheat (`ISO_TBOOST*`);
+  radiative sink (`ISO_COOLING`), two-fluid (`ISO_TWO_FLUID`), and the ionization
+  network (`ISO_IONIZATION`). See the header for the full knob list.
+- **Aliases:** `model_isentropic` → `model_column` (identical); `model_gentle` →
+  `model_column` with the documented stable resolved-corona full-physics preset
+  (`ISO_CORONA ISO_H_BASE=1003 ISO_HEAT_FLUX ISO_COOLING ISO_IONIZATION ISO_TWO_FLUID`).
+
+Migration: the numeric-method env toggles that used to select the "bestwb" path —
+`ISO_LOG_RECON`, `ISO_MC3`/`ISO_MC3_BETA`, `ISO_EQ_WB`, `ISO_INNER_WB`,
+`ISO_INNER_WB_RHO`, `ISO_C7_IC`, `ISO_C7_HSE` — are now unconditional and are
+simply ignored if set (old commands still run). The diagnostic toggles (`ISO_DIAG_*`),
+the base sponge (`ISO_SPONGE_*`), `ISO_TRAC_TC_FIXED`, and the analytic-isentrope toy
+IC (`ISO_T_BASE`/`ISO_N_BASE`/`ISO_F_ION`) were removed. The former `GENTLE_*` knobs
+map to `ISO_QFLUX*` (was `GENTLE_Q_*`), `ISO_CHEAT*` (was `GENTLE_HEAT_*`), and
+`ISO_TBOOST*` (was `GENTLE_T_BOOST*`).
 
 ### `model_c7`
 

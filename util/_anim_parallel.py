@@ -32,20 +32,25 @@ def save_frames_parallel(worker_fn, frame_args, out_path, fps, n_workers=None):
         with Pool(processes=n_workers) as pool:
             pool.starmap(worker_fn, star_args)
         n = len(frame_args)
-        subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-framerate", str(fps),
-                "-i", os.path.join(tmpdir, "frame_%06d.png"),
-                "-c:v", "libx264",
-                "-pix_fmt", "yuv420p",
-                "-preset", "fast",
-                "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
-                out_path,
-            ],
-            check=True,
-            capture_output=True,
-        )
+        # Encode quality is env-tunable (defaults reproduce the original output):
+        #   ANIM_CRF      libx264 CRF (lower = higher quality; unset = x264 default ~23)
+        #   ANIM_PIX_FMT  pixel format (default yuv420p; yuv444p avoids chroma loss on thin colored lines)
+        #   ANIM_PRESET   x264 preset (default fast; slow = better compression at same CRF)
+        pix_fmt = os.environ.get("ANIM_PIX_FMT", "yuv420p")
+        preset = os.environ.get("ANIM_PRESET", "fast")
+        crf = os.environ.get("ANIM_CRF")
+        cmd = [
+            "ffmpeg", "-y",
+            "-framerate", str(fps),
+            "-i", os.path.join(tmpdir, "frame_%06d.png"),
+            "-c:v", "libx264",
+            "-pix_fmt", pix_fmt,
+            "-preset", preset,
+        ]
+        if crf is not None:
+            cmd += ["-crf", crf]
+        cmd += ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", out_path]
+        subprocess.run(cmd, check=True, capture_output=True)
         print(f"wrote {out_path}  ({n} frames @ {fps} fps = {n / fps:.1f} s)")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

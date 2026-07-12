@@ -35,6 +35,11 @@ struct ScenarioDataFile {
     // Field-line topology. "closed" ⇒ the outer face is the loop apex (reflecting
     // symmetry BC); anything else (default "open") ⇒ coronal outflow at the top.
     std::string topology    = "open";
+    // Loop half-length L [m] (footpoint→apex arc), written by make_loop_dat.py.
+    // Used to calibrate the ambient coronal heating E_H0(L, s_H, T_max). 0 if the
+    // file omits it (older traces) — the heating overlay then falls back to the
+    // arc-length sum.
+    float       loop_half_length_m = 0.0f;
 
     // CELLS, all length ns.
     Vec ds_m;

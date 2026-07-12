@@ -150,4 +150,4 @@ As-built mapping of the four "physics changes that matter" (§2.46):
 `ENABLE_TE=1` on the 2024-08-01 PFSS event lines is stable and shows T_e running
 up to ~6× T_i in the beam-heated footpoints/loop-top during the impulsive onset,
 relaxing toward T_e = T_i as the loop fills and ν_ei speeds up — the predicted
-beam-onset / low-density decoupling. Movies in `util/visualization/event_20240801_*_Te.mp4`.
+beam-onset / low-density decoupling. Movies in `visualization/event_20240801_*_Te.mp4`.

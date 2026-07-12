@@ -2,7 +2,9 @@
 #include "physics.hpp"
 
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
+#include <string>
 
 namespace chromosphere {
 
@@ -40,8 +42,8 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state) {
             // Three-T: the beam deposits into electrons alone, so the heating
             // timescale that matters is ε_e/Q (a much smaller pool). Single-T:
             // the deposited heat is shared, so use the total thermal energy.
-            const Vec eps = grid.enable_Te ? Vec(1.5f * p_e)
-                                           : Vec(1.5f * (p_i + p_n));
+            const Vec eps = grid.enable_Te ? Vec(grid.inv_gm1() * p_e)
+                                           : Vec(grid.inv_gm1() * (p_i + p_n));
             // dt ≤ BEAM_HEAT_CFL · min(ε/Q) over cells receiving the beam.
             Vec tau = eps / arma::clamp(Q, 1.0e-30f, arma::datum::inf);
             // Only constrain where the beam actually deposits (Q>0).
@@ -49,6 +51,30 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state) {
                 if (Q(i) <= 0.0f) tau(i) = arma::datum::inf;
             const float dt_beam = BEAM_HEAT_CFL * arma::min(tau);
             if (dt_beam < dt_min_i) dt_min_i = dt_beam;
+        }
+    }
+
+    // Coronal-heating timescale limit (same rationale as the beam guard). The
+    // steady footpoint heating is gentle (τ_heat = ε/H ~ tens of s in the tenuous
+    // corona, far longer in the dense chromosphere), so this rarely binds — but a
+    // ramped/localized enhancement (Phase 3) can shorten it, so cap dt to a small
+    // fractional energy gain per step where H > 0, exactly as for the beam.
+    if (grid.enable_coronal_heating) {
+        const Vec prim = cons2prim(grid, xn_state);
+        const Vec p_i  = get_scalar(grid, prim, prim::P_I);
+        const Vec p_n  = get_scalar(grid, prim, prim::P_N);
+        const Vec p_e  = get_scalar(grid, prim, prim::P_E);
+        const Vec H    = coronal_heating_rate(grid);   // W/m^3
+        const float Hmax = H.max();
+        if (Hmax > 0.0f) {
+            const float HEAT_CFL = 0.1f;
+            const Vec eps = grid.enable_Te ? Vec(grid.inv_gm1() * p_e)
+                                           : Vec(grid.inv_gm1() * (p_i + p_n));
+            Vec tau = eps / arma::clamp(H, 1.0e-30f, arma::datum::inf);
+            for (arma::uword i = 0; i < grid.ns; ++i)
+                if (H(i) <= 0.0f) tau(i) = arma::datum::inf;
+            const float dt_heat = HEAT_CFL * arma::min(tau);
+            if (dt_heat < dt_min_i) dt_min_i = dt_heat;
         }
     }
     return dt_min_i * arma::ones<Vec>(grid.ns);
@@ -88,14 +114,16 @@ float compute_trac_cutoff_T(const Grid& grid, const Vec& prim_state) {
                                      : Vec(p_i / (2.0f * n_i * grid.k_b));
 
     const float Tpeak    = arma::max(T);
-    const float Tc_upper = std::max(0.2f * Tpeak, grid.trac_T_chrom);
+    const float Tc_upper = std::max(grid.trac_Tc_max_frac * Tpeak, grid.trac_T_chrom);
     float Tc = grid.trac_T_chrom;
     const arma::uword ns = grid.ns;
     for (arma::uword i = 0; i < ns; ++i) {
         float dTds;
-        if (i == 0)            dTds = (T(1) - T(0)) / grid.ds_i(0);
-        else if (i == ns - 1)  dTds = (T(i) - T(i - 1)) / grid.ds_i(i);
-        else                   dTds = (T(i + 1) - T(i - 1)) / (2.0f * grid.ds_i(i));
+        // Center-to-center separations (grid.ds_iph_i/ds_imh_i mirror the boundary
+        // widths, so the one-sided ends match the legacy Δs on a uniform mesh).
+        if (i == 0)            dTds = (T(1) - T(0)) / grid.ds_iph_i(0);
+        else if (i == ns - 1)  dTds = (T(i) - T(i - 1)) / grid.ds_imh_i(i);
+        else                   dTds = (T(i + 1) - T(i - 1)) / (grid.ds_iph_i(i) + grid.ds_imh_i(i));
         // Under-resolved ⟺ L_R/L_T = Δs|dT/ds|/T > 1/2.
         if (std::fabs(dTds) * grid.ds_i(i) > 0.5f * T(i)) {
             if (T(i) > Tc) Tc = T(i);
@@ -158,8 +186,8 @@ static void apply_drag_stage(const Grid& grid, Vec& prim_state, float dt) {
     const Vec dE_drag = 0.5 * mu % (w_old % w_old - w_new % w_new);
     const float f_i = grid.m_n / (grid.m_i + grid.m_n);
     const float f_n = grid.m_i / (grid.m_i + grid.m_n);
-    const Vec p_i_new = p_i + (2.0f / 3.0f) * f_i * dE_drag;
-    const Vec p_n_new = p_n + (2.0f / 3.0f) * f_n * dE_drag;
+    const Vec p_i_new = p_i + grid.gm1() * f_i * dE_drag;
+    const Vec p_n_new = p_n + grid.gm1() * f_n * dE_drag;
 
     // Frictional heating goes to the combined charged pool (P_I = total charged
     // pressure); with the electron pressure P_E carried unchanged through this
@@ -198,8 +226,11 @@ static void apply_temperature_stage(const Grid& grid, Vec& prim_state, float dt)
         const Vec T_n   = p_n / (n_n * grid.k_b);
 
         const Vec alpha = rho_i % nu_in(grid, n_n, T_i, T_n);
-        const Vec C_i = 3.0 * n_i * grid.k_b;
-        const Vec C_n = 1.5 * n_n * grid.k_b;
+        // Heat capacities per volume C = nk/(γ−1); the charged row carries ions
+        // + electrons (n_e = n_i ⇒ 2 n_i), the neutral row n_n. (β below is a
+        // kinetic collisional coefficient — see Grid::gm1 note — left at 3 k_B.)
+        const Vec C_i = 2.0f * grid.inv_gm1() * n_i * grid.k_b;
+        const Vec C_n = grid.inv_gm1() * n_n * grid.k_b;
         const Vec C_sum = C_i + C_n;
 
         const Vec beta = 3.0 * grid.k_b * alpha / (grid.m_i + grid.m_n);
@@ -240,9 +271,9 @@ static void apply_temperature_stage(const Grid& grid, Vec& prim_state, float dt)
     const Vec T_i = p_proton / (n_i * grid.k_b);
     const Vec T_n = p_n      / (n_n * grid.k_b);
 
-    const Vec C_e = 1.5 * n_i * grid.k_b;
-    const Vec C_i = 1.5 * n_i * grid.k_b;
-    const Vec C_n = 1.5 * n_n * grid.k_b;
+    const Vec C_e = grid.inv_gm1() * n_i * grid.k_b;
+    const Vec C_i = grid.inv_gm1() * n_i * grid.k_b;
+    const Vec C_n = grid.inv_gm1() * n_n * grid.k_b;
 
     const Vec alpha = rho_i % nu_in(grid, n_n, T_i, T_n);
     const Vec g_in  = 3.0 * grid.k_b * alpha / (grid.m_i + grid.m_n);
@@ -333,7 +364,7 @@ static Vec ghost_extended_T(const Grid& grid,
     const Vec etot  = get_scalar(grid, cons_state, cons_E);
     const Vec vel   = mom / rho;
     const Vec phi_g = 0.5 * (grid.phi_g_imh + grid.phi_g_iph);
-    const Vec p     = 2.0/3.0 * etot - 1.0/3.0 * rho % vel % vel - 2.0/3.0 * rho % phi_g;
+    const Vec p     = grid.gm1() * etot - grid.half_gm1() * rho % vel % vel - grid.gm1() * rho % phi_g;
     const Vec n     = rho / m_species;
     const Vec T     = p / (k_per_n * n);
 
@@ -353,7 +384,7 @@ static Vec ghost_extended_T(const Grid& grid,
             : im1(grid, 0.5 * (grid.phi_g_iph + grid.phi_g_imh), SLICE);
         if (outer) phi_g_s[grid.ns - 1] = grid.phi_g_iph[grid.ns - 1];
         else       phi_g_s[0]           = grid.phi_g_imh[0];
-        const Vec p_s = 2.0/3.0 * e_s - 1.0/3.0 * rho_s % v_s % v_s - 2.0/3.0 * rho_s % phi_g_s;
+        const Vec p_s = grid.gm1() * e_s - grid.half_gm1() * rho_s % v_s % v_s - grid.gm1() * rho_s % phi_g_s;
         const Vec n_s = rho_s / m_species;
         return Vec(p_s / (k_per_n * n_s));
     };
@@ -376,7 +407,7 @@ static Vec ghost_extended_Te(const Grid& grid, const Vec& cons_state,
         const Vec rho_i = get_scalar(grid, cs, cons::RHO_I);
         const Vec e_e   = get_scalar(grid, cs, cons::E_E);
         const Vec n_i   = rho_i / grid.m_i;
-        return Vec((2.0f / 3.0f) * e_e / (n_i * grid.k_b));
+        return Vec(grid.gm1() * e_e / (n_i * grid.k_b));
     };
     const Vec T     = Te_of(cons_state);
     const Vec T_ip1 = Te_of(ip1(grid, cons_state));
@@ -404,7 +435,10 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     // evaluated at whichever temperature drives the row; the neutral row is
     // identical in both. The proton conduction κ_i ≈ κ_e/43 is dropped (plan §3).
     const bool  Te_on = grid.enable_Te;
-    const float cfac  = Te_on ? 1.5f : 3.0f;   // C_charged = cfac · n_i k_B
+    // C_charged = cfac · n_i k_B. Single-T conducts the combined charged pool
+    // (ions+electrons ⇒ 2 n_i): cfac = 2/(γ−1). Three-T conducts electrons only
+    // (n_i): cfac = 1/(γ−1). (γ=5/3 ⇒ 3.0 and 1.5 respectively.)
+    const float cfac  = Te_on ? grid.inv_gm1() : 2.0f * grid.inv_gm1();
     const Vec   p_i_orig = get_scalar(grid, prim_state, prim::P_I);
     const Vec   p_e_orig = get_scalar(grid, prim_state, prim::P_E);
 
@@ -477,8 +511,8 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     // 1.5 three-T), so the face value is 0.5·cfac·k_B·(n_i + n_i_shift).
     const Vec Knum_iph_i = (0.5f * cfac * grid.k_b * chi) * (n_i + n_i_ip1);
     const Vec Knum_imh_i = (0.5f * cfac * grid.k_b * chi) * (n_i + n_i_im1);
-    const Vec Knum_iph_n = (0.75f * grid.k_b * chi) * (n_n + n_n_ip1);
-    const Vec Knum_imh_n = (0.75f * grid.k_b * chi) * (n_n + n_n_im1);
+    const Vec Knum_iph_n = (0.5f * grid.inv_gm1() * grid.k_b * chi) * (n_n + n_n_ip1);
+    const Vec Knum_imh_n = (0.5f * grid.inv_gm1() * grid.k_b * chi) * (n_n + n_n_im1);
 
     // TRAC broadening (Johnston 2020): below the adaptive cutoff T_c the charged-
     // fluid conductivity is enhanced by ε=(T_c/T)^{5/2} (→ κ' = κ(T_c), constant),
@@ -493,8 +527,16 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     }
 
     // ----- ion (charged) row ----- K_ion_total = κ_e (κ_i is zero in this code)
-    const Vec K_face_iph_i = 0.5 * (Kb + Kb_ip1) + Knum_iph_i;
-    const Vec K_face_imh_i = 0.5 * (Kb + Kb_im1) + Knum_imh_i;
+    // Spitzer κ_e is combined across a face by the legacy arithmetic average on a
+    // uniform mesh, or the width-weighted series-resistance combination on a
+    // refined mesh (physics.hpp::face_conductivity_series). The isotropic
+    // numerical diffusivity K_num keeps its face average either way.
+    const Vec K_face_iph_i = (grid.uniform_mesh ? Vec(0.5 * (Kb + Kb_ip1))
+                                : face_conductivity_series(Kb, Kb_ip1, grid.ds_i, ds_i_ip1))
+                             + Knum_iph_i;
+    const Vec K_face_imh_i = (grid.uniform_mesh ? Vec(0.5 * (Kb + Kb_im1))
+                                : face_conductivity_series(Kb, Kb_im1, grid.ds_i, ds_i_im1))
+                             + Knum_imh_i;
     const Vec C_i = cfac * n_i * grid.k_b;
     const Vec g_iph_i = grid.B_i / grid.ds_i % (K_face_iph_i / grid.B_iph) / ds_iph;
     const Vec g_imh_i = grid.B_i / grid.ds_i % (K_face_imh_i / grid.B_imh) / ds_imh;
@@ -510,9 +552,16 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
         c_i[i] = -R_coef_i[i];
         b_i[i] = 1.0f + L_coef_i[i] + R_coef_i[i];
     }
-    // Inner BC (Dirichlet at i = -1): fold L_0 * T_ghost into RHS, zero a[0].
-    d_i[0] += L_coef_i[0] * T_ghost_in_i[0];
+    // Inner BC. Default Dirichlet at i = -1: fold L_0 * T_ghost into RHS, zero
+    // a[0]. Neumann (grid.inner_conduction_neumann): zero conductive flux through
+    // the base — drop the inner-face coupling entirely (no L_0 ghost term, no L_0
+    // in the diagonal), so dT/ds = 0 at the base and the photosphere is insulating.
     a_i[0] = 0.0f;
+    if (grid.inner_conduction_neumann) {
+        b_i[0] = 1.0f + R_coef_i[0];
+    } else {
+        d_i[0] += L_coef_i[0] * T_ghost_in_i[0];
+    }
     // Outer BC. Either:
     //   * Neumann fixed-flux (impose_outer_heat_flux): the top face carries the
     //     imposed coronal conductive flux q = outer_heat_flux [W/m²] into the
@@ -531,10 +580,14 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     c_i[nlast] = 0.0f;
     const Vec T_i_new = thomas_solve(a_i, b_i, c_i, d_i);
 
-    // ----- neutral row -----
-    const Vec K_face_iph_n = 0.5 * (K_n + K_n_ip1) + Knum_iph_n;
-    const Vec K_face_imh_n = 0.5 * (K_n + K_n_im1) + Knum_imh_n;
-    const Vec C_n_vec = 1.5 * n_n * grid.k_b;
+    // ----- neutral row ----- (same series-resistance treatment on a refined mesh)
+    const Vec K_face_iph_n = (grid.uniform_mesh ? Vec(0.5 * (K_n + K_n_ip1))
+                                : face_conductivity_series(K_n, K_n_ip1, grid.ds_i, ds_i_ip1))
+                             + Knum_iph_n;
+    const Vec K_face_imh_n = (grid.uniform_mesh ? Vec(0.5 * (K_n + K_n_im1))
+                                : face_conductivity_series(K_n, K_n_im1, grid.ds_i, ds_i_im1))
+                             + Knum_imh_n;
+    const Vec C_n_vec = grid.inv_gm1() * n_n * grid.k_b;
     const Vec g_iph_n = grid.B_i / grid.ds_i % (K_face_iph_n / grid.B_iph) / ds_iph;
     const Vec g_imh_n = grid.B_i / grid.ds_i % (K_face_imh_n / grid.B_imh) / ds_imh;
     Vec R_coef_n = dt * g_iph_n / C_n_vec;
@@ -549,8 +602,12 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
         c_n[i] = -R_coef_n[i];
         b_n[i] = 1.0f + L_coef_n[i] + R_coef_n[i];
     }
-    d_n[0] += L_coef_n[0] * T_ghost_in_n[0];
     a_n[0] = 0.0f;
+    if (grid.inner_conduction_neumann) {
+        b_n[0] = 1.0f + R_coef_n[0];
+    } else {
+        d_n[0] += L_coef_n[0] * T_ghost_in_n[0];
+    }
     d_n[grid.ns - 1] += R_coef_n[grid.ns - 1] * T_ghost_out_n[0];
     c_n[grid.ns - 1] = 0.0f;
     Vec T_n_new = thomas_solve(a_n, b_n, c_n, d_n);
@@ -635,7 +692,7 @@ void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt) 
                   + Q_thin;
     // Pool that radiates: combined charged (single-T) or electron-only (three-T).
     const Vec p_pool = grid.enable_Te ? p_e : p_i;
-    const Vec eps = 1.5f * p_pool;                              // thermal energy density
+    const Vec eps = grid.inv_gm1() * p_pool;                    // thermal energy density
     // Backward-Euler relaxation: ε^{n+1} = ε^n / (1 + Δt Q/ε^n) with Q frozen.
     const Vec denom = 1.0f + dt * Q / arma::clamp(eps, 1.0e-30f, arma::datum::inf);
     const Vec p_pool_new = p_pool / arma::clamp(denom, 1.0e-6f, arma::datum::inf);
@@ -793,7 +850,7 @@ void apply_beam_heating_stage(const Grid& grid, Vec& prim_state, float dt) {
         // targets. The total energy P_I gains the same Δε so E_I stays the
         // conserved total. (cal_dt_i caps Δt on the electron pool so the spike is
         // bounded.) ΔT_e = Δt Q /(1.5 n_i k_B); Δp_e = (2/3)·1.5 n_i k_B ΔT_e = Δt Q.
-        const Vec dp_e = (2.0f / 3.0f) * dt * Q_beam;     // = (2/3) Δε_e
+        const Vec dp_e = grid.gm1() * dt * Q_beam;        // = (γ−1) Δε_e
         prim_state += scalar_to(grid, dp_e, prim::P_E);
         prim_state += scalar_to(grid, dp_e, prim::P_I);
         return;
@@ -801,9 +858,55 @@ void apply_beam_heating_stage(const Grid& grid, Vec& prim_state, float dt) {
     // Single-temperature baseline: share Q_beam between the charged and neutral
     // pools by heat capacity so both gain the SAME ΔT (essential in the weakly
     // ionized chromosphere; see header note). ΔT = Δt Q / (C_i + C_n).
-    const Vec C_i  = 3.0f * n_i * k_b;
-    const Vec C_n  = 1.5f * n_n * k_b;
+    const Vec C_i  = 2.0f * grid.inv_gm1() * n_i * k_b;
+    const Vec C_n  = grid.inv_gm1() * n_n * k_b;
     const Vec dT   = (dt * Q_beam) / (C_i + C_n);
+    const Vec dp_i = 2.0f * n_i % (k_b * dT);          // = (2/3) C_i ΔT
+    const Vec dp_n =        n_n % (k_b * dT);          // = (2/3) C_n ΔT
+    prim_state += scalar_to(grid, dp_i, prim::P_I);
+    prim_state += scalar_to(grid, dp_n, prim::P_N);
+}
+
+// ----------------------------------------------------------------------------
+// Ambient coronal heating stage. Adds the steady footpoint-anchored volumetric
+// heating H(s) [W/m³] (physics.hpp::coronal_heating_rate) over one step, with
+// the SAME pool partitioning and TRAC broadening as the flare beam: in the
+// single-temperature baseline the heat is shared between the charged and neutral
+// fluids by heat capacity so both gain the same ΔT = Δt H / (C_i + C_n); with
+// enable_Te it is deposited into the electron pool (electrons carry the Spitzer
+// conduction that delivers the flux into the TR), mirrored into the total energy
+// P_I so E_I stays the conserved total. H is T-independent, so this explicit
+// additive update is exact and positivity-preserving. No-op unless
+// grid.enable_coronal_heating. Mutates the thermal pressures in place.
+// ----------------------------------------------------------------------------
+void apply_coronal_heating_stage(const Grid& grid, Vec& prim_state, float dt) {
+    if (!grid.enable_coronal_heating) return;
+    const Vec rho_i = get_scalar(grid, prim_state, prim::RHO_I);
+    const Vec rho_n = get_scalar(grid, prim_state, prim::RHO_N);
+    const Vec n_i   = rho_i / grid.m_i;
+    const Vec n_n   = rho_n / grid.m_n;
+    const float k_b = grid.k_b;
+
+    Vec Q = coronal_heating_rate(grid);                // W/m³, +ve = heating
+    if (arma::all(Q <= 0.0f)) return;
+    if (grid.enable_trac) {
+        const Vec p_i = get_scalar(grid, prim_state, prim::P_I);
+        const Vec p_e = get_scalar(grid, prim_state, prim::P_E);
+        const Vec T_e = grid.enable_Te ? Vec(p_e / (n_i * k_b))
+                                       : Vec(p_i / (2.0f * n_i * k_b));
+        Q /= trac_broadening_factor(grid, T_e);
+    }
+    if (grid.enable_Te) {
+        // Deposit into the electrons (Δp_e = Δt Q); mirror into the total P_I.
+        const Vec dp_e = grid.gm1() * dt * Q;          // = (γ−1) Δε_e
+        prim_state += scalar_to(grid, dp_e, prim::P_E);
+        prim_state += scalar_to(grid, dp_e, prim::P_I);
+        return;
+    }
+    // Single-temperature baseline: share by heat capacity → equal ΔT.
+    const Vec C_i  = 2.0f * grid.inv_gm1() * n_i * k_b;
+    const Vec C_n  = grid.inv_gm1() * n_n * k_b;
+    const Vec dT   = (dt * Q) / (C_i + C_n);
     const Vec dp_i = 2.0f * n_i % (k_b * dT);          // = (2/3) C_i ΔT
     const Vec dp_n =        n_n % (k_b * dT);          // = (2/3) C_n ΔT
     prim_state += scalar_to(grid, dp_i, prim::P_I);
@@ -966,15 +1069,15 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     // Energy bookkeeping (writeup §5.3, eqs. stageE-ei / stageE-en). We update
     // in *thermal* form: convert pressures to thermal energy ε = (3/2) p, apply
     // the source-driven Δε, then rebuild pressures from the new ε and KE.
-    const Vec eps_i_old = 1.5 * p_i;
-    const Vec eps_n_old = 1.5 * p_n;
+    const Vec eps_i_old = grid.inv_gm1() * p_i;
+    const Vec eps_n_old = grid.inv_gm1() * p_n;
     const Vec KE_i_old  = 0.5 * rho_i % V % V;
     const Vec KE_n_old  = 0.5 * rho_n % U % U;
     const Vec KE_i_new  = 0.5 * rho_i_new % V_new % V_new;
     const Vec KE_n_new  = 0.5 * rho_n_new % U_new % U_new;
 
-    const Vec th_inherit = 1.5 * grid.k_b * T_n;   // per-particle thermal carried by new ion
-    const Vec th_leave   = 1.5 * grid.k_b * T_i;   // per-particle thermal leaving with recomb. neutral
+    const Vec th_inherit = grid.inv_gm1() * grid.k_b * T_n;   // per-particle thermal carried by new ion
+    const Vec th_leave   = grid.inv_gm1() * grid.k_b * T_i;   // per-particle thermal leaving with recomb. neutral
     const Vec KE_inherit = 0.5 * m * U % U;        // per-particle KE inherited by new ion (from neutral)
     const Vec KE_leave   = 0.5 * m * V % V;        // per-particle KE leaving ion fluid
 
@@ -1009,8 +1112,8 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     // (writeup §5.3); the lost energy is the radiative-heating term that a
     // future PR will supply.
     const float p_floor = 1.0e-15f;
-    Vec p_i_new = (2.0f / 3.0f) * eps_i_new;
-    Vec p_n_new = (2.0f / 3.0f) * eps_n_new;
+    Vec p_i_new = grid.gm1() * eps_i_new;
+    Vec p_n_new = grid.gm1() * eps_n_new;
     for (arma::uword i = 0; i < grid.ns; ++i) {
         if (p_i_new(i) < p_floor) p_i_new(i) = p_floor;
         if (p_n_new(i) < p_floor) p_n_new(i) = p_floor;
@@ -1024,7 +1127,7 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     Vec p_e_new = p_e_old;
     if (grid.enable_Te) {
         const Vec chi_eps = -(Gamma_coll + Gamma_mlvl - Gamma_rec_3b) * grid.chi_H_J;
-        p_e_new = p_e_old + (2.0f / 3.0f) * chi_eps;
+        p_e_new = p_e_old + grid.gm1() * chi_eps;
         for (arma::uword i = 0; i < grid.ns; ++i) {
             if (p_e_new(i) < p_floor)                 p_e_new(i) = p_floor;
             if (p_e_new(i) > p_i_new(i) - p_floor)    p_e_new(i) = p_i_new(i) - p_floor;
@@ -1041,12 +1144,30 @@ void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt) {
     prim_state += scalar_to(grid, p_e_new,   prim::P_E);
 }
 
+// Equilibrium-reference well-balancing (chromosphere.hpp::eq_wb): on the first
+// step, cache R_eq = rhs_explicit_state(eq_state) so it can be subtracted every
+// step, making eq_state an exact discrete fixed point. Computed here (not in the
+// const rhs_explicit_state) because it mutates grid; the empty() guard inside
+// rhs_explicit_state ensures this capture is itself uncorrected. dt_state is set
+// by broadcast_dt before this runs; R_eq's residual dt-dependence is 2nd-order
+// small at equilibrium (the predictor half-step is a near-no-op at balance).
+static void ensure_eq_residual(Grid& grid) {
+    if (grid.eq_wb && grid.eq_residual.is_empty() && !grid.eq_state.is_empty()) {
+        grid.eq_residual = rhs_explicit_state(grid, grid.eq_state);
+    }
+}
+
 // ----------------------------------------------------------------------------
-// Backward-Euler integrator (writeup §3.7, §5.3): explicit MUSCL step for R_E,
-// then four stiff sub-steps (B→C→D→E) that solve R_I exactly inside one Δt.
+// Backward-Euler split integrator (writeup §3.7, §5.3). The operational order is
+// A: explicit MUSCL/Rusanov hydro RHS; B: drag; C: ion-neutral temperature
+// equilibration; D: implicit conduction; E: ionization (when enabled); then
+// optional beam/coronal heating, radiative cooling, and floors/electron slaving.
+// In particular, Stage D changes pressure at fixed velocity and the next Stage-A
+// RHS differentiates that updated pressure field.
 // ----------------------------------------------------------------------------
 Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     broadcast_dt(grid, dt_i);
+    ensure_eq_residual(grid);
 
     Vec U_star = xn_state + grid.dt_state % rhs_explicit_state(grid, xn_state);
     Vec prim   = cons2prim(grid, U_star);
@@ -1057,13 +1178,18 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     // evaporation front on the coarse grid, which would feed a negative T into
     // the conduction tridiagonal and produce NaN. The floor clips densities and
     // pressures positive and slaves the trace neutral; no-op for steady runs.
-    if (grid.enable_beam_heating) apply_flare_floor_stage(grid, prim);
+    if (grid.floors_active()) apply_flare_floor_stage(grid, prim);
     // TRAC: recompute the adaptive cutoff T_c from the current profile so the
     // conduction and cooling stages broaden the (currently) unresolved TR.
     if (grid.enable_trac) grid.trac_cutoff_T = compute_trac_cutoff_T(grid, prim);
     apply_drag_stage(grid, prim, dt);
     apply_temperature_stage(grid, prim, dt);
-    apply_conduction_stage(grid, prim, dt);
+    // Stage D heat conduction. Default-on; the isentropic relaxation experiment
+    // (model_column Stage 1) disables it so the adiabatic atmosphere stays a
+    // conduction-free Euler steady state (docs/gentle_evaporation_downflow.md).
+    if (grid.enable_conduction) {
+        apply_conduction_stage(grid, prim, dt);
+    }
     if (grid.enable_ionization) {
         apply_ionization_stage(grid, prim, dt);
     }
@@ -1074,12 +1200,19 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     if (grid.enable_beam_heating) {
         apply_beam_heating_stage(grid, prim, dt);
     }
+    // Ambient coronal heating BEFORE cooling, like the beam: the RTV balance is
+    // the competition between this heating, conduction, and the radiative sink.
+    // Always-on for a steady run (no temporal gate beyond the optional Phase-3
+    // ramp inside coronal_heating_rate); no-op when enable_coronal_heating is off.
+    if (grid.enable_coronal_heating) {
+        apply_coronal_heating_stage(grid, prim, dt);
+    }
     if (grid.enable_radiative_cooling) {
         apply_radiative_cooling_stage(grid, prim, dt);
     }
     // Vacuum floor / trace-neutral slaving — keeps the fully-ionized evaporated
     // column well-conditioned (ρ_n→0). No-op for steady scenarios.
-    if (grid.enable_beam_heating) {
+    if (grid.floors_active()) {
         apply_flare_floor_stage(grid, prim);
     }
 
@@ -1102,11 +1235,13 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
 // comparison runs that need R_I ≡ 0.
 Vec advance_Euler_explicit_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     broadcast_dt(grid, dt_i);
+    ensure_eq_residual(grid);
     return xn_state + grid.dt_state % rhs_explicit_state(grid, xn_state);
 }
 
 Vec advance_RK4(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     broadcast_dt(grid, dt_i);
+    ensure_eq_residual(grid);
     const Vec k1 = grid.dt_state % rhs_explicit_state(grid, xn_state);
     const Vec k2 = grid.dt_state % rhs_explicit_state(grid, xn_state + 0.5 * k1);
     const Vec k3 = grid.dt_state % rhs_explicit_state(grid, xn_state + 0.5 * k2);

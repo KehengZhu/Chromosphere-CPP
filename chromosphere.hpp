@@ -79,6 +79,18 @@ struct Grid {
 
     // --- physical constants (SI) ------------------------------------------
     float gamma_mono = 5.0f / 3.0f;
+    // Adiabatic-index factors derived from gamma_mono so the equation of state
+    // and every energy↔pressure / heat-capacity conversion tracks a single γ.
+    // The thermal energy density of an ideal gas is ε = p/(γ−1), so the pressure
+    // is p = (γ−1)[E − ½ρv² − ρφ] and the heat capacity per volume is C = nk/(γ−1).
+    // At the γ=5/3 default these reduce to the historical literals: gm1()=2/3,
+    // inv_gm1()=3/2, half_gm1()=1/3. NOTE: these are the *thermodynamic* index
+    // only — Spitzer κ∝T^{5/2} and the ion–neutral collisional energy-exchange
+    // coefficient (3 k_B α/(m_i+m_n)) are kinetic-theory factors, intentionally
+    // NOT tied to gamma_mono.
+    inline float gm1()      const { return gamma_mono - 1.0f; }           // γ−1
+    inline float inv_gm1()  const { return 1.0f / (gamma_mono - 1.0f); }  // 1/(γ−1)
+    inline float half_gm1() const { return 0.5f * (gamma_mono - 1.0f); }  // (γ−1)/2
     float m_i        = 1.6726219e-27f;
     float m_n        = 1.6726219e-27f;
     float m_e        = 9.10938356e-31f;
@@ -103,7 +115,7 @@ struct Grid {
     // (cool weakly-ionized chromosphere ~6 kK through the dense flare
     // condensation to the ~10⁷ K, fully-ionized evaporated plasma), so the
     // complete network is the correct default; each channel is the leading
-    // term in some regime (see util/visualization/c7_ioniz_recomb_rates.png):
+    // term in some regime (see visualization/c7_ioniz_recomb_rates.png):
     //
     // enable_direct_collisional_ionization: S_i (Voronov 1997 ground-state
     //   electron-impact rate). Subdominant to the multilevel S_CR by 2–3 orders
@@ -154,6 +166,103 @@ struct Grid {
     //     (Bradshaw 2006; Manchester 2012). Toggled at runtime by ENABLE_TE=1.
     bool enable_Te = false;
 
+    // Well-balanced gravity in the explicit MUSCL reconstruction. The TVD-MUSCL
+    // step limits PRIMITIVE variables, obtaining the neighbour pressures by
+    // cons2prim of the spatially-shifted conserved states (ip1/im1/ip2/im2 in
+    // rhs_explicit_state). But cons2prim subtracts the LOCAL-index φ_g, while the
+    // shifted cell's total energy carries that cell's ρφ_g — so each neighbour
+    // pressure is biased by ⅔ρ·Δφ_g = ⅔ρg·Δs, which turns the hydrostatic slope
+    // dp/ds = −ρg into −⅓ρg (the reconstructed pressure gradient is only ⅓ of the
+    // true one). A hydrostatic atmosphere then feels a spurious, resolution-
+    // independent (γ−1)g ≈ ⅔g downward force and cannot stay static. (Stage-D
+    // conduction already shifts φ_g correctly — rhs_implicit_state — so only the
+    // explicit reconstruction is affected.) When true, rhs_explicit_state corrects
+    // the shifted-state pressures with the shifted φ_g, so a hydrostatic profile is
+    // a discrete fixed point (V≈0) and the isentropic relaxation
+    // (docs/gentle_evaporation_downflow.md, model_column) holds. Default false
+    // keeps every existing scenario / the 5950-test baseline byte-for-byte; set by
+    // model_column. (Candidate to enable globally — it is the physically
+    // correct reconstruction and removes the spurious chromospheric downflow.)
+    bool well_balanced = false;
+
+    // Log-space MUSCL reconstruction in rhs_explicit_state. In a gravitationally
+    // stratified atmosphere ρ and p are EXPONENTIAL in height, so a linear TVD slope
+    // misrepresents them and minmod clips the steep gradient to first order, injecting
+    // Rusanov numerical diffusion that is worst at the dense lower boundary. When true,
+    // the reconstruction limits log ρ / log p (the strictly-positive, exponentially-
+    // stratified primitive slots {RHO_I, RHO_N, P_I, P_N, P_E}) instead — an isothermal
+    // hydrostatic column is then piecewise-LINEAR, the minmod ratio r→1 passes the full
+    // slope, and the reconstructed face jump (hence the diffusion) collapses. The SIGNED
+    // velocities {V, U} stay linear (log undefined; no large dynamic range). Faces are
+    // exp'd back before prim2cons so the scheme stays conservative; applied AFTER the
+    // well-balanced φ_g pressure correction (which must see linear p). Default false
+    // keeps every existing scenario / the test baseline byte-for-byte; always on in
+    // model_column. Composes with well_balanced.
+    bool log_reconstruct = false;
+
+    // Slope limiter for the explicit MUSCL reconstruction (rhs_explicit_state).
+    // Default false ⇒ the symmetric minmod limiter φ(r)=max(0,min(1,r)) used
+    // everywhere (writeup eq 15; slimL=slimR so one flux_lim(r) feeds both faces
+    // of a cell). True ⇒ the MC3 / Koren limiter (BATSRUS ModFaceValue 'mc3'), the
+    // ASYMMETRIC third-order (κ=1/3) monotonized-central limiter: less diffusive
+    // than minmod, so it clips the under-resolved TR gradient far less (the source
+    // of the O(Δs) base-drainage truncation in the iso runs). Because it is
+    // asymmetric, the '+' and '−' reconstruction terms take DIFFERENT limited
+    // slopes — see flux_lim_mc3_plus / flux_lim_mc3_minus. limiter_beta is the
+    // Koren β (2 ⇒ classic Koren; 1 ⇒ minmod-like). Default off keeps every
+    // existing scenario / the 5958-test baseline byte-for-byte; always on in
+    // model_column (β=2). Composes with log_reconstruct and well_balanced (it only
+    // changes how the same differences are limited).
+    bool  mc3_limiter = false;
+    float limiter_beta = 2.0f;
+
+    // Equilibrium-reference ("δ-form") well-balancing. The φ_g correction
+    // (well_balanced) fixes the gravity-potential bookkeeping and log_reconstruct
+    // makes the reconstruction EXACT for an isothermal (log-linear) column — but a
+    // general NON-isothermal hydrostatic atmosphere (e.g. Model C7, with a
+    // temperature minimum) is only reproduced to O(Δs), so the explicit MUSCL step
+    // applies a small spurious force even at rest ⇒ a residual O(Δs) base drainage
+    // (docs/boundary_conditions_plan.md). This device removes it for ANY
+    // stratification: capture the scheme's explicit-RHS residual at a frozen
+    // reference equilibrium once, R_eq = rhs_explicit_state(eq_state), and subtract
+    // it every step. Then rhs_explicit_state(eq_state) − R_eq ≡ 0, so eq_state is an
+    // EXACT discrete steady state (V=0 held to round-off, resolution-independent),
+    // while real deviations from equilibrium (conduction-driven evaporation) evolve
+    // normally minus that fixed O(Δs) correction. eq_state is the (V=0, HSE) IC set
+    // by the scenario; eq_residual is computed lazily on the first step (integrators)
+    // with subtraction disabled via the empty() guard. Default off (eq_residual
+    // empty ⇒ no subtraction ⇒ byte-identical baseline); always on in model_column.
+    // Complements well_balanced / log_reconstruct; supersedes the isothermal-only
+    // exactness of log_reconstruct for non-isothermal columns.
+    bool eq_wb = false;
+    Vec  eq_state;      // frozen reference equilibrium (conserved), set by scenario IC
+    Vec  eq_residual;   // cached explicit-RHS residual at eq_state (empty until computed)
+
+    // model_c7 "New explanation" upper BC (docs/gentle_evaporation_downflow.md):
+    // when set, model_c7_update_bc imposes at the TR-base top face a hydrostatic
+    // ghost pressure (centered HSE ⇒ no spurious boundary downflow), a FIXED
+    // temperature jump T_ghost = a·T_ref, b·a·T_ref (the downward conductive flux
+    // q(T) then enters via the Stage-D Dirichlet ghost-T, not the imposed Neumann
+    // flux), and an EOS ghost density at that (p, T) — replacing the Mach-capped
+    // RTV reservoir. Set true only by the bare `model_c7` scenario (which also
+    // turns on well_balanced and turns off impose_outer_heat_flux); default false
+    // keeps model_flare / analytic_canopy / model_gentle — which share
+    // model_c7_ic / model_c7_update_bc — and the 5950-test baseline unchanged.
+    bool c7_tr_jump_bc = false;
+
+    // Enable Stage D (field-aligned heat conduction) in advance_Euler_state.
+    // Default ON so the existing scenarios / test suite are byte-for-byte
+    // unchanged. The isentropic single-fluid relaxation experiment
+    // (docs/gentle_evaporation_downflow.md, model_column Stage 1) sets this
+    // false to switch OFF all heat flux — the adiabatic atmosphere T(z) ∝ (1 −
+    // z/H_ad) is then an exact steady state of the (conduction-free) Euler
+    // equations, so the relaxation should hold the linear T profile with V ≈ 0.
+    // Stage 2 flips it back on, with the imposed top temperature jump (the
+    // ghost-cell Dirichlet BC) supplying the downward conductive flux. NOTE: the
+    // isotropic numerical diffusivity below is folded into the Stage D operator,
+    // so it is also disabled when conduction is off.
+    bool enable_conduction = true;
+
     // Isotropic numerical thermal diffusivity χ_num [m²/s] added to the Stage D
     // conduction operator (Pandey et al. 2024 §3.3): an explicit ∂T/∂t = χ ∂²T/∂s²
     // term, realized as an additive face conductivity K_num = χ·C (C = heat
@@ -176,6 +285,42 @@ struct Grid {
     bool  impose_outer_heat_flux = false;
     float outer_heat_flux        = 0.0f;
 
+    // Inner-boundary conduction BC. Default false ⇒ Dirichlet: the innermost
+    // conduction face couples cell 0 to the inner ghost temperature (the
+    // photospheric reservoir's fixed T — a heat sink at the base). True ⇒ Neumann
+    // (zero conductive flux through the base, dT/ds = 0): the inner face coupling
+    // is dropped from the Stage-D tridiagonal so the base is insulating and the
+    // photosphere heats freely. Set by model_column from ISO_INNER_T_NEUMANN.
+    bool  inner_conduction_neumann = false;
+
+    // Time-ramp on the imposed coronal conductive flux q(T) — the gentle
+    // conduction-driven evaporation driver (docs/gentle_evaporation_plan.md v2).
+    // The scenario stores the steady quiet value in outer_heat_flux_base; the
+    // boundary update sets outer_heat_flux = base · enhance(sim_time), where
+    // enhance(t) rises with a cosine ramp from 1 to outer_heat_flux_enhance over
+    // [t_on, t_on+ramp]. enhance = 1 (default) ⇒ no ramp (steady q, unchanged
+    // behavior for model_c7 / model_flare). Raising it above 1 increases the
+    // downward coronal conductive flux into the TR/upper chromosphere → the
+    // gentle upflow (Antiochos & Sturrock 1978). Set by model_gentle.
+    float outer_heat_flux_base    = 0.0f;
+    float outer_heat_flux_t_on    = 0.0f;
+    float outer_heat_flux_ramp    = 1.0f;
+    float outer_heat_flux_enhance = 1.0f;
+
+    // Corona-as-boundary domain top [km] for model_c7_ic(extended=true). The
+    // extended C7 table (Avrett & Loeser 2008 Table 26) reaches 68 Mm / 1.59 MK;
+    // this lifts the upper boundary into a real resolved coronal VOLUME (so the
+    // evaporated mass has somewhere to accumulate — the coronal EM rise that *is*
+    // gentle evaporation), with q(T) imposed at that high coronal top. 0 (default)
+    // ⇒ use the full table top. Set by model_gentle from GENTLE_TOP_KM.
+    float corona_top_km           = 0.0f;
+
+    // Absolute height [km] of the domain base, used only to label the output
+    // heights chromo_main writes (cumulative ds + base). Defaults to the C7 base
+    // (1003 km) so every existing scenario's output is unchanged; model_column
+    // sets it to its actual base (0 km for the photosphere-anchored C7 IC).
+    float out_base_km             = 1003.0f;
+
     // Transition-Region Adaptive Conduction (TRAC; Johnston et al. 2019, 2020).
     // When enabled, an adaptive cutoff temperature T_c is recomputed each step
     // (the highest temperature where the TR is under-resolved, L_R/L_T > 1/2,
@@ -189,6 +334,10 @@ struct Grid {
     bool  enable_trac   = false;
     float trac_T_chrom  = 2.0e4f;   // TRAC-region base temperature T_b [K]
     float trac_cutoff_T = 2.0e4f;   // adaptive cutoff T_c [K], recomputed each step
+    float trac_Tc_max_frac = 0.2f;  // upper bound on T_c as a fraction of T_peak
+                                    // (Johnston 2020 Eq. 9: 0.2). Raise toward 1 on a
+                                    // corona-less domain (e.g. iso_t22k, T_peak≈22 kK)
+                                    // so the cap does not pin T_c to the T_b floor.
 
     // Effective hydrogen photoionization rate from the ground state [s^-1],
     // modeling the Lyα-excitation + Balmer-continuum two-step channel
@@ -253,11 +402,66 @@ struct Grid {
     float beam_E_cut_keV          = 20.0f;   // low-energy cutoff E_c [keV]
     float beam_delta              = 5.0f;    // injected power-law spectral index δ (>2)
 
+    // --- ambient coronal (footpoint) heating (gentle conduction-driven evaporation) ---
+    // Steady volumetric heating H(s) [W/m³] standing in for the (sub-grid) coronal
+    // heating mechanism that sustains a loop against conduction + radiation — the
+    // Rosner–Tucker–Vaiana (1978) static energy balance
+    //   d/ds(κ_e T^{5/2} dT/ds) + H(s) − n²Λ(T) = 0.
+    // make_loop_dat.py supplies the hydrostatic line; this term supplies H(s), the
+    // missing ingredient that makes a resolved chromosphere→TR→corona column a true
+    // steady state rather than a draining, prescribed-T atmosphere. Footpoint-
+    // anchored exponential (Aschwanden & Schrijver 2002 §3):
+    //   H(s) = coronal_heat_E0 · exp(−d(s)/s_H) · enhance(t),
+    // where d(s) is the field-aligned distance to the nearest footpoint
+    // (one-sided d = s − s₀ for open / half-loop; two-sided d = min over both ends
+    // for a full loop, set by coronal_heat_two_sided). The uniform-heating limit
+    // is recovered as s_H → ∞ (Martens 2010: T(s) is only weakly sensitive to the
+    // shape). UNLIKE the transient beam this is ALWAYS on for a steady run; gentle
+    // evaporation (Antiochos & Sturrock 1978) is driven by a slow time RAMP of the
+    // amplitude (coronal_heat_enhance > 1), kept sub-threshold so v ≪ c_s.
+    //
+    // Heating is deposited into the charged thermal pool exactly like the beam
+    // (apply_coronal_heating_stage): shared with neutrals by heat capacity in the
+    // single-T baseline, into the electron pool when enable_Te (electrons conduct).
+    // Default off so existing scenarios / the test suite are byte-for-byte unchanged.
+    bool  enable_coronal_heating  = false;
+    float coronal_heat_E0         = 0.0f;     // E_H0 [W/m³], footpoint heating amplitude
+    float coronal_heat_sH         = 1.0e7f;   // heating scale length s_H [m]
+    float coronal_heat_s0         = 0.0f;     // footpoint anchor s₀ [m] (arc length, cell-0 face = 0)
+    bool  coronal_heat_two_sided  = false;    // true: decay from BOTH ends (full loop)
+    // Phase-3 ramp: multiply E_H0 by a smooth flat-top window that rises from 1 to
+    // coronal_heat_enhance over [t_on, t_on+ramp]. enhance = 1 (default) ⇒ no ramp
+    // (steady relaxation); enhance > 1 raises the heating to drive the upflow.
+    float coronal_heat_t_on       = 0.0f;     // ramp onset time [s]
+    float coronal_heat_ramp       = 1.0f;     // cosine ramp half-width [s]
+    float coronal_heat_enhance    = 1.0f;     // peak amplitude multiplier after the ramp
+
+    // Positivity / vacuum floor (apply_flare_floor_stage + the rhs predictor and
+    // reconstructed-face floors). Clips ρ,p positive, caps |V|, and — where the
+    // ionization fraction f ≥ 0.99 — slaves the trace neutral onto the charged
+    // fluid (the exact single-fluid limit). Flare runs switch this on implicitly
+    // via enable_beam_heating; STEADY scenarios whose hot upper layers fully
+    // ionize (ρ_n→0 → 0/0 velocity decode and a runaway spectral radius → NaN,
+    // e.g. the C7 column once the TR ionizes) opt in via enable_vacuum_floor.
+    // Default false keeps the test suite and untouched scenarios byte-for-byte.
+    bool  enable_vacuum_floor     = false;
+    // True when the positivity/vacuum floors should run this step.
+    bool  floors_active() const { return enable_beam_heating || enable_vacuum_floor; }
+
     // When true, the outer boundary uses a transparent (Neumann) outflow on the
     // velocity instead of the slow Mach-0.05 cap, so a supersonic evaporation
     // upflow can leave the domain. Set by flare scenarios. Default false keeps
-    // the C7 quiet-Sun Mach-capped outflow.
+    // the C7 quiet-Sun Mach-capped outflow. NOTE: a Neumann outflow is ill-posed
+    // for INflow (a downflow at the top feeds mass in unphysically); use the
+    // Mach cap (below) for runs whose residual is a downflow.
     bool  outer_free_outflow      = false;
+
+    // Mach-number fraction for the capped outer outflow (model_c7_update_bc):
+    // V_ghost is clamped to ±outer_mach_cap·c_s(T_TR). Default 0.05 (the quiet-Sun
+    // value the C7 tests pin). A gentle-evaporation run raises it (e.g. 0.5) so the
+    // subsonic upflow exits without the ill-posed free-outflow inflow — the steady
+    // relaxation flow (≪ cap) is unaffected.
+    float outer_mach_cap          = 0.05f;
 
     // When true, the outer face is a reflecting symmetry plane rather than an
     // outflow: the outer ghosts mirror the interior with V,U → −V,−U, so the net
@@ -291,11 +495,46 @@ struct Grid {
     Vec B_state, B_state_imh, B_state_iph;
     Vec dinvB_ds_state, ds_state, dt_state;
 
+    // --- static-mesh metric caches (rebuilt by broadcast() from ds_i) ------
+    // Support for a metric-aware, static non-uniform finite-volume mesh (static
+    // local refinement — NOT AMR: no runtime regridding). Every quantity here is
+    // derived from the canonical cell-width array `ds_i`, taking the cell CENTER
+    // at the geometric midpoint of its two faces:
+    //   * `s_face`   — face arc length [m] from the inner boundary (s_face[0]=0),
+    //                  length ns+1.
+    //   * `s_i`      — cell-center arc length [m], length ns.
+    //   * `ds_iph_i` — center-to-center distance to the i+1 neighbour [m]. At the
+    //                  outer boundary the ghost width mirrors the last cell, so
+    //                  ds_iph_i[ns-1] = ds_i[ns-1] (Neumann), matching the legacy
+    //                  0.5*(ds_i + ip1(ds_i,SLICE)) formula used in rhs/conduction.
+    //   * `ds_imh_i` — center-to-center distance to the i-1 neighbour [m], with the
+    //                  inner ghost width mirrored: ds_imh_i[0] = ds_i[0].
+    // On a UNIFORM mesh ds_iph_i = ds_imh_i = ds_i, `uniform_mesh` is true, and
+    // every spacing-sensitive operator keeps its legacy code path (byte-for-byte
+    // identical results). broadcast() sets `uniform_mesh` by scanning ds_i and
+    // rejects (throws) any non-positive / non-finite width.
+    Vec  s_i, s_face;
+    Vec  ds_iph_i, ds_imh_i;
+    bool uniform_mesh = true;
+
+    // Packed (n_state) center-to-center distances, used by the non-uniform MUSCL
+    // reconstruction and conduction paths. Populated by broadcast() on every mesh
+    // (they equal ds_state on a uniform mesh).
+    Vec ds_iph_state, ds_imh_state;
+
     /// Allocate arrays for ns cells, fill physical constants, zero the fields.
     void init(arma::uword ns_in, float CFL_in);
 
-    /// Recompute the packed `_state` broadcasts from ds_i, B_i, B_imh, B_iph,
-    /// dinvB_ds_i. Call after editing any of those fields.
+    /// Re-allocate the ns-sized arrays for a new cell count WITHOUT touching the
+    /// physical constants, γ, CFL, or any runtime toggle. Used by the static-mesh
+    /// scenarios: peek_ns() returns the coarse-equivalent count, then the IC builds
+    /// the (possibly refined) face grid and resizes so the allocated count matches
+    /// the generated mesh. No-op when ns_new == ns.
+    void resize(arma::uword ns_new);
+
+    /// Recompute the packed `_state` broadcasts and the static-mesh metric caches
+    /// from ds_i, B_i, B_imh, B_iph, dinvB_ds_i. Call after editing any of those
+    /// fields. Throws std::runtime_error on a non-positive / non-finite ds_i.
     void broadcast();
 };
 
@@ -330,6 +569,16 @@ Vec prim2cons(const Grid& grid, const Vec& prim_state);
 
 /// Minmod limiter (writeup eq 15): φ(r) = max(0, min(1, r)).
 Vec flux_lim(const Vec& r);
+
+/// MC3 / Koren limiter (BATSRUS ModFaceValue 'mc3') — the ASYMMETRIC third-order
+/// (κ=1/3) monotonized-central limiter. In the code's ratio form r = Δ₋/Δ₊ the two
+/// faces of a cell take DIFFERENT limited slopes (unlike the symmetric minmod):
+///   '+' faces (Lxn = u_i + ½φΔ₊):  φ₊(r) = max(0, min(β r, β, (2r+1)/3))
+///   '−' faces (Rxn = u_i − ½φΔ₊):  φ₋(r) = max(0, min(β r, β, (r+2)/3))
+/// β = grid.limiter_beta (2 ⇒ classic Koren). Non-finite r ⇒ 0 (first order at
+/// flats/extrema, matching flux_lim). Selected by grid.mc3_limiter in rhs.
+Vec flux_lim_mc3_plus (const Vec& r, float beta);
+Vec flux_lim_mc3_minus(const Vec& r, float beta);
 
 /// Cell-centered flux F(U).
 Vec cal_flux_state(const Grid& grid, const Vec& xn_state);
@@ -385,6 +634,14 @@ void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt);
 /// window around grid.sim_time, to drive chromospheric evaporation (Fisher et
 /// al. 1985). No-op unless grid.enable_beam_heating. Mutates p_i in place.
 void apply_beam_heating_stage(const Grid& grid, Vec& prim_state, float dt);
+
+/// Ambient coronal heating stage: deposits the steady footpoint-anchored
+/// volumetric heating H(s) (physics.hpp::coronal_heating_rate) into the charged
+/// thermal pool (shared with neutrals by heat capacity; electrons when
+/// enable_Te), driving the conductive flux that sustains the corona and, when
+/// ramped up (coronal_heat_enhance > 1), gentle chromospheric evaporation
+/// (Antiochos & Sturrock 1978). No-op unless grid.enable_coronal_heating.
+void apply_coronal_heating_stage(const Grid& grid, Vec& prim_state, float dt);
 
 /// TRAC adaptive cutoff temperature T_c (Johnston et al. 2020 Eq. 8): the
 /// maximum temperature among grid cells where the charged-fluid TR is

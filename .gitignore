@@ -1,14 +1,18 @@
 .cache/
 .claude/
+.agents/
 build/
 .DS_Store
 writeup-overleaf/
 docs/presentation-build/
 docs/latex-build/
+# LaTeX build artifacts (LaTeX Workshop / latexmk -outdir) in any latex-build/ subfolder
+**/latex-build/
 __pycache__/
 .venv/
+.vscode/
 util/data/
-util/visualization/
+visualization/
 scenarios/data/*.dat
 outputs/
 

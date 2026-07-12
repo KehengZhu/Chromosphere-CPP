@@ -11,7 +11,7 @@ with the un-simulated corona above the cap drawn faded). This is the campaign's
 Inputs: the ensemble index from extract_event_ensemble.py (lines + 3-D paths + the
 .dat/.txt of each run) and the ADAPT magnetogram (for the photosphere colour).
 
-Outputs (util/visualization/):
+Outputs (visualization/):
   event_ensemble_3d_peak.png   — snapshot at --snap-time (flare-filled loops)
   event_ensemble_3d.mp4        — time evolution: the flare lighting up the lines
 
@@ -138,7 +138,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--lines-json", default="outputs/event_ensemble_lines.json")
     ap.add_argument("--magnetogram", required=True)
-    ap.add_argument("--out-dir", default="util/visualization")
+    ap.add_argument("--out-dir", default="visualization")
     ap.add_argument("--snap-time", type=float, default=40.0, help="static PNG time [s]")
     ap.add_argument("--t-max", type=float, default=160.0)
     ap.add_argument("--n-frames", type=int, default=90)

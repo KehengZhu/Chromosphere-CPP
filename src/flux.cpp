@@ -17,8 +17,8 @@ Vec cal_flux_state(const Grid& grid, const Vec& xn_state) {
     const Vec phi_g = 0.5 * (grid.phi_g_imh + grid.phi_g_iph);
     // p_i = total charged pressure (protons + electrons): the momentum flux and
     // the charged total-energy flux are unchanged by the T_e split.
-    const Vec p_i   = 2.0/3.0 * e_i - 1.0/3.0 * rho_i % V % V - 2.0/3.0 * rho_i % phi_g;
-    const Vec p_n   = 2.0/3.0 * e_n - 1.0/3.0 * rho_n % U % U - 2.0/3.0 * rho_n % phi_g;
+    const Vec p_i   = grid.gm1() * e_i - grid.half_gm1() * rho_i % V % V - grid.gm1() * rho_i % phi_g;
+    const Vec p_n   = grid.gm1() * e_n - grid.half_gm1() * rho_n % U % U - grid.gm1() * rho_n % phi_g;
 
     F_state += scalar_to(grid, rhoV_i,              cons::RHO_I);
     F_state += scalar_to(grid, rhoU_n,              cons::RHO_N);
@@ -45,8 +45,8 @@ Vec cal_spectral_radius_state(const Grid& grid, const Vec& xn_state) {
     const Vec V     = rhoV_i / rho_i;
     const Vec U     = rhoU_n / rho_n;
     const Vec phi_g = 0.5 * (grid.phi_g_imh + grid.phi_g_iph);
-    Vec p_i   = 2.0/3.0 * e_i - 1.0/3.0 * rho_i % V % V - 2.0/3.0 * rho_i % phi_g;
-    Vec p_n   = 2.0/3.0 * e_n - 1.0/3.0 * rho_n % U % U - 2.0/3.0 * rho_n % phi_g;
+    Vec p_i   = grid.gm1() * e_i - grid.half_gm1() * rho_i % V % V - grid.gm1() * rho_i % phi_g;
+    Vec p_n   = grid.gm1() * e_n - grid.half_gm1() * rho_n % U % U - grid.gm1() * rho_n % phi_g;
 
     // Flare scenario: in the fast (~10²–10³ km/s), hot (~10⁷ K) evaporated column
     // the float32 cancellation p = ⅔E − ⅓ρv² − ⅔ρφ can leave p slightly NEGATIVE,
@@ -83,8 +83,8 @@ Vec cal_source_state(const Grid& grid, const Vec& xn_state) {
     const Vec V     = rhoV_i / rho_i;
     const Vec U     = rhoU_n / rho_n;
     const Vec phi_g = 0.5 * (grid.phi_g_imh + grid.phi_g_iph);
-    const Vec p_i   = 2.0/3.0 * e_i - 1.0/3.0 * rho_i % V % V - 2.0/3.0 * rho_i % phi_g;
-    const Vec p_n   = 2.0/3.0 * e_n - 1.0/3.0 * rho_n % U % U - 2.0/3.0 * rho_n % phi_g;
+    const Vec p_i   = grid.gm1() * e_i - grid.half_gm1() * rho_i % V % V - grid.gm1() * rho_i % phi_g;
+    const Vec p_n   = grid.gm1() * e_n - grid.half_gm1() * rho_n % U % U - grid.gm1() * rho_n % phi_g;
 
     // Gravity at cell center from the face potentials.
     const Vec gb = -(grid.phi_g_iph - grid.phi_g_imh) / grid.ds_i;
@@ -104,11 +104,22 @@ Vec cal_source_state(const Grid& grid, const Vec& xn_state) {
     if (grid.enable_Te) {
         const Vec V     = rhoV_i / rho_i;
         const Vec e_e   = get_scalar(grid, xn_state, cons::E_E);
-        const Vec p_e   = 2.0/3.0 * e_e;
+        const Vec p_e   = grid.gm1() * e_e;
         const Vec V_ip1 = ip1(grid, V, SLICE);
         const Vec V_im1 = im1(grid, V, SLICE);
-        const Vec Vf_iph = 0.5 * (V + V_ip1);
-        const Vec Vf_imh = 0.5 * (V_im1 + V);
+        // Face velocity by interpolation between cell centers. Uniform mesh: the
+        // midpoint average. Refined mesh: distance-weighted so the face value is a
+        // proper linear interpolant (metric-weighted), keeping ∇·V second-order.
+        Vec Vf_iph, Vf_imh;
+        if (grid.uniform_mesh) {
+            Vf_iph = 0.5 * (V + V_ip1);
+            Vf_imh = 0.5 * (V_im1 + V);
+        } else {
+            const Vec ds_ip1 = ip1(grid, grid.ds_i, SLICE);
+            const Vec ds_im1 = im1(grid, grid.ds_i, SLICE);
+            Vf_iph = (0.5 * ds_ip1 % V + 0.5 * grid.ds_i % V_ip1) / grid.ds_iph_i;
+            Vf_imh = (0.5 * grid.ds_i % V_im1 + 0.5 * ds_im1 % V) / grid.ds_imh_i;
+        }
         const Vec divV = grid.B_i % (Vf_iph / grid.B_iph - Vf_imh / grid.B_imh) / grid.ds_i;
         S_state += scalar_to(grid, -p_e % divV, cons::E_E);
     }

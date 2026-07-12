@@ -152,7 +152,7 @@ def main():
 
     fig.suptitle(f"{tag}: two-fluid (ON) vs single-fluid (OFF) — same beam/IC/BCs", fontsize=12)
     fig.tight_layout()
-    png = f"util/visualization/two_fluid/compare_{tag}.png"
+    png = f"visualization/two_fluid/compare_{tag}.png"
     fig.savefig(png, dpi=120)
     print(f"  wrote {png}")
 

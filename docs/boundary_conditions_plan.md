@@ -103,7 +103,7 @@ The full plan below is **implemented**, with the user's "RTV now, TRAC after" ch
 - **Upper BC.** Retired the ad-hoc (T,2T)/(V/2,V/4) cascade. New: ρ,T Neumann (constant-pressure TR), Mach-capped (M≤0.05) mass-flux outflow, neutral slaved (U=V). `q(T)` is imposed as a **Neumann conductive-flux** outer BC on the ion conduction row (new `Grid::impose_outer_heat_flux`, `outer_heat_flux`), NOT a Dirichlet hot wall — a hot wall over-conducts via κ_e∝T^{5/2} on the coarse grid and drove a spurious supersonic downflow (verified). `q = (2/7)κ₀T_cor^{7/2}/L ≈ 90 W/m²` (RTV quiet-Sun).
 - **Isotropic numerical diffusion** (`Grid::numerical_diffusivity`, Pandey 2024) folded into the Stage-D face conductivities as `K_num = χ·C`; model_c7 sets χ≈5.5×10⁷ m²/s (grid-scaled).
 - **q(T) ↔ cooling are paired.** `impose_outer_heat_flux = enable_radiative_cooling`: an imposed coronal flux has no steady sink without radiation. So the **physically-complete model_c7 runs with cooling ON**; no-cooling is a diagnostic baseline.
-- **Validation.** *cooling + q(T):* stable to the step cap (t=328 s), top supported (P_top ×1.5), base steady, |V|≲3 km/s — the top forms a self-consistent TR/low-corona (~3×10⁵ K) that re-conducts the flux down. *no-cooling (q off):* now stable to 553 s (the old collapse at ~104 s is gone; top drains only ×6, never singular). Movie: `util/visualization/model_c7_evolution.mp4` (cooling+q run, 1001 frames). All 5834 C++ tests pass.
+- **Validation.** *cooling + q(T):* stable to the step cap (t=328 s), top supported (P_top ×1.5), base steady, |V|≲3 km/s — the top forms a self-consistent TR/low-corona (~3×10⁵ K) that re-conducts the flux down. *no-cooling (q off):* now stable to 553 s (the old collapse at ~104 s is gone; top drains only ×6, never singular). Movie: `visualization/model_c7_evolution.mp4` (cooling+q run, 1001 frames). All 5834 C++ tests pass.
 - **TR optically-thin radiation — ADDED (2026-06).** The "known limitation" below (no TR-temperature radiative sink) is now resolved: `physics.hpp::radiative_loss_thin` adds `Q_thin = n_e n_H Λ(T)` (coronal-abundance Λ, peak ≈4×10⁻³⁵ W m³ at log T≈5.1; CHIANTI-class, Klimchuk 2008), stitched to CL2012 by a ~2×10⁴ K tanh switch, summed into Stage R. With it the column self-consistently forms **chromosphere → thin radiating TR → low corona**: the chromosphere proper stays 5–9×10³ K (it is no longer the chromosphere that heats — the >10⁵ K gas is corona *above* the TR). The TR-temperature radiation (column-integrated ~30–60 W/m²) re-radiates the imposed q; the enthalpy flux (the other dominant TR term) was already in the hydro. `q(T)` was retuned from 90→**~29 W/m²** (L_cor 1.5e7→4.5e7), the sweet spot of the stable window q∈[~30,90]: it puts the TR base as high as possible (~1.77×10³ km) with the corona capped ~2×10⁵ K. Below ~10 W/m² the run hits the radiative-loss-peak thermal/condensation instability and fails. Stable to 411 s; 5834 tests pass; movie regenerated. Refs added to bib: Klimchuk2008, BradshawCargill2010, Landi2012 (NEQ Λ underestimate ≲3×). Writeup updated (paper.tex §closures, main.tex cooling appendix).
 - **TRAC κ/Λ/Q broadening + eq.27 jump condition — ADDED (2026-06).** Johnston et al. 2019/2020 TRAC implemented: `integrators.cpp::compute_trac_cutoff_T` finds the adaptive cutoff T_c each step (max T where L_R/L_T > δ=1/2, L_T=T/|dT/ds|, clamped [trac_T_chrom=2e4, 0.2 T_peak]); `physics.hpp::trac_broadening_factor` returns ε=(T_c/T)^{5/2} in [T_b,T_c); Stage D multiplies κ_e by ε, Stage R divides the optically-thin loss by ε. This keeps κΛ and κQ invariant → TR-integrated radiation/heating (coronal density response) conserved on the coarse grid = **the eq.27 jump condition enforced analytically** by the broadening (not as a separate discontinuity BC — that's the 2019 approach, incompatible with our finite-volume conduction). Gated `enable_trac = enable_radiative_cooling`. **Cutoff limiter (Johnston 2020 App. A.2) was REQUIRED:** without it a sudden T_c jump (2e4→3.4e4) caused a conduction shock and NaN at ~105 s; rate-limiting |ΔT_c| to ≤3%/step (both directions) makes engagement smooth and stable. With the limiter, the ad-hoc numerical diffusivity was reduced 5.5e7→2.2e7 (TRAC, which conserves the integrals, now does the principled TR broadening; diffusion is just a stability floor). Stable to step cap (406 s), TRAC engages smoothly (T_c lifts to ~2.1e4 when the TR sharpens, then relaxes), chromosphere 5.1–6.2 kK, TR base ~1.74e3 km, corona ~2e5 K, drift −1.5%. 5852 tests pass (+2 TRAC tests: broadening conservation, cutoff detection+limiter). Writeup: paper.tex §bc + main.tex Stage-D both have TRAC paragraphs; Johnston2019/2020 already in bib. Movie regenerated. Added T_c to chromo_main step diagnostic.
 - **Finding:** TRAC is near-latent in the steady model_c7 (the TR is already marginally resolved by the grid+diffusion), correctly acting only when the TR sharpens. It does NOT move the TR base to 2153 km — TR location is set by the q-vs-radiation energy balance, not resolution; TRAC makes that balance grid-converged. Pushing the TR to the boundary would need a different q / coronal density, or a longer column. Secondary omitted sinks remain: ambipolar H-ionization energy flux in the lower TR (Fontenla 1990), He ionization (Golding) — minor.
@@ -132,6 +132,76 @@ The full plan below is **implemented**, with the user's "RTV now, TRAC after" ch
 - (b) Draft the `reference.bib` entries + the §4.5 writeup rewrite.
 - (c) Implement the BC code changes in `model_c7_update_bc`.
 - Decide between RTV-integral $q(T)$ vs. full TRAC (jump condition + broadening). TRAC is more robust on the coarse grid but is a larger code change.
+
+## Discrete BC formulation for `model_isentropic` (implemented) — inner vs. outer, and the density well-balancing fix
+
+This section records the *discrete* ghost-cell states actually used by `model_isentropic` (`scenarios/model_isentropic.cpp`, `model_isentropic_update_bc`), and the proposed extension that removes a residual base downflow. All three closures use the same machinery — two ghost cells per end, primitive state reconstructed (TVD-MUSCL, `log_reconstruct` on the density/pressure slots), then Rusanov/LLF flux. They differ only in *what state the ghosts hold*.
+
+**Notation.** Boundary cell width $\Delta s$; gravity magnitude $g$ (inward). Base reference (cell 0, captured at the IC): $\rho_{i0}=n_{i0}m_i$, $\rho_{n0}=n_{n0}m_n$, $p_{i0}=2n_{i0}k T_0$ (the factor 2 = electrons), $p_{n0}=n_{n0}k T_0$, fixed reservoir temperature $T_0$. Top reference: top cell $(\rho_\mathrm{top},p_\mathrm{top},T_\mathrm{top},x_\mathrm{top},V_\mathrm{top})$, next-in pressure $p_2$, imposed top temperature $T_\mathrm{ref}$ (= `ISO_T_TOP`, 22000 K here), jump factors $a,b$ (=1 here). Ghost G0 = one cell outside, G1 = two cells outside. Energy packed as $E=p/(\gamma-1)+\rho\,\phi_g$ (the same $\rho$ must appear in the RHO slot and this $\rho\phi_g$ term or $c\!\to\!p$ decode is wrong); $E_E=\tfrac12 p_i/(\gamma-1)$ so $T_e=T_i$.
+
+### Current INNER BC — photospheric reservoir (`ISO_INNER_WB=1`)
+
+$$
+\begin{array}{l|ll}
+ & \textbf{G0}\;(-1) & \textbf{G1}\;(-2)\\\hline
+\rho_i & \rho_{i0} & \rho_{i0}\ \text{(same — pinned flat)}\\
+\rho_n & \rho_{n0} & \rho_{n0}\ \text{(same — pinned flat)}\\
+p_i & p_{i0}+\rho_{i0}g\Delta s & p_{i0}+2\rho_{i0}g\Delta s\\
+p_n & p_{n0}+\rho_{n0}g\Delta s & p_{n0}+2\rho_{n0}g\Delta s\\
+V & 0 & 0
+\end{array}
+$$
+
+Conduction: Dirichlet $T=T_0$ (default) or Neumann $dT/ds=0$ (`ISO_INNER_T_NEUMANN`). Pressure carries the hydrostatic slope $-\rho_{i0}g$ (well-balanced — `ISO_INNER_WB` fixed the G1 pressure, `kInnerPiGh2`, vs. an earlier flat copy). **But the density is pinned flat**, so the implied ghost temperature *rises* ($T_G\propto p_G/\rho_0$): the reservoir is **not isothermal**, and — the key defect — the ghost-side density slope is **zero** while the interior slope is hydrostatic.
+
+### Current OUTER BC — lower-TR reservoir / Mach-capped outflow
+
+$$
+\begin{array}{l|ll}
+ & \textbf{G0}\;(N) & \textbf{G1}\;(N{+}1)\\\hline
+p_\mathrm{tot} & p_{g0}=p_2-2\Delta s\,\rho_\mathrm{top}g & p_{g1}=p_\mathrm{top}-2\Delta s\,\rho_{g0}g\\
+T & T_{g0}=a\,T_\mathrm{ref} & T_{g1}=b\,T_{g0}\\
+\rho & \rho_{g0}=\dfrac{p_{g0}m_i}{(1+x_\mathrm{top})k T_{g0}} & \rho_{g1}=\dfrac{p_{g1}m_i}{(1+x_\mathrm{top})k T_{g1}}\\
+(\rho_i,\rho_n) & (x_\mathrm{top}\rho_{g0},(1{-}x_\mathrm{top})\rho_{g0}) & (x_\mathrm{top}\rho_{g1},(1{-}x_\mathrm{top})\rho_{g1})\\
+V & V_g & V_g
+\end{array}
+$$
+
+with $V_g=0$ (Stage 1) or $V_g=\mathrm{clamp}(V_\mathrm{top},\pm\,\text{Mach}\cdot c_s)$ (Stage 2). Pressure hydrostatic (centered HSE); **density from the EOS** at the ghost $(p,T)$ so $\rho_{g0}\ne\rho_{g1}$ (**stratified**). Any residual mismatch is harmless: $\rho$ is $\sim10^4\times$ smaller there, and this boundary is an *outflow*, not a static wall.
+
+### Why the inner boundary drains and the outer does not
+
+`log`-density reconstruction is *exact* on a hydrostatic column (that is the point of `log_reconstruct`: $\rho_L=\rho_R$ at every interior face $\Rightarrow$ zero Rusanov density jump). At the inner face the ghost-side $\log\rho$ slope is 0 (flat ghost) while the interior slope is $\sim\Delta s/H$, so the RHO slope ratio $r\to0\Rightarrow$ first order $\Rightarrow$ the reconstructed $\rho_L$ (ghost side) is pinned flat while $\rho_R$ (cell-0 side) follows the stratification $\Rightarrow \rho_R-\rho_L=\mathcal O(\Delta s)$. That jump feeds the Rusanov/LLF mass flux (`rhs.cpp`, acts on **every** conserved slot):
+$$F_\mathrm{mass}=\tfrac12(\rho V_L+\rho V_R)-\tfrac12\,\alpha\,(\rho_R-\rho_L),\qquad V=0:\ F_\mathrm{mass}=-\tfrac12\alpha(\rho_R-\rho_L)\ne0,$$
+a spurious base drainage $\sim\rho\,c_s\,(\Delta s/H)=\mathcal O(\Delta s)$, amplified by the $\sim10^4\times$ larger base density. The outer boundary avoids it because its ghost density is EOS-stratified ($\rho_L\approx\rho_R$), and is an outflow anyway. (Consistent with the observation that the MC3 limiter — which sharpens $\rho_R$ only — cut the drainage $\sim40\%$ but could not remove it: $\rho_L$ stays flat regardless of limiter.)
+
+### Proposed INNER BC — mirror the outer construction (isothermal reservoir), `ISO_INNER_WB_RHO=1`
+
+Keep the hydrostatic pressures; **derive the ghost densities from the EOS at the reservoir temperature $T_0$** instead of pinning them flat (i.e. $\rho\propto p$ at fixed $T_0$ — the same recipe the outer ghost already uses):
+
+$$
+\begin{array}{l|ll}
+ & \textbf{G0}\;(-1) & \textbf{G1}\;(-2)\\\hline
+p_i,p_n & \text{unchanged (hydrostatic)} & \text{unchanged (hydrostatic)}\\
+\rho_i & \dfrac{p_i m_i}{2k T_0}=\rho_{i0}\dfrac{p_i}{p_{i0}} & \rho_{i0}\dfrac{p_i}{p_{i0}}\\
+\rho_n & \dfrac{p_n m_n}{k T_0}=\rho_{n0}\dfrac{p_n}{p_{n0}} & \rho_{n0}\dfrac{p_n}{p_{n0}}\\
+V & 0 & 0
+\end{array}
+$$
+
+i.e. $\rho_{i,G0}=\rho_{i0}(1+\rho_{i0}g\Delta s/p_{i0})$, $\rho_{i,G1}=\rho_{i0}(1+2\rho_{i0}g\Delta s/p_{i0})$, and similarly for $\rho_n$. This is a $\sim\!1\%$-per-cell change, but it makes the ghost-side $\log\rho$ slope match the interior to $\mathcal O(\Delta s^2)$ $\Rightarrow r\to1$ $\Rightarrow \rho_L=\rho_R$ $\Rightarrow$ the Rusanov mass leak $\to\mathcal O(\Delta s^2)$ (from $\mathcal O(\Delta s)$). $V=0$ becomes an exact discrete fixed point for **mass** as well as pressure/momentum, and the reservoir is now genuinely isothermal at $T_0$. Gated behind `ISO_INNER_WB_RHO` (default off) so all prior runs / the test baseline are byte-for-byte unchanged; requires `ISO_INNER_WB=1` (it stratifies both ghosts' density consistently with the WB pressures).
+
+### Comparison
+
+| | current inner | current outer | proposed inner |
+|---|---|---|---|
+| pressure ghosts | hydrostatic ✓ | hydrostatic ✓ | hydrostatic ✓ (unchanged) |
+| **density ghosts** | **flat $\rho_0$** ✗ | EOS-stratified ✓ | **EOS-stratified $\rho_0\,p/p_0$** ✓ |
+| implied ghost $T$ | rises (non-isothermal) | imposed | constant $T_0$ (isothermal) |
+| velocity | 0 (static wall) | Mach-capped outflow | 0 (static wall) |
+| $\rho_L$ vs $\rho_R$ at face | mismatch $\mathcal O(\Delta s)$ ✗ | $\approx$ match ✓ | match $\mathcal O(\Delta s^2)$ ✓ |
+| Rusanov mass leak at rest | $\ne0\Rightarrow$ base downflow | $\approx0$ ($\rho$ tiny) | $\to0$ |
+| exact fixed point for | pressure/momentum only | (outflow, N/A) | **mass + momentum** |
 
 ## References (papers in `docs/supporting-papers/`)
 

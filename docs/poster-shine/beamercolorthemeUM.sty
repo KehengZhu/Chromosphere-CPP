@@ -1,0 +1,193 @@
+% UM Gemini theme
+% Inspired from:
+% See: https://github.com/alfurka/gemini-uq
+% Forked from
+% https://rev.cs.uchicago.edu/k4rtik/gemini-uccs
+% which is forked from
+% https://github.com/anishathalye/gemini
+
+% ====================
+% Definitions
+% ====================
+
+
+% Reference:
+% https://communications.dartmouth.edu/visual-identity/design-elements/color-palette
+% https://brand.umich.edu/logos/
+
+% \ProvidesPackage{beamercolorthemeUM}
+% \mode<presentation>  % Invoke presentation mode
+
+% \RequirePackage{xcolor}
+
+
+% Define colours for University of Michigan
+\definecolor{Maize}{RGB}{255, 209, 0}
+\definecolor{Blue}{RGB}{0, 41, 102}
+\definecolor{Amethyst}{RGB}{69, 2, 247}
+\definecolor{MatthaeiViolet}{RGB}{59, 45, 183}
+\definecolor{ArboretumBlue}{RGB}{31, 128, 255}
+\definecolor{PumaBlack}{RGB}{0, 4, 10}
+\definecolor{TappanRed}{RGB}{157, 14, 0}
+\definecolor{VeryBlack}{RGB}{0, 0, 0}
+
+\definecolor{MyGold}{RGB}{230, 200, 19}
+
+% Define colors for Dartmouth College
+\definecolor{DartmouthGreen}{RGB}{0, 105, 62}
+\definecolor{ForestGreen}{RGB}{18, 49, 43}
+\definecolor{SnowWhite}{RGB}{255, 255, 255}
+\definecolor{MidnightBlack}{RGB}{0, 0, 0}
+\definecolor{RiverBlue}{RGB}{155, 200, 235}
+\definecolor{RiverNavy}{RGB}{0, 60, 115}
+\definecolor{SpringGreen}{RGB}{165, 215, 95}
+\definecolor{BonfireOrange}{RGB}{255, 160, 15}
+\definecolor{BonfireRed}{RGB}{157, 22, 46}
+\definecolor{TuckOrange}{RGB}{230, 60, 47}
+\definecolor{AutumnBrown}{RGB}{100, 60, 32}
+\definecolor{WinterGray}{RGB}{200, 188, 208}
+\definecolor{WebGray1}{RGB}{247, 247, 247}
+\definecolor{WebGray2}{RGB}{226, 226, 226}
+
+% Colors (from Xun)
+\definecolor{mediumtealblue}{rgb}{0.0, 0.33, 0.71}
+\definecolor{carmine}{rgb}{0.59, 0.0, 0.09}
+\definecolor{desert}{rgb}{0.76, 0.6, 0.42}
+\definecolor{khaki}{rgb}{0.76, 0.69, 0.57}
+\definecolor{sapphire}{rgb}{0.03, 0.15, 0.4}
+
+% % Colors.
+% \newcommand{\myblue}[1]{{\color[rgb]{0,0,0.65} #1}}
+% \newcommand{\mylblue}[1]{{\color[rgb]{0,0,1.} #1}}
+% \newcommand{\mygreen}[1]{{\color[rgb]{0,.65,0} #1}}
+% \newcommand{\mywhite}[1]{{\color[rgb]{1.0,1.0,1.0} #1}}
+% \newcommand{\myred}[1]{{\color[rgb]{0.65,0.0,0.0} #1}}
+% \newcommand{\mylred}[1]{{\color[rgb]{1,0.0,0.0} #1}}
+% \newcommand{\myblack}[1]{{\color[rgb]{0.0,0.0,0.0} #1}}
+% \newcommand{\mygrey}[1]{{\color[rgb]{0.6,0.6,0.6} #1}}
+% \newcommand{\mylightgrey}[1]{{\color[rgb]{0.8,0.8,0.8} #1}}
+
+
+% Basic colors
+\setbeamercolor{palette primary}{fg=black,bg=white}
+\setbeamercolor{palette secondary}{fg=black,bg=white}
+\setbeamercolor{palette tertiary}{bg=black,fg=white}
+\setbeamercolor{palette quaternary}{fg=black,bg=white}
+
+
+% Items
+% \setbeamercolor{structure}{fg=Amethyst}
+\setbeamertemplate{itemize item}[triangle]
+\setbeamercolor{itemize item}{fg=Amethyst}
+\setbeamertemplate{navigation symbols}{}  % no navigation on a poster
+% Headline
+\setbeamercolor{headline}{fg=Maize, bg=Blue}
+\setbeamercolor{headline rule}{bg=Blue}
+
+% Author and Institure
+\setbeamercolor{headline author}{fg=white}
+% \setbeamercolor{date}{fg=Black}
+\setbeamercolor{headline institute}{fg=white}
+
+% Line head colors
+\setbeamercolor{lower separation line head}{bg=Maize}
+\setbeamercolor{upper separation line foot}{bg=Maize}
+
+% Block
+\setbeamercolor{block title}{fg=Maize, bg=Blue}
+\setbeamercolor{block separator}{bg=Maize}
+\setbeamercolor{block body}{fg=black, bg=white}
+
+% Alert Block
+\setbeamercolor{block alerted title}{fg=Blue, bg=lightgray!25}
+\setbeamercolor{block alerted separator}{bg=Maize}
+\setbeamercolor{block alerted body}{fg=black, bg=lightgray!25}
+
+% Heading
+\setbeamercolor{heading}{fg=black}
+
+% Itemize
+\setbeamercolor{item}{fg=darkgray}
+
+% Bibliography
+\setbeamercolor{bibliography item}{fg=black}
+\setbeamercolor{bibliography entry author}{fg=black}
+\setbeamercolor{bibliography entry title}{fg=black}
+\setbeamercolor{bibliography entry location}{fg=black}
+\setbeamercolor{bibliography entry note}{fg=black}
+\setbeamertemplate{bibliography entry article}{}
+\setbeamertemplate{bibliography entry title}{}
+\setbeamertemplate{bibliography entry location}{}
+\setbeamertemplate{bibliography entry note}{}
+% % set colors for block elements
+% \setbeamercolor{sidebar}{bg=WebGray1}
+
+% \setbeamercolor{titlelike}{fg=SnowWhite,bg=Blue}
+% \setbeamercolor{author}{fg=VeryBlack}
+% \setbeamercolor{date}{fg=Amethyst}
+% \setbeamercolor{institute}{fg=Blue}
+
+% \setbeamercolor{frametitle}{fg=Maize,bg=Blue}
+% \setbeamercolor{framesubtitle}{fg=SnowWhite}
+
+% \setbeamercolor{normal text}{fg=VeryBlack}
+% \setbeamercolor{structure}{fg=Blue}
+% \setbeamercolor{alerted text}{fg=TappanRed}
+% \setbeamercolor{example text}{fg=DartmouthGreen}
+
+% \setbeamercolor{block title}{use=structure,fg=SnowWhite,bg=structure.fg!75!PumaBlack}
+% \setbeamercolor{block title alerted}{use=alerted text,fg=SnowWhite,bg=alerted text.fg!75!PumaBlack}
+% \setbeamercolor{block title example}{use=example text,fg=SnowWhite,bg=example text.fg!75!PumaBlack}
+
+% \setbeamercolor{block body}{bg=WebGray1!25!SnowWhite,fg=PumaBlack}
+% \setbeamercolor{block body alerted}{bg=WebGray1!25!SnowWhite,fg=PumaBlack}
+% \setbeamercolor{block body example}{bg=WebGray1!25!SnowWhite,fg=PumaBlack}
+
+% \setbeamercolor{section in toc}{fg=MatthaeiViolet,bg=SnowWhite}
+
+% \setbeamercolor{navigation symbols}{fg=ArboretumBlue}
+
+
+
+
+% \definecolor{Orange}{RGB}{255,110,30}  % Caltech Orange!
+
+% \definecolor{Red}{HTML}{E53E30}  % "Pantone 179"
+% \definecolor{Green}{HTML}{00AD69}  % "Pantone 3405"
+% \definecolor{Blue}{HTML}{2171b5}
+% \definecolor{Purple}{HTML}{652F6C}  % "Pantone 520"
+
+% \definecolor{White}{RGB}{255,255,255}
+% \definecolor{DarkGrey}{RGB}{118,119,123}
+% \definecolor{MediumGrey}{RGB}{200,200,200}
+% \definecolor{LightGrey}{RGB}{240,240,240}
+% \definecolor{Black}{RGB}{0,0,0}
+
+% \setbeamercolor{sidebar}{bg=LightGrey}
+
+% \setbeamercolor{titlelike}{fg=Orange,bg=LightGrey}
+% \setbeamercolor{author}{fg=Black}
+% \setbeamercolor{date}{fg=Black}
+% \setbeamercolor{institute}{fg=Black}
+
+% \setbeamercolor{frametitle}{fg=Orange,bg=LightGrey}
+% \setbeamercolor{framesubtitle}{fg=Green}
+
+% \setbeamercolor{normal text}{fg=Black}
+% \setbeamercolor{structure}{fg=Blue}
+% \setbeamercolor{alerted text}{fg=Red}
+% \setbeamercolor{example text}{fg=Green}
+
+% \setbeamercolor{block title}{use=structure,fg=White,bg=structure.fg!75!Black}
+% \setbeamercolor{block title alerted}{use=alerted text,fg=White,bg=alerted text.fg!75!Black}
+% \setbeamercolor{block title example}{use=example text,fg=White,bg=example text.fg!75!Black}
+
+% \setbeamercolor{block body}{bg=MediumGrey!25!White,fg=Black}
+% \setbeamercolor{block body alerted}{bg=MediumGrey!25!White,fg=Black}
+% \setbeamercolor{block body example}{bg=MediumGrey!25!White,fg=Black}
+
+% \setbeamercolor{section in toc}{fg=Black,bg=White}
+
+% \setbeamercolor{navigation symbols}{fg=Orange}
+
+\mode<all>

@@ -47,6 +47,21 @@ inline Vec kappa_e(const Vec& n_e, const Vec& n_n, const Vec& T_e) {
             / (n_e + 2.836e-11f * n_n % T_e % T_e));
 }
 
+/// Width-weighted series-resistance face conductivity for a NON-UNIFORM mesh.
+/// The conductive flux from cell center i to center j crosses two half-cells in
+/// series, so the effective face conductivity is the resistance-weighted harmonic
+/// mean over the center-to-center distance ds_i+ds_j:
+///   K_face = (ds_i + ds_j) / (ds_i/K_i + ds_j/K_j).
+/// On a uniform mesh this is the harmonic mean 2 K_i K_j/(K_i+K_j) — NOT the
+/// arithmetic average — so callers keep the legacy arithmetic average
+/// 0.5(K_i+K_j) on uniform meshes and only switch to this on refined ones.
+inline Vec face_conductivity_series(const Vec& K_here, const Vec& K_there,
+                                    const Vec& ds_here, const Vec& ds_there) {
+    const Vec kh = arma::clamp(K_here,  1.0e-30f, arma::datum::inf);
+    const Vec kt = arma::clamp(K_there, 1.0e-30f, arma::datum::inf);
+    return (ds_here + ds_there) / (ds_here / kh + ds_there / kt);
+}
+
 /// Neutral heat conductivity in SI units (writeup eq 59).
 inline Vec kappa_n(const Vec& n_i, const Vec& n_n, const Vec& T_i, const Vec& T_n) {
     return (0.0342006f * n_n % T_n)
@@ -523,6 +538,62 @@ inline Vec beam_heating_rate(const Grid& grid, const Vec& n_i, const Vec& n_n) {
 
     Q = (grid.beam_flux * g / norm) * w;            // W m^-3
     return Q;
+}
+
+// ============================================================================
+// Ambient coronal (footpoint) heating — gentle conduction-driven evaporation
+//   H(s) = E_H0 · exp(−d(s)/s_H) · enhance(t)   [W/m³],  positive = heating.
+//   The steady, footpoint-anchored exponential heating of Aschwanden & Schrijver
+//   (2002, ApJS 142, 269, §3): E_H0 is the volumetric heating rate at the loop
+//   base and s_H the field-aligned scale length over which it decays into the
+//   corona. This is the H(s) term in the RTV (1978) static loop balance
+//   d/ds(κ_e T^{5/2} dT/ds) + H − n²Λ = 0 — the ingredient the code previously
+//   lacked, without which a resolved corona simply drains. d(s) is the distance
+//   to the nearest chromospheric footpoint (two-sided for a full loop so the
+//   heating is weakest at the apex; one-sided from the inner footpoint for an
+//   open line / half loop). The s_H → ∞ limit gives uniform heating (Martens
+//   2010: T(s) is only weakly sensitive to the shape).
+//
+//   enhance(t) is the Phase-3 driver: 1 during relaxation, ramped up to
+//   coronal_heat_enhance to drive the gentle upflow. A modest, slow increment
+//   keeps it in the Antiochos & Sturrock (1978) gentle regime (v ≪ c_s); a
+//   large/fast jump would tip into the Fisher (1985) explosive regime.
+// ============================================================================
+inline Vec coronal_heating_rate(const Grid& grid) {
+    Vec H = arma::zeros<Vec>(grid.ns);
+    if (!grid.enable_coronal_heating || grid.coronal_heat_E0 <= 0.0f) return H;
+
+    // Time ramp enhance(t): hold at 1 until t_on, cosine-rise to enhance over
+    // [t_on, t_on+ramp], hold. enhance ≡ 1 (relaxation default) ⇒ purely steady.
+    float amp = 1.0f;
+    if (grid.coronal_heat_enhance != 1.0f) {
+        const float t   = grid.sim_time;
+        const float ton = grid.coronal_heat_t_on;
+        const float r   = (grid.coronal_heat_ramp > 1.0e-6f) ? grid.coronal_heat_ramp : 1.0e-6f;
+        float w;
+        if (t <= ton)          w = 0.0f;
+        else if (t >= ton + r) w = 1.0f;
+        else w = 0.5f * (1.0f - std::cos(static_cast<float>(arma::datum::pi) * (t - ton) / r));
+        amp = 1.0f + (grid.coronal_heat_enhance - 1.0f) * w;
+    }
+
+    // Field-aligned distance to the nearest footpoint. Arc length is accumulated
+    // from grid.ds_i with the cell-0 inner face at s = 0.
+    const Vec& ds    = grid.ds_i;
+    const float s_end = arma::sum(ds);
+    const float sH    = (grid.coronal_heat_sH > 1.0e-3f) ? grid.coronal_heat_sH : 1.0e-3f;
+    const float E0amp = grid.coronal_heat_E0 * amp;
+    float s_lo = 0.0f;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const float s_c = s_lo + 0.5f * ds(i);
+        float d = grid.coronal_heat_two_sided
+                    ? std::min(s_c, s_end - s_c) - grid.coronal_heat_s0
+                    : s_c - grid.coronal_heat_s0;
+        if (d < 0.0f) d = 0.0f;
+        H(i) = E0amp * std::exp(-d / sH);
+        s_lo += ds(i);
+    }
+    return H;
 }
 
 } // namespace chromosphere

@@ -16,7 +16,9 @@ int main(int argc, char** argv) {
     //   output_path:  defaults to "output.txt"
     //   mode:         "full" (semi-implicit, default) or "explicit" (R_I ≡ 0)
     //   ionization:   "ionization" (default — Stage E enabled) or "no-ionization"
-    //   scenario:     "model_c7" (default) | "pfss_field_line" | "analytic_canopy"
+    //   scenario:     "model_column" (default — the unified chromosphere→corona column;
+    //                 accepts "model_isentropic" / "model_gentle" as aliases) |
+    //                 "model_c7" | "model_flare" | "pfss_field_line" | "analytic_canopy"
     //   data_path:    required for tabulated scenarios (e.g. pfss_field_line);
     //                 ignored otherwise (pass "-" or "" for scenarios that don't use it)
     //   time_mult:    multiplier on the default total_time (default 1.0). Step
@@ -26,7 +28,7 @@ int main(int argc, char** argv) {
     const std::string out_path      = (argc > 1) ? argv[1] : "outputs/output.txt";
     const std::string mode          = (argc > 2) ? argv[2] : "full";
     const std::string ioniz_arg     = (argc > 3) ? argv[3] : "ionization";
-    const std::string scenario_name = (argc > 4) ? argv[4] : "model_c7";
+    const std::string scenario_name = (argc > 4) ? argv[4] : "model_column";
     const std::string data_path     = (argc > 5) ? argv[5] : "";
     const float       time_mult     = (argc > 6) ? std::stof(argv[6]) : 1.0f;
     const std::string cool_arg      = (argc > 7) ? argv[7] : "cooling";
@@ -72,8 +74,10 @@ int main(int argc, char** argv) {
 
     // Multi-snapshot output. Format:
     //   line 1: "ns num_of_eq"
-    //   line 2: ns cumulative cell heights in km (offset by 1003 km to match
-    //           the C7 base; ds_i is in m, hence the 1e-3 conversion)
+    //   line 2: ns cumulative cell heights in km (offset by grid.out_base_km, the
+    //           domain base — 1003 km for C7-based scenarios, 0 km for the
+    //           photosphere-anchored model_isentropic C7 IC; ds_i is in m, hence
+    //           the 1e-3 conversion)
     //   then, repeated: a "# t = T step = S" marker followed by ns lines of
     //   num_of_eq space-separated conserved-variable values.
     std::ofstream fout(out_path);
@@ -82,7 +86,7 @@ int main(int argc, char** argv) {
         float cum_km = 0.0f;
         for (arma::uword i = 0; i < grid.ns; ++i) {
             cum_km += grid.ds_i(i) * 1.0e-3f;
-            fout << "  " << (cum_km + 1.003e3f);
+            fout << "  " << (cum_km + grid.out_base_km);
         }
         fout << '\n';
     }

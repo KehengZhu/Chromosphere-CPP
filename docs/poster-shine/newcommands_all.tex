@@ -1,0 +1,259 @@
+% Colors.
+\newcommand{\myblue}[1]{{\color[rgb]{0,0,0.65} #1}}
+\newcommand{\mylblue}[1]{{\color[rgb]{0,0,1.} #1}}
+\newcommand{\mygreen}[1]{{\color[rgb]{0,.65,0} #1}}
+\newcommand{\mywhite}[1]{{\color[rgb]{1.0,1.0,1.0} #1}}
+\newcommand{\myred}[1]{{\color[rgb]{0.65,0.0,0.0} #1}}
+\newcommand{\mylred}[1]{{\color[rgb]{1,0.0,0.0} #1}}
+\newcommand{\myblack}[1]{{\color[rgb]{0.0,0.0,0.0} #1}}
+\newcommand{\mygrey}[1]{{\color[rgb]{0.6,0.6,0.6} #1}}
+\newcommand{\mylightgrey}[1]{{\color[rgb]{0.8,0.8,0.8} #1}}
+
+% Everything else
+\newcommand{\xh}[1]{\textcolor{blue}{\textbf{(xh:)} #1}}
+\newcommand{\aj}[1]{\textcolor{magenta}{\textbf{(aj:)} #1}}
+
+% Common formatting.
+\renewcommand{\[}{\left[}
+\renewcommand{\]}{\right]}
+\renewcommand{\(}{\left(}
+\renewcommand{\)}{\right)}
+
+% Common operators.
+\newcommand{\dd}[2]{\frac{d #1}{d #2}}
+\newcommand{\ddt}[1]{\frac{d #1}{d t}}
+\newcommand{\ddd}[2]{\frac{d^2 #1}{d #2^2}}
+\newcommand{\dddt}[1]{\frac{d^2 #1}{d t^2}}
+\newcommand{\pp}[2]{\frac{\partial #1}{\partial #2}}
+\newcommand{\ppp}[2]{\frac{\partial^2 #1}{\partial #2^2}}
+\newcommand{\pppp}[2]{\frac{\partial^3 #1}{\partial #2^3}}
+\newcommand{\ppppp}[2]{\frac{\partial^4 #1}{\partial #2^4}}
+
+\newcommand{\adj}[1]{#1^{*}}
+\newcommand{\abs}[1]{\left|#1\right|}
+\newcommand{\divergence}[1]{\nabla \cdot #1}
+\newcommand{\enorm}[1]{\vvvert #1 \vvvert}
+\newcommand{\grad}[1]{\nabla #1}
+\newcommand{\laplace}[1]{\nabla^2 #1}
+\newcommand{\norm}[2]{\left\|\, #1 \,\right\|_{#2}}
+\newcommand{\order}[1]{\mathcal{O}\(#1\)}
+\newcommand{\supp}{\mathop{\mathrm{supp}}}
+\newcommand{\vvvert}{|\kern-1pt|\kern-1pt|}
+
+\newcommand{\eq}[1]{\mathop{\,{\buildrel #1 \over =}\,}}
+\newcommand{\ap}[1]{\mathop{\,{\buildrel #1 \over \approx}\,}}
+
+% Modified/combined symbols.
+
+% Hats.
+\newcommand{\hg}{\hat{g}}
+\newcommand{\hh}{\hat{h}}
+\newcommand{\hi}{\hat{i}}
+\newcommand{\hj}{\hat{j}}
+\newcommand{\hk}{\hat{k}}
+\newcommand{\hm}{\hat{m}}
+\newcommand{\hn}{\hat{n}}
+\newcommand{\hs}{\hat{s}}
+\newcommand{\hu}{\hat{u}}
+\newcommand{\hv}{\hat{v}}
+\newcommand{\hx}{\hat{x}}
+
+\newcommand{\hA}{\hat{A}}
+\newcommand{\hC}{\hat{C}}
+\newcommand{\hI}{\hat{I}}
+\newcommand{\hJ}{\hat{J}}
+\newcommand{\hN}{\hat{N}}
+\newcommand{\hT}{\hat{T}}
+\newcommand{\hU}{\hat{U}}
+
+\newcommand{\hbf}{\boldsymbol{\hat{f}}}
+\newcommand{\hbg}{\boldsymbol{\hat{g}}}
+\newcommand{\hsig}{\hat{\sigma}}
+
+% Bar.
+\newcommand{\barg}{\bar{g}}
+\newcommand{\barh}{\bar{h}}
+\newcommand{\barm}{\bar{m}}
+\newcommand{\barv}{\bar{v}}
+\newcommand{\barw}{\bar{w}}
+\newcommand{\barx}{\bar{x}}
+\newcommand{\bary}{\bar{y}}
+
+\newcommand{\barB}{\bar{B}}
+\newcommand{\barC}{\bar{C}}
+\newcommand{\barH}{\bar{H}}
+\newcommand{\barJ}{\bar{J}}
+\newcommand{\barN}{\bar{N}}
+\newcommand{\barR}{\bar{R}}
+
+\newcommand{\barmu}{\bar{\mu}}
+
+% Tilde.
+\newcommand{\tf}{\tilde{f}}
+\newcommand{\thh}{\tilde{h}}
+
+\newcommand{\tA}{\tilde{A}}
+\newcommand{\tg}{\tilde{g}}
+\newcommand{\tH}{\tilde{H}}
+\newcommand{\tJ}{\tilde{J}}
+\newcommand{\tQ}{\tilde{Q}}
+\newcommand{\tT}{\tilde{T}}
+
+\newcommand{\tmu}{\tilde{\mu}}
+\newcommand{\ttheta}{\tilde{\theta}}
+\newcommand{\txi}{\tilde{\xi}}
+
+\newcommand{\tTheta}{\tilde{\Theta}}
+\newcommand{\tXi}{\tilde{\Xi}}
+
+% Bold.
+\newcommand{\mb}[1]{\mathbf{#1}}
+\newcommand{\sbf}[1]{\boldsymbol{#1}}
+
+\newcommand{\bb}{\textbf{b}}
+\newcommand{\bd}{\textbf{d}}
+\newcommand{\bee}{\textbf{e}}
+\newcommand{\bff}{\textbf{f}}
+\newcommand{\bh}{\textbf{h}}
+\newcommand{\bg}{\textbf{g}}
+\newcommand{\bk}{\textbf{k}}
+\newcommand{\bii}{\textbf{i}}
+\newcommand{\bj}{\textbf{j}}
+\newcommand{\bl}{\textbf{l}}
+\newcommand{\bn}{\textbf{n}}
+\newcommand{\bp}{\textbf{p}}
+\newcommand{\br}{\textbf{r}}
+\newcommand{\bs}{\textbf{s}}
+\newcommand{\bt}{\textbf{t}}
+\newcommand{\bu}{\textbf{u}}
+\newcommand{\bv}{\textbf{v}}
+\newcommand{\bw}{\textbf{w}}
+\newcommand{\bx}{\textbf{x}}
+\newcommand{\by}{\textbf{y}}
+
+\newcommand{\bA}{\mathbf{A}}
+\newcommand{\bC}{\mathbf{C}}
+\newcommand{\bE}{\mathbf{E}}
+\newcommand{\bF}{\mathbf{F}}
+\newcommand{\bG}{\mathbf{G}}
+\newcommand{\bI}{\mathbf{I}}
+\newcommand{\bK}{\mathbf{K}}
+\newcommand{\bN}{\mathbf{N}}
+\newcommand{\bQ}{\mathbf{Q}}
+\newcommand{\bR}{\mathbf{R}}
+\newcommand{\bT}{\mathbf{T}}
+\newcommand{\bU}{\mathbf{U}}
+\newcommand{\bV}{\mathbf{V}}
+\newcommand{\bY}{\mathbf{Y}}
+
+\newcommand{\balpha}{\boldsymbol{\alpha}}
+\newcommand{\bbeta}{\boldsymbol{\beta}}
+\newcommand{\bepsilon}{\boldsymbol{\epsilon}}
+\newcommand{\bhsig}{\boldsymbol{\hsig}}
+\newcommand{\bpsi}{\boldsymbol{\psi}}
+\newcommand{\bsig}{\boldsymbol{\sigma}}
+\newcommand{\btau}{\boldsymbol{\tau}}
+\newcommand{\bmu}{\boldsymbol{\mu}}
+\newcommand{\btheta}{\boldsymbol{\theta}}
+\newcommand{\bphi}{\boldsymbol{\phi}}
+\newcommand{\bxi}{\boldsymbol{\xi}}
+
+\newcommand{\bDelta}{\boldsymbol{\Delta}}
+\newcommand{\bTheta}{\boldsymbol{\Theta}}
+\newcommand{\bXi}{\boldsymbol{\Xi}}
+\newcommand{\bOmega}{\boldsymbol{\Omega}}
+\newcommand{\bSigma}{\boldsymbol{\Sigma}}
+
+% Shadow.
+\newcommand{\EE}{\mathbb{E}}
+\newcommand{\II}{\mathbb{I}}
+\newcommand{\NN}{\mathbb{N}}
+\newcommand{\QQ}{\mathbb{Q}}
+\newcommand{\PP}{\mathbb{P}}
+\newcommand{\RR}{\mathbb{R}}
+
+% Vec.
+\newcommand{\vt}{\vec{t}}
+\newcommand{\vu}{\vec{u}}
+\newcommand{\vv}{\vec{v}}
+\newcommand{\vx}{\vec{x}}
+
+\newcommand{\vV}{\vec{V}}
+
+\newcommand{\vo}{\vec{\omega}}
+
+% Dot.
+\newcommand{\dotk}{\dot{k}}
+\newcommand{\dotm}{\dot{m}}
+\newcommand{\dotx}{\dot{x}}
+
+\newcommand{\dotomega}{\dot{\omega}}
+
+% Mathcal.
+\newcommand{\CA}{\mathcal{A}}
+\newcommand{\CB}{\mathcal{B}}
+\newcommand{\CD}{\mathcal{D}}
+\newcommand{\CE}{\mathcal{E}}
+\newcommand{\CF}{\mathcal{F}}
+\newcommand{\CH}{\mathcal{H}}
+\newcommand{\CI}{\mathcal{I}}
+\newcommand{\CJ}{\mathcal{J}}
+\newcommand{\CK}{\mathcal{K}}
+\newcommand{\CL}{\mathcal{L}}
+\newcommand{\CM}{\mathcal{M}}
+\newcommand{\CN}{\mathcal{N}}
+\newcommand{\CR}{\mathcal{R}}
+\newcommand{\CS}{\mathcal{S}}
+\newcommand{\CT}{\mathcal{T}}
+\newcommand{\CU}{\mathcal{U}}
+\newcommand{\CV}{\mathcal{V}}
+\newcommand{\CW}{\mathcal{W}}
+\newcommand{\CX}{\mathcal{X}}
+\newcommand{\CY}{\mathcal{Y}}
+
+\newcommand{\CbarJ}{\bar{\mathcal{J}}}
+\newcommand{\CbarL}{\bar{\mathcal{L}}}
+\newcommand{\CbarR}{\bar{\mathcal{R}}}
+
+% Delta.
+\newcommand{\du}{\delta{u}}
+
+\newcommand{\dbeta}{\delta{\beta}}
+\newcommand{\dxi}{\delta{\xi}}
+\newcommand{\deta}{\delta{\eta}}
+\newcommand{\drho}{\delta{\rho}}
+\newcommand{\dtau}{\delta{\tau}}
+
+\newcommand{\dbu}{\delta{\boldsymbol{u}}}
+\newcommand{\dbp}{\delta{\boldsymbol{p}}}
+\newcommand{\dbx}{\delta{\boldsymbol{x}}}
+
+\newcommand{\Dx}{\Delta{x}}
+\newcommand{\Dy}{\Delta{y}}
+\newcommand{\Dt}{\Delta{t}}
+
+% Others.
+\newcommand{\ra}{\rightarrow}
+\newcommand{\Ra}{\Rightarrow}
+\newcommand{\LRa}{\Longrightarrow}
+\newcommand{\lra}{\longrightarrow}
+
+\newcommand{\pe}{\,{\scriptstyle +}\!\!=}
+\newcommand{\me}{\,{\scriptstyle -}\!\!=}
+\newcommand{\Var}{\textrm{Var}}
+\newcommand{\Cov}{\textrm{Cov}}
+\newcommand{\diag}{\textrm{diag}}
+
+\newcommand{\etal}{\textit{et al.}}
+
+\def\sgn{\mathop{\rm sgn}}
+\newcommand{\argmax}{\operatornamewithlimits{argmax}}
+\newcommand{\argmin}{\operatornamewithlimits{argmin}}
+\newcommand{\DKL}{D_{\mathrm{KL}}}
+
+\newcommand{\iid}{\stackrel{\textrm{iid}}{\sim}}
+\newcommand{\ti}[1]{\textbf{Title: }\textit{{#1}}}
+
+
+
+

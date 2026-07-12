@@ -55,6 +55,24 @@ CHROMO_TOP_RISE_M = (CHROMO_TOP_KM - H_C7_BASE_KM) * 1.0e3   # rise above footpo
 F_CORONA = 1.0e-3                            # n_n/n_e in the corona ⇒ f_ion ≈ 0.999
 
 
+def heating_calibration(L, apex_T, sH_frac=0.4):
+    """RTV (1978) + Aschwanden & Schrijver (2002) inversion: the footpoint heating
+    E_H0 and scale length s_H that relax a loop of half-length L [m] to apex
+    temperature apex_T [K]. Mirrors the C++ GENTLE overlay (scenarios/pfss_field_line.cpp)
+    so make_loop_dat's prescribed apex_T is heating-consistent with what GENTLE=1
+    will auto-compute. Returns (E_H0_SI [W/m^3], s_H [m]). cgs internally:
+        p0     = (T_max/1400)^3 / L_cm                  [dyne cm^-2]   (RTV 4.3)
+        E_unif = 9.8e4 * p0^(7/6) * L_cm^(-5/6)         [erg cm^-3 s^-1] (RTV 4.4)
+        E_H0   = E_unif * exp(0.5 L/s_H)                [peak, footpoint; Serio 1981]
+        ->SI  * 0.1 W m^-3."""
+    s_H = sH_frac * L
+    L_cm = L * 100.0
+    p0 = (apex_T / 1400.0) ** 3 / L_cm
+    E_unif = 9.8e4 * p0 ** (7.0 / 6.0) * L_cm ** (-5.0 / 6.0)
+    E_H0_SI = 0.1 * E_unif * np.exp(0.5 * L / s_H)
+    return E_H0_SI, s_H
+
+
 def stretched_faces(L, ds_fine, s_fine_top, growth, ds_max):
     """Face positions [m] from 0 to L: uniform ds_fine up to s_fine_top, then
     geometric growth to ds_max."""
@@ -247,6 +265,13 @@ def main():
     ia = int(np.argmax(rise_c))                 # true apex (max rise), not last cell
     print(f"  chromosphere base: ne={ne[0]:.2e} nn={nn[0]:.2e} T={T[0]:.0f} K  f={f_ion[0]:.3f}")
     print(f"  corona apex:       ne={ne[ia]:.2e} nn={nn[ia]:.2e} T={T[ia]:.3e} K  f={f_ion[ia]:.3f}")
+    # Heating-consistent calibration: the GENTLE coronal heating that holds this
+    # apex_T (so the prescribed-T IC starts near its relaxed steady state).
+    E_H0, s_H = heating_calibration(L, apex_T)
+    print(f"  GENTLE heating (auto): E_H0={E_H0:.3e} W/m^3  s_H={s_H/1e6:.1f} Mm "
+          f"(s_H/L=0.40)  for apex_T={apex_T/1e6:.2f} MK")
+    print(f"    → run: GENTLE=1 [GENTLE_ENHANCE=3 GENTLE_T_ON=<after relax>] "
+          f"./build/chromo_main <out.txt> full ionization pfss_field_line {args.output} <time_mult> cooling")
 
 
 if __name__ == "__main__":

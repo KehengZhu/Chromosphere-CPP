@@ -76,7 +76,7 @@ def main():
     full_dat = "scenarios/data/loop_full_fine.dat"
     half_out = "outputs/loop_half_flare.txt"
     full_out = "outputs/loop_full_flare.txt"
-    out = "util/visualization/loop_bc_compare.png"
+    out = "visualization/loop_bc_compare.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     dsh, sh, phih, _ = parse_dat(half_dat)

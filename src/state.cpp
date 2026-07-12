@@ -107,9 +107,9 @@ Vec cons2prim(const Grid& grid, const Vec& cons_state) {
     const Vec U     = rhoU_n / rho_n;
     const Vec phi_g = 0.5 * (grid.phi_g_imh + grid.phi_g_iph);
     // p_i is the TOTAL charged pressure (protons + electrons); see cons::E_I note.
-    const Vec p_i   = 2.0/3.0 * e_i - 1.0/3.0 * rho_i % V % V - 2.0/3.0 * rho_i % phi_g;
-    const Vec p_n   = 2.0/3.0 * e_n - 1.0/3.0 * rho_n % U % U - 2.0/3.0 * rho_n % phi_g;
-    const Vec p_e   = 2.0/3.0 * e_e;   // electron partial pressure (no KE / gravity)
+    const Vec p_i   = grid.gm1() * e_i - grid.half_gm1() * rho_i % V % V - grid.gm1() * rho_i % phi_g;
+    const Vec p_n   = grid.gm1() * e_n - grid.half_gm1() * rho_n % U % U - grid.gm1() * rho_n % phi_g;
+    const Vec p_e   = grid.gm1() * e_e;   // electron partial pressure (no KE / gravity)
 
     prim_state += scalar_to(grid, rho_i, prim::RHO_I);
     prim_state += scalar_to(grid, rho_n, prim::RHO_N);
@@ -136,9 +136,9 @@ Vec prim2cons(const Grid& grid, const Vec& prim_state) {
     const Vec phi_g  = 0.5 * (grid.phi_g_imh + grid.phi_g_iph);
     // E_I is the TOTAL charged energy (p_i already includes the electron pressure
     // p_e); E_E carries the electron internal energy alone. See cons::E_I note.
-    const Vec e_i    = 3.0/2.0 * p_i + 0.5 * rho_i % V % V + rho_i % phi_g;
-    const Vec e_n    = 3.0/2.0 * p_n + 0.5 * rho_n % U % U + rho_n % phi_g;
-    const Vec e_e    = 3.0/2.0 * p_e;
+    const Vec e_i    = grid.inv_gm1() * p_i + 0.5 * rho_i % V % V + rho_i % phi_g;
+    const Vec e_n    = grid.inv_gm1() * p_n + 0.5 * rho_n % U % U + rho_n % phi_g;
+    const Vec e_e    = grid.inv_gm1() * p_e;
 
     cons_state += scalar_to(grid, rho_i,  cons::RHO_I);
     cons_state += scalar_to(grid, rho_n,  cons::RHO_N);
@@ -158,6 +158,35 @@ Vec flux_lim(const Vec& r) {
     Vec one (arma::size(r), arma::fill::ones);
     Vec zero(arma::size(r), arma::fill::zeros);
     Vec res = arma::max(zero, arma::min(one, r));
+    res(arma::find_nan(res)).zeros();
+    return res;
+}
+
+// ============================================================================
+// MC3 / Koren limiter (BATSRUS ModFaceValue 'mc3'): the asymmetric third-order
+// (κ=1/3) monotonized-central limiter. The '+' (right-face) and '−' (left-face)
+// reconstruction terms take DIFFERENT central branches — (2r+1)/3 and (r+2)/3 —
+// which is why minmod's single flux_lim(r) cannot express it. Both clip to the
+// TVD envelope min(β r, β) and floor at 0 (⇒ first order where Δ₊,Δ₋ disagree in
+// sign, i.e. r<0, and at flats where r is non-finite). β = limiter_beta.
+// ============================================================================
+
+Vec flux_lim_mc3_plus(const Vec& r, float beta) {
+    Vec zero(arma::size(r), arma::fill::zeros);
+    Vec bcap(arma::size(r)); bcap.fill(beta);
+    Vec res = arma::min(beta * r, bcap);
+    res = arma::min(res, (2.0f * r + 1.0f) / 3.0f);
+    res = arma::max(zero, res);
+    res(arma::find_nan(res)).zeros();
+    return res;
+}
+
+Vec flux_lim_mc3_minus(const Vec& r, float beta) {
+    Vec zero(arma::size(r), arma::fill::zeros);
+    Vec bcap(arma::size(r)); bcap.fill(beta);
+    Vec res = arma::min(beta * r, bcap);
+    res = arma::min(res, (r + 2.0f) / 3.0f);
+    res = arma::max(zero, res);
     res(arma::find_nan(res)).zeros();
     return res;
 }

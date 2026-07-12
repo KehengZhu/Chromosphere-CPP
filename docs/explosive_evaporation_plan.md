@@ -29,7 +29,7 @@ Test whether a physically-plausible flare energy-deposition driver, added to the
 5. **`model_c7_update_bc`:** honor `outer_free_outflow` (skip the Mach cap → free supersonic outflow).
 6. **`chromo_main.cpp`:** set `grid.sim_time = time` each step.
 7. **Register** `model_flare` in `make_scenario`; add to `CMakeLists.txt`; add tests (beam profile normalization + gentle/explosive monotonicity).
-8. **Run** both cases; **visualize** the height–time evolution of T, V, n (the classic evaporation diagram) + an 8-panel evolution movie, into `util/visualization/`.
+8. **Run** both cases; **visualize** the height–time evolution of T, V, n (the classic evaporation diagram) + an 8-panel evolution movie, into `visualization/`.
 
 ## Plausibility checks (post-run)
 

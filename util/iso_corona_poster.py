@@ -15,7 +15,7 @@ corona compressed), matching the movie and the project convention.
 
 Usage:
     python util/iso_corona_poster.py [input.txt] [output.png]
-Defaults: outputs/iso_corona.txt -> docs/poster-shine/web/iso_corona_evolution.png
+Defaults: outputs/model_column/iso_corona.txt -> docs/poster-shine/web/iso_corona_evolution.png
 """
 import os
 import sys
@@ -59,7 +59,7 @@ T_PEAK_V = 194.0   # peak-upflow time (vertical marker in panel c)
 
 
 def main():
-    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/iso_corona.txt"
+    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_column/iso_corona.txt"
     out_path = (sys.argv[2] if len(sys.argv) > 2
                 else "docs/poster-shine/web/iso_corona_evolution.png")
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)

@@ -33,9 +33,9 @@ disk-center (vertical) line of sight. A general inclined LOS would require the
 
 Outputs
 -------
-  visualization/<stem>_doppler.png      v_Dopp(t) + intensity(t) per line
-  visualization/<stem>_dopplergram.png  synthetic (v, t) spectrograms
-  outputs/<stem>_doppler.csv                 raw v_Dopp(t), I(t) per line
+  visualization/events/<stem>_doppler.png      v_Dopp(t) + intensity(t) per line
+  visualization/events/<stem>_dopplergram.png  synthetic (v, t) spectrograms
+  outputs/events/<stem>_doppler.csv            raw v_Dopp(t), I(t) per line
 
 Usage
 -----
@@ -44,7 +44,7 @@ Usage
 Example
 -------
   python util/synth_doppler.py scenarios/data/event_ensemble/c05_101Mm.dat \
-      outputs/event_te/c05_101Mm_te.txt c05_101Mm_te
+      outputs/events/event_te/c05_101Mm_te.txt c05_101Mm_te
 """
 import os
 import sys
@@ -318,8 +318,8 @@ def main():
 
     times, vDopp, Iline, hform = synth_timeseries(frames, phi_g, ds, dhds)
 
-    vis = "visualization"
-    out = "outputs"
+    vis = "visualization/events"
+    out = "outputs/events"
     os.makedirs(vis, exist_ok=True)
     os.makedirs(out, exist_ok=True)
     ts_png = os.path.join(vis, f"{stem}_doppler.png")

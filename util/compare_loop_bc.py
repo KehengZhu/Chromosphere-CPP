@@ -74,9 +74,9 @@ def stack_V(frames):
 def main():
     half_dat = "scenarios/data/loop_closed_fine.dat"
     full_dat = "scenarios/data/loop_full_fine.dat"
-    half_out = "outputs/loop_half_flare.txt"
-    full_out = "outputs/loop_full_flare.txt"
-    out = "visualization/loop_bc_compare.png"
+    half_out = "outputs/loops/loop_half_flare.txt"
+    full_out = "outputs/loops/loop_full_flare.txt"
+    out = "visualization/loops/loop_bc_compare.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     dsh, sh, phih, _ = parse_dat(half_dat)

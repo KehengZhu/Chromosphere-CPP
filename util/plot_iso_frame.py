@@ -23,7 +23,7 @@ from animate_isentropic import load, primitives, heat_flux, G
 
 
 def main():
-    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/iso_t22k.txt"
+    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_column/iso_t22k.txt"
     fidx = int(sys.argv[2]) if len(sys.argv) > 2 else -1
     if len(sys.argv) > 3:
         out_path = sys.argv[3]

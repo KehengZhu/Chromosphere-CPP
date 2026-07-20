@@ -92,8 +92,8 @@ def lambda_si(T):
 
 def main():
     dat = sys.argv[1] if len(sys.argv) > 1 else "scenarios/data/loop_full_fine.dat"
-    flare = sys.argv[2] if len(sys.argv) > 2 else "outputs/loop_full_flare.txt"
-    out = sys.argv[3] if len(sys.argv) > 3 else "visualization/loop_cooling.png"
+    flare = sys.argv[2] if len(sys.argv) > 2 else "outputs/loops/loop_full_flare.txt"
+    out = sys.argv[3] if len(sys.argv) > 3 else "visualization/loops/loop_cooling.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     topology = read_meta(dat).get("topology", "closed")

@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 args = [a for a in sys.argv[1:]]
 T = 100.0
-out = "visualization/iso_t22k_250km_convergence.png"
+out = "visualization/model_column/iso_t22k_250km_convergence.png"
 files = []
 for a in args:
     if a.endswith(".txt"): files.append(a)
@@ -22,9 +22,9 @@ for a in args:
         try: T = float(a)
         except: pass
 if not files:
-    files = ["outputs/iso_t22k_ns2000_gamma105_bestwb_condon.txt",
-             "outputs/iso_bestwb_condon_ns3000.txt",
-             "outputs/iso_bestwb_condon_ns4000.txt"]
+    files = ["outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt",
+             "outputs/model_column/iso_bestwb_condon_ns3000.txt",
+             "outputs/model_column/iso_bestwb_condon_ns4000.txt"]
 
 def frame_near(fn, target):
     f=open(fn); ns,neq=map(int,f.readline().split())

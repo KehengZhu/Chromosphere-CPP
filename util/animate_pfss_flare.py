@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Evolution movie for a flaring PFSS field line (PFSS_FLARE run).
 
-Reads a chromo_main output (default outputs/pfss_lineA_flare.txt) and renders a
+Reads a chromo_main output (default outputs/pfss/pfss_lineA_flare.txt) and renders a
 4-panel vertical-profile animation vs height — T_i, V, densities (n_i, n_n), and
 ionization fraction — with the beam deposition window shaded and a beam-status
 clock. Frames are rendered in parallel and stitched to MP4 (util/_anim_parallel).

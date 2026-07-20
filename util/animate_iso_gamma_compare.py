@@ -16,8 +16,8 @@ each target time on a common axis [0, min(t_max)], the nearest frame from each r
 
 Usage:
     python util/animate_iso_gamma_compare.py [out.mp4]
-Defaults to the three outputs/iso_t22k*_gamma105.txt files ->
-visualization/iso_t22k_gamma105_massflux_compare.mp4. Set ANIM_MAX_FRAMES to cap
+Defaults to the three outputs/model_column/iso_t22k*_gamma105.txt files ->
+visualization/model_column/iso_t22k_gamma105_massflux_compare.mp4. Set ANIM_MAX_FRAMES to cap
 the rendered-frame count (default 300; sampled uniformly in time).
 """
 import os
@@ -34,9 +34,9 @@ from _anim_parallel import save_frames_parallel
 H_ZOOM = 1800.0  # km — TR/upper-chromosphere zoom threshold
 
 RUNS = [
-    ("outputs/iso_t22k_ns1000_gamma105.txt", "ns=1000", "tab:red",    1.6),
-    ("outputs/iso_t22k_ns2000_gamma105.txt", "ns=2000", "tab:orange", 1.3),
-    ("outputs/iso_t22k_gamma105.txt",        "ns=4000", "tab:blue",   1.0),
+    ("outputs/model_column/iso_t22k_ns1000_gamma105.txt", "ns=1000", "tab:red",    1.6),
+    ("outputs/model_column/iso_t22k_ns2000_gamma105.txt", "ns=2000", "tab:orange", 1.3),
+    ("outputs/model_column/iso_t22k_gamma105.txt",        "ns=4000", "tab:blue",   1.0),
 ]
 
 
@@ -115,7 +115,7 @@ def _render(k, tmpdir, tt, per_run, ylims):
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else \
-        "visualization/iso_t22k_gamma105_massflux_compare.mp4"
+        "visualization/model_column/iso_t22k_gamma105_massflux_compare.mp4"
     runs = [(load(fn), lab, col, lw) for fn, lab, col, lw in RUNS]
 
     t_common = min(r[0][1][-1] for r in runs)   # min of per-run max time

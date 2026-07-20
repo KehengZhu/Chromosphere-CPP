@@ -7,7 +7,7 @@
   (b) electron density vs height, preflare (relaxed) vs evaporation, on a split
       x-axis (zoom the sub-Mm chromosphere+TR, compress the corona) — the corona
       fills and the TR burns down.
-Reads outputs/gentle_v3_evap.txt; writes docs/writeup-overleaf/gentle_evaporation.png.
+Reads outputs/model_column/gentle_v3_evap.txt; writes docs/writeup-overleaf/gentle_evaporation.png.
 
 Usage: python util/plot_gentle_summary.py [run.txt] [out.png]
 """
@@ -51,7 +51,7 @@ def w_ramp(t):
 
 
 def main():
-    run = sys.argv[1] if len(sys.argv) > 1 else "outputs/gentle_v3_evap.txt"
+    run = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_column/gentle_v3_evap.txt"
     out = sys.argv[2] if len(sys.argv) > 2 else "docs/writeup-overleaf/gentle_evaporation.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
     h, fr = read_frames(run)

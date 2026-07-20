@@ -30,9 +30,9 @@ import numpy as np
 
 
 DEFAULT_FILES = [
-    "outputs/iso_cond_hydro_local4_outer2000.csv",
-    "outputs/iso_cond_hydro_local4_outer3000.csv",
-    "outputs/iso_cond_hydro_local4_outer4000.csv",
+    "outputs/_archive/iso_cond_hydro_local4_outer2000.csv",
+    "outputs/_archive/iso_cond_hydro_local4_outer3000.csv",
+    "outputs/_archive/iso_cond_hydro_local4_outer4000.csv",
 ]
 
 METRICS = (
@@ -238,7 +238,7 @@ def main() -> None:
     parser.add_argument("--time", type=float, default=100.0, help="matched physical time in seconds")
     parser.add_argument("--hmin", type=float, default=150.0, help="profile-panel minimum height in km")
     parser.add_argument("--hmax", type=float, default=350.0, help="profile-panel maximum height in km")
-    parser.add_argument("--out", type=Path, default=Path("visualization/iso_cond_hydro_convergence_t100.png"),
+    parser.add_argument("--out", type=Path, default=Path("visualization/_archive/iso_cond_hydro_convergence_t100.png"),
                         help="output PNG path")
     args = parser.parse_args()
 

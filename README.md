@@ -66,7 +66,11 @@ include/armadillo        Vendored header-only Armadillo
 util/                    Python visualizations + PFSS extraction pipeline
 fortran/                 Legacy Fortran main + SWMF couplers (not built)
 docs/                    Al Shidi 2019 paper + Keheng's writeup
-outputs/                 Default destination for chromo_main snapshot files (.txt, .log)
+outputs/                 chromo_main snapshot dumps (.txt/.log), organized by scenario:
+                           model_c7/ model_column/ model_flare/ analytic_canopy/
+                           loops/ pfss/ events/ two_fluid/ _archive/ (retired-code dumps)
+visualization/           Rendered figures/movies (gitignored), same per-scenario subdirs
+                           as outputs/ + reference/ (physics-reference plots & scripts)
 CMakeLists.txt           Build config
 ```
 
@@ -190,14 +194,14 @@ Each argument is positional and optional; defaults are shown in parentheses.
 
 | Arg | Position | Values | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `output_path` | 1 | any path | `outputs/output.txt` | snapshot file (line 1 = `ns num_of_eq`; line 2 = cumulative heights in km; then `# t = T step = S` markers each followed by `ns` rows of conserved variables) |
+| `output_path` | 1 | any path | `outputs/model_c7/output.txt` | snapshot file (line 1 = `ns num_of_eq`; line 2 = cumulative heights in km; then `# t = T step = S` markers each followed by `ns` rows of conserved variables) |
 | `mode`        | 2 | `full` \| `explicit` | `full` | `full` = semi-implicit driver (Stage A explicit, B drag, C T-equil, D conduction). `explicit` zeroes `R_I` and runs pure explicit Euler |
 | `ionization`  | 3 | `ionization` \| `no-ionization` | `ionization` | toggles Stage E (Voronov 1997 ionization + Hummer 1994 recombination) |
 | `scenario`    | 4 | `model_column` \| `model_c7` \| `model_flare` \| `analytic_canopy` \| `pfss_field_line` | `model_column` | which IC + BC pair to dispatch (see [Scenarios](#scenarios)). `model_isentropic` and `model_gentle` are backward-compat aliases of `model_column` (the latter applies the resolved-corona full-physics gentle preset) |
 | `data_path`   | 5 | path to `.dat` \| `""` | `""` | required for tabulated scenarios (`pfss_field_line`); ignored otherwise |
 | `time_mult`   | 6 | float | `1.0` | multiplier on the default total simulation time `10·L/Cs`. Step cap scales with this so longer runs aren't truncated |
 
-A companion `outputs/output.log` is appended with the configured `total_time`.
+A companion `outputs/_archive/output.log` is appended with the configured `total_time`.
 
 ### Examples
 
@@ -206,22 +210,22 @@ A companion `outputs/output.log` is appended with the configured `total_time`.
 build/chromo_main
 
 # The quiet-Sun Model C7 baseline scenario (shared C7 atmosphere library)
-build/chromo_main outputs/out_c7.txt full ionization model_c7
+build/chromo_main outputs/model_c7/out_c7.txt full ionization model_c7
 
 # Ionization OFF baseline for comparison
-build/chromo_main outputs/out_c7_off.txt full no-ionization model_c7
+build/chromo_main outputs/model_c7/out_c7_off.txt full no-ionization model_c7
 
 # Run 10× longer (useful for relaxation studies)
-build/chromo_main outputs/out_c7_10x.txt full ionization model_c7 "" 10.0
+build/chromo_main outputs/model_c7/out_c7_10x.txt full ionization model_c7 "" 10.0
 
 # Pure-explicit run (drops the implicit drag / conduction / T-equilibration stages)
-build/chromo_main outputs/out_c7_explicit.txt explicit ionization model_c7
+build/chromo_main outputs/model_c7/out_c7_explicit.txt explicit ionization model_c7
 
 # Analytic exponential-canopy B(z) overlay on the C7 thermodynamic profile
-build/chromo_main outputs/out_canopy.txt full ionization analytic_canopy
+build/chromo_main outputs/analytic_canopy/out_canopy.txt full ionization analytic_canopy
 
 # PFSS field line generated from a GONG synoptic magnetogram
-build/chromo_main outputs/out_pfss.txt full ionization pfss_field_line \
+build/chromo_main outputs/pfss/out_pfss.txt full ionization pfss_field_line \
     scenarios/data/pfss_qs_20190801.dat
 ```
 
@@ -230,7 +234,7 @@ animation at the two snapshot files:
 
 ```sh
 .venv/bin/python util/animate_ionization_compare.py \
-    outputs/out_c7_10x_on.txt outputs/out_c7_10x_off.txt \
+    outputs/model_c7/out_c7_10x_on.txt outputs/model_c7/out_c7_10x_off.txt \
     util/c7_openbc_8panel_compare.mp4 24
 ```
 
@@ -242,7 +246,7 @@ snapshot).
 ### Split conduction-to-hydro diagnostic
 
 Set `ISO_DIAG_COND_HYDRO=1` for an opt-in CSV snapshot around every Stage-D
-conduction solve. It writes `outputs/iso_cond_hydro_diagnostic.csv` by default;
+conduction solve. It writes `outputs/_archive/iso_cond_hydro_diagnostic.csv` by default;
 set `ISO_DIAG_COND_HYDRO_OUT=outputs/<name>.csv` to avoid collisions in a
 resolution sweep and `ISO_DIAG_COND_HYDRO_EVERY=N` to record every Nth
 conduction call. Each row contains the cell-center height, pre/post Stage-D

@@ -21,7 +21,7 @@ Frames are synced by nearest-time matching on a common axis [0, min(t_max)].
 Usage:
     python util/animate_iso_condcompare.py [condON.txt] [condOFF.txt] [out.mp4]
 Defaults to the best-WB ns=2000 γ=1.05 pair ->
-visualization/iso_t22k_ns2000_gamma105_bestwb_condcompare.mp4.
+visualization/model_column/iso_t22k_ns2000_gamma105_bestwb_condcompare.mp4.
 ANIM_MAX_FRAMES caps the rendered-frame count (default 300); ANIM_FPS sets fps.
 """
 import os
@@ -37,9 +37,9 @@ from _anim_parallel import save_frames_parallel
 
 H_ZOOM = 1800.0  # km — TR/upper-chromosphere zoom threshold
 
-CONDON  = sys.argv[1] if len(sys.argv) > 1 else "outputs/iso_t22k_ns2000_gamma105_bestwb_condon.txt"
-CONDOFF = sys.argv[2] if len(sys.argv) > 2 else "outputs/iso_t22k_ns2000_gamma105_bestwb_condoff.txt"
-OUT     = sys.argv[3] if len(sys.argv) > 3 else "visualization/iso_t22k_ns2000_gamma105_bestwb_condcompare.mp4"
+CONDON  = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt"
+CONDOFF = sys.argv[2] if len(sys.argv) > 2 else "outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condoff.txt"
+OUT     = sys.argv[3] if len(sys.argv) > 3 else "visualization/model_column/iso_t22k_ns2000_gamma105_bestwb_condcompare.mp4"
 LABEL   = os.environ.get("ANIM_LABEL", "best well-balanced (INNER_WB+RHO+EQ_WB, MC3)")
 
 RUNS = [

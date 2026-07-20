@@ -18,7 +18,7 @@ Two ways to specify the jobs:
   (A) Manifest (full per-line control — the production path; per-line beam params
       come from STIX + the AIA ribbon mask, see docs/event-data-to-code.md §5):
 
-        python util/run_ensemble.py --manifest outputs/ensemble_jobs.json [--workers 16]
+        python util/run_ensemble.py --manifest outputs/events/event_ensemble_jobs.json [--workers 16]
 
       jobs.json:
         {
@@ -30,7 +30,7 @@ Two ways to specify the jobs:
           },
           "jobs": [
             {"name": "lineA", "dat": "scenarios/data/lineA.dat",
-             "out": "outputs/lineA.txt",
+             "out": "outputs/pfss/lineA.txt",
              "env": {"FLARE_BEAM_FLUX": "3e7", "FLARE_T_ON": "2"}},
             ...
           ]
@@ -40,7 +40,7 @@ Two ways to specify the jobs:
   (B) Quick glob mode (shared env for every line):
 
         python util/run_ensemble.py \
-          --dats "scenarios/data/ensemble_demo/*.dat" --out-dir outputs/ensemble_demo \
+          --dats "scenarios/data/ensemble_demo/*.dat" --out-dir outputs/events/ensemble_demo \
           --time-mult 1.0 --env PFSS_FLARE=1 FLARE_BEAM_FLUX=3e7 FLARE_DELTA=4 FLARE_E_CUT=20
 
 Each job writes <out>.txt and a sibling <out>.run.log; the driver prints a per-job
@@ -149,7 +149,7 @@ def main():
     ap.add_argument("--manifest", help="JSON job manifest (mode A)")
     # Glob mode (B):
     ap.add_argument("--dats", help="glob of .dat files (mode B)")
-    ap.add_argument("--out-dir", default="outputs/ensemble")
+    ap.add_argument("--out-dir", default="outputs/events/event_ensemble")
     ap.add_argument("--binary", default="build/chromo_main")
     ap.add_argument("--mode", default="full")
     ap.add_argument("--ioniz", default="ionization")

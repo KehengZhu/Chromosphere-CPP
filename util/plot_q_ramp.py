@@ -36,7 +36,7 @@ def w_ramp(t, t_on, ramp):
 
 
 def main():
-    out     = sys.argv[1] if len(sys.argv) > 1 else "visualization/q_ramp.png"
+    out     = sys.argv[1] if len(sys.argv) > 1 else "visualization/model_column/q_ramp.png"
     q0      = float(sys.argv[2]) if len(sys.argv) > 2 else 230.0
     enhance = float(sys.argv[3]) if len(sys.argv) > 3 else 3.0
     t_on    = float(sys.argv[4]) if len(sys.argv) > 4 else 3000.0

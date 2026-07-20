@@ -40,7 +40,7 @@ def parse_cells(path):
 
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else "scenarios/data/loop_closed_test.dat"
-    out = sys.argv[2] if len(sys.argv) > 2 else "visualization/loop_ic_check.png"
+    out = sys.argv[2] if len(sys.argv) > 2 else "visualization/loops/loop_ic_check.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     ds, h, ne, nn, T = parse_cells(path)

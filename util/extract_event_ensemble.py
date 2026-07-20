@@ -95,9 +95,9 @@ def main():
     ap.add_argument("--n-seed", type=int, default=15)
     ap.add_argument("--seed-height-rsun", type=float, default=1.003)
     ap.add_argument("--dat-dir", default="scenarios/data/event_ensemble")
-    ap.add_argument("--out-dir", default="outputs/event_ensemble")
-    ap.add_argument("--manifest", default="outputs/event_ensemble_jobs.json")
-    ap.add_argument("--lines-json", default="outputs/event_ensemble_lines.json")
+    ap.add_argument("--out-dir", default="outputs/events/event_ensemble")
+    ap.add_argument("--manifest", default="outputs/events/event_ensemble_jobs.json")
+    ap.add_argument("--lines-json", default="outputs/events/event_ensemble_lines.json")
     # Shared beam params for the ensemble (uniform for now; ribbon-mask per-line
     # weighting is Phase 2). M8.2 STIX/literature-anchored values.
     ap.add_argument("--flare-flux", default="3e7")

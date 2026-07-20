@@ -24,7 +24,7 @@ Usage (2024-08-01 07:09 UT M8.2, AR 13768 at Stonyhurst lon=+74, lat=-16):
     python util/extract_event_loop.py \
         --magnetogram util/data/adapt40311_044012_202408010600_i00005600n1.fts.gz \
         --ar-lon 74 --ar-lat -16 --obstime 2024-08-01T07:09:00 \
-        --out-json outputs/event_20240801_AR13768_geometry.json
+        --out-json outputs/events/event_20240801_AR13768_geometry.json
 """
 from __future__ import annotations
 

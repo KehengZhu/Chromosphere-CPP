@@ -398,8 +398,8 @@ def main():
     ap.add_argument("--outs", nargs="+", default=[
         "out_lineA.txt", "out_lineB.txt", "out_lineC.txt",
     ])
-    ap.add_argument("--out-png", default="visualization/pfss_lines_evolution.png")
-    ap.add_argument("--out-mp4", default="visualization/pfss_lines_evolution.mp4")
+    ap.add_argument("--out-png", default="visualization/pfss/pfss_lines_evolution.png")
+    ap.add_argument("--out-mp4", default="visualization/pfss/pfss_lines_evolution.mp4")
     ap.add_argument("--fps", type=int, default=15)
     ap.add_argument("--nrho", type=int, default=60)
     ap.add_argument("--rss",  type=float, default=2.5)

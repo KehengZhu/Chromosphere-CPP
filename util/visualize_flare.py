@@ -67,8 +67,8 @@ def stack(frames, tmax):
 
 
 def main():
-    exp_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/flare_explosive.txt"
-    gen_path = sys.argv[2] if len(sys.argv) > 2 else "outputs/flare_gentle.txt"
+    exp_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_flare/flare_explosive.txt"
+    gen_path = sys.argv[2] if len(sys.argv) > 2 else "outputs/model_flare/flare_gentle.txt"
     tmax = float(sys.argv[3]) if len(sys.argv) > 3 else 25.0
 
     H, fe = read_frames(exp_path)

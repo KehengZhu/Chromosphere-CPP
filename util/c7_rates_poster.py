@@ -4,7 +4,7 @@ rate figure — enlarged text, short legends, clean styling, sized to read at
 poster scale (panel text >= ~5 mm when shown ~300 mm wide).
 
 It reuses the physics and the computed rate arrays from the analysis script
-`visualization/plot_c7_ioniz_recomb_rates.py` (importing it also regenerates
+`visualization/reference/plot_c7_ioniz_recomb_rates.py` (importing it also regenerates
 that script's own non-poster figure as a harmless side effect) and only changes
 the presentation: three stacked panels (ionization, recombination,
 photoionization-rate / Route-B closure) on the shared, TR-magnified height axis.

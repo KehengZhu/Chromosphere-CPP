@@ -12,7 +12,7 @@ sustained subsonic upflow. Reuses the split-axis transform from animate_loop_fla
 
 Usage:
   python util/gentle_evap_profiles.py scenarios/data/loop_closed_gentle.dat \
-      outputs/gentle_evap.txt [visualization/gentle_evap_profiles.png] [t_pre]
+      outputs/model_column/gentle_evap.txt [visualization/model_column/gentle_evap_profiles.png] [t_pre]
 """
 import os
 import sys
@@ -36,8 +36,8 @@ def nearest_frame(frames, t_target):
 
 def main():
     dat   = sys.argv[1] if len(sys.argv) > 1 else "scenarios/data/loop_closed_gentle.dat"
-    evout = sys.argv[2] if len(sys.argv) > 2 else "outputs/gentle_evap.txt"
-    out   = sys.argv[3] if len(sys.argv) > 3 else "visualization/gentle_evap_profiles.png"
+    evout = sys.argv[2] if len(sys.argv) > 2 else "outputs/model_column/gentle_evap.txt"
+    out   = sys.argv[3] if len(sys.argv) > 3 else "visualization/model_column/gentle_evap_profiles.png"
     t_pre = float(sys.argv[4]) if len(sys.argv) > 4 else 1000.0
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 

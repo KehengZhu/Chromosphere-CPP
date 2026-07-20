@@ -16,6 +16,7 @@ e_i, e_n] and the .dat (for phi_g), reconstructs primitives EXACTLY as
 animate_loop_flare.primitives does, and reports where/when/how-much the fluids
 decouple, plus an order-of-magnitude frictional-heating budget.
 """
+import os
 import sys
 import numpy as np
 
@@ -153,7 +154,8 @@ def main():
         ax[1].set_title("temperature split |T_i-T_n|/T_i")
         fig.colorbar(im1, ax=ax[1])
         fig.tight_layout()
-        png = f"visualization/two_fluid_diag_{tag}.png"
+        png = f"visualization/two_fluid/two_fluid_diag_{tag}.png"
+        os.makedirs(os.path.dirname(png), exist_ok=True)
         fig.savefig(png, dpi=120)
         print(f"  wrote {png}")
     except Exception as e:

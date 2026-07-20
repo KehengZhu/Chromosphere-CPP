@@ -85,8 +85,8 @@ def thick_target_Q(ntot, ds, phi, E_cut_keV, delta):
 
 def main():
     dat = sys.argv[1] if len(sys.argv) > 1 else "scenarios/data/loop_full_fine.dat"
-    flare = sys.argv[2] if len(sys.argv) > 2 else "outputs/loop_full_thick.txt"
-    out = sys.argv[3] if len(sys.argv) > 3 else "visualization/beam_stopping_feedback.png"
+    flare = sys.argv[2] if len(sys.argv) > 2 else "outputs/loops/loop_full_thick.txt"
+    out = sys.argv[3] if len(sys.argv) > 3 else "visualization/loops/beam_stopping_feedback.png"
     E_cut = float(sys.argv[4]) if len(sys.argv) > 4 else 20.0
     delta = float(sys.argv[5]) if len(sys.argv) > 5 else 5.0
     T_ON = 2.0

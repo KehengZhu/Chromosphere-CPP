@@ -20,10 +20,10 @@ Usage:
 Examples:
   # relaxation (steady heating, no ramp)
   python util/animate_gentle.py scenarios/data/loop_closed_gentle.dat \
-      outputs/gentle_relax.txt visualization/gentle_relax_evolution.mp4 1e9 1 1
+      outputs/model_column/gentle_relax.txt visualization/model_column/gentle_relax_evolution.mp4 1e9 1 1
   # relaxation + ×3 ramp evaporation
   python util/animate_gentle.py scenarios/data/loop_closed_gentle.dat \
-      outputs/gentle_evap.txt visualization/gentle_evap_evolution.mp4 1000 200 3
+      outputs/model_column/gentle_evap.txt visualization/model_column/gentle_evap_evolution.mp4 1000 200 3
 """
 import os
 import sys
@@ -140,8 +140,8 @@ def _render_gentle_frame(k, tmpdir, xMm, t, Ti, Te, V, ni, nn, Hshape, hmult,
 
 def main():
     dat   = sys.argv[1] if len(sys.argv) > 1 else "scenarios/data/loop_closed_gentle.dat"
-    run   = sys.argv[2] if len(sys.argv) > 2 else "outputs/gentle_evap.txt"
-    out   = sys.argv[3] if len(sys.argv) > 3 else "visualization/gentle_evap_evolution.mp4"
+    run   = sys.argv[2] if len(sys.argv) > 2 else "outputs/model_column/gentle_evap.txt"
+    out   = sys.argv[3] if len(sys.argv) > 3 else "visualization/model_column/gentle_evap_evolution.mp4"
     t_on    = float(sys.argv[4]) if len(sys.argv) > 4 else float(os.environ.get("GENTLE_T_ON", 1e9))
     ramp    = float(sys.argv[5]) if len(sys.argv) > 5 else float(os.environ.get("GENTLE_RAMP", 30.0))
     enhance = float(sys.argv[6]) if len(sys.argv) > 6 else float(os.environ.get("GENTLE_ENHANCE", 1.0))

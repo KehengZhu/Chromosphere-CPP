@@ -17,7 +17,7 @@ Outputs (visualization/):
 
 Usage:
   python util/visualize_event_3d.py \
-    --lines-json outputs/event_ensemble_lines.json \
+    --lines-json outputs/events/event_ensemble_lines.json \
     --magnetogram util/data/adapt40311_044012_202408010600_i00053600n1.fts.gz
 """
 from __future__ import annotations
@@ -136,9 +136,9 @@ def load_line_temperatures(lines, t_grid):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--lines-json", default="outputs/event_ensemble_lines.json")
+    ap.add_argument("--lines-json", default="outputs/events/event_ensemble_lines.json")
     ap.add_argument("--magnetogram", required=True)
-    ap.add_argument("--out-dir", default="visualization")
+    ap.add_argument("--out-dir", default="visualization/events")
     ap.add_argument("--snap-time", type=float, default=40.0, help="static PNG time [s]")
     ap.add_argument("--t-max", type=float, default=160.0)
     ap.add_argument("--n-frames", type=int, default=90)

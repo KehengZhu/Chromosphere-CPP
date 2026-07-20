@@ -28,9 +28,9 @@ import numpy as np
 
 
 DEFAULT_FILES = [
-    "outputs/iso_dynamic_mix_hse_ns2000.csv",
-    "outputs/iso_dynamic_mix_hse_ns3000.csv",
-    "outputs/iso_dynamic_mix_hse_ns4000.csv",
+    "outputs/_archive/iso_dynamic_mix_hse_ns2000.csv",
+    "outputs/_archive/iso_dynamic_mix_hse_ns3000.csv",
+    "outputs/_archive/iso_dynamic_mix_hse_ns4000.csv",
 ]
 
 METRICS = (
@@ -214,7 +214,7 @@ def main() -> None:
     parser.add_argument("--time", type=float, default=100.0)
     parser.add_argument("--h0", type=float, default=0.0, help="lower-window start [km]")
     parser.add_argument("--h1", type=float, default=700.0, help="lower-window end [km]")
-    parser.add_argument("--out", type=Path, default=Path("visualization/iso_dynamic_mix_hse_t100.png"))
+    parser.add_argument("--out", type=Path, default=Path("visualization/_archive/iso_dynamic_mix_hse_t100.png"))
     args = parser.parse_args()
 
     if len(args.files) < 2:

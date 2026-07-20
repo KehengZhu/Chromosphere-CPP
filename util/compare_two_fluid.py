@@ -12,6 +12,7 @@ animate_loop_flare.primitives, then reports:
 and writes a difference figure: dT(s,t), dV(s,t) heatmaps + overlay profiles at
 the epoch of maximum departure.
 """
+import os
 import sys
 import numpy as np
 import matplotlib
@@ -153,6 +154,7 @@ def main():
     fig.suptitle(f"{tag}: two-fluid (ON) vs single-fluid (OFF) — same beam/IC/BCs", fontsize=12)
     fig.tight_layout()
     png = f"visualization/two_fluid/compare_{tag}.png"
+    os.makedirs(os.path.dirname(png), exist_ok=True)
     fig.savefig(png, dpi=120)
     print(f"  wrote {png}")
 

@@ -10,7 +10,7 @@ shifts to what IRIS actually measured (Young et al. 2015 ApJ 799,218; Li et al.
 
 Reuses synth_doppler.py for the forward model (optically-thin EM-weighted v_Dopp,
 disk-center LOS v_z = V*dh/ds). Produces:
-  visualization/<stem>_vs_obs.png  — (left) synthetic v_Dopp(t) with observed
+  visualization/events/<stem>_vs_obs.png  — (left) synthetic v_Dopp(t) with observed
      bands overlaid; (right) peak synthetic vs observed-range comparison per line.
 
 Usage:
@@ -126,8 +126,8 @@ def main():
     axc.margins(y=0.18)
     axc.grid(alpha=0.25, axis="x")
 
-    out = os.path.join("visualization", f"{stem}_vs_obs.png")
-    os.makedirs("visualization", exist_ok=True)
+    out = os.path.join("visualization/events", f"{stem}_vs_obs.png")
+    os.makedirs("visualization/events", exist_ok=True)
     fig.tight_layout()
     fig.savefig(out, dpi=130, bbox_inches="tight")
     plt.close(fig)

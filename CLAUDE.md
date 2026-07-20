@@ -18,6 +18,7 @@ latexmk -xelatex -output-directory=latex-build main.tex
 
 - **Code outputs** (simulation results, data dumps, logs from `chromo_main` / scenarios): save under `outputs/`.
 - **Visualizations** (plots, animations, figures generated from outputs): save under `visualization/` (project root). This directory is gitignored. Plotting scripts live in `util/` and already default their output here — keep new/edited scripts defaulting to `visualization/` too. Never write figures or movies to the repo root, into `util/`, or alongside source code.
+- **Both `outputs/` and `visualization/` are organized into per-scenario subdirs** mirroring `scenarios/`: `model_c7/`, `model_column/` (the unified column, which absorbed the old `iso_*`/`gentle_*` runs), `model_flare/`, `analytic_canopy/`, `loops/`, `pfss/`, `events/` (real-event campaigns — 2024-08-01 AR13768, SOL2014, ensembles; keeps `event_ensemble/`, `event_te/`, `sol2014/` nested inside), and `two_fluid/`. `visualization/` additionally has `reference/` (physics-reference plots + their scripts). `_archive/` holds dumps/figures from now-deleted diagnostic code and retired analytic-isentrope stages. **Place new runs/figures in the matching scenario subdir** — never loose in `outputs/` or `visualization/` root.
 
 Do not scatter output files in the repo root or alongside source code.
 

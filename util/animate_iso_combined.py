@@ -206,9 +206,9 @@ def _render_frame(k, tmpdir, h, V, T, rho, p, t, stage, nF, ylims):
 
 
 def main():
-    s1 = sys.argv[1] if len(sys.argv) > 1 else "outputs/iso_stage1.txt"
-    s2 = sys.argv[2] if len(sys.argv) > 2 else "outputs/iso_stage2b.txt"
-    out_path = sys.argv[3] if len(sys.argv) > 3 else "visualization/iso_combined_stage1_stage2.mp4"
+    s1 = sys.argv[1] if len(sys.argv) > 1 else "outputs/_archive/iso_stage1.txt"
+    s2 = sys.argv[2] if len(sys.argv) > 2 else "outputs/_archive/iso_stage2b.txt"
+    out_path = sys.argv[3] if len(sys.argv) > 3 else "visualization/_archive/iso_combined_stage1_stage2.mp4"
     fps = int(sys.argv[4]) if len(sys.argv) > 4 else 24
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 

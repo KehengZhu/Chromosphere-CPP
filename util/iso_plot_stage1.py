@@ -14,7 +14,7 @@ def load(fn):
             try:cur.append(list(map(float,line.split())))
             except:cur.append([])
     flush();return h,frames
-h,frames=load("outputs/iso_stage1.txt")
+h,frames=load("outputs/_archive/iso_stage1.txt")
 phi=g*(h-h[0])*1000
 def prim(U):
     rho_i,rho_n=U[:,0],U[:,1];V=U[:,2]/rho_i;Un=U[:,3]/rho_n
@@ -35,6 +35,6 @@ ax[1].plot(h,V0,'--',c='gray',label='IC');ax[1].plot(h,Vf,'-',c='C0',label=f'rel
 ax[1].axhline(0,c='k',lw=0.5);ax[1].set_xlabel('height [km]');ax[1].set_ylabel('V [m/s]');ax[1].set_title('Velocity ≈ 0 (tens of m/s)');ax[1].legend(fontsize=8)
 ax[2].semilogy(h,p0,'--',c='gray',label='IC');ax[2].semilogy(h,pf,'-',c='C2',label='relaxed')
 ax[2].set_xlabel('height [km]');ax[2].set_ylabel('p [Pa]');ax[2].set_title('Pressure (hydrostatic, stable)');ax[2].legend(fontsize=8)
-plt.tight_layout();plt.savefig("visualization/iso_stage1_relaxation.png",dpi=130)
+plt.tight_layout();plt.savefig("visualization/_archive/iso_stage1_relaxation.png",dpi=130)
 print(f"relaxed: max|V|={np.max(np.abs(Vf)):.1f} m/s  T[{Tf.min():.0f},{Tf.max():.0f}]K  linear-fit R²={R2:.6f}  lapse={A[0]:.3f} K/km")
-print("saved visualization/iso_stage1_relaxation.png")
+print("saved visualization/_archive/iso_stage1_relaxation.png")

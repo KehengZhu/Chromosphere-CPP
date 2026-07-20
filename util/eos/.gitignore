@@ -1,0 +1,4 @@
+# build artifacts of tabulate_gamma
+*.o
+*.exe
+*.mod

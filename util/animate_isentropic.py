@@ -7,8 +7,8 @@ corona), so a single linear height axis is used — no split x-axis needed.
 Usage:
     python util/animate_isentropic.py [input.txt] [output.mp4] [fps]
 
-Defaults to outputs/iso_stage2b.txt (conduction + radiative cooling: the localized
-TR + condensation downflow front) -> visualization/iso_stage2b_evolution.mp4.
+Defaults to outputs/_archive/iso_stage2b.txt (conduction + radiative cooling: the localized
+TR + condensation downflow front) -> visualization/_archive/iso_stage2b_evolution.mp4.
 Set ANIM_MAX_FRAMES to cap the number of rendered frames (default 400; the run is
 subsampled uniformly in time).
 """
@@ -183,7 +183,7 @@ def _render_frame(k, tmpdir, h, V, T, rho, p, q, mflux, t, nF, ylims, title, xsp
 
 
 def main():
-    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/iso_stage2b.txt"
+    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/_archive/iso_stage2b.txt"
     if len(sys.argv) > 2:
         out_path = sys.argv[2]
     else:

@@ -22,18 +22,18 @@ Usage:
 Examples:
 # Closed ensemble loop
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 python3 util/animate_loop_flare.py \
-  scenarios/data/event_ensemble/c05_101Mm.dat outputs/event_ensemble/c05_101Mm.txt \
-  visualization/event_ensemble_c05_101Mm_closed.mp4
+  scenarios/data/event_ensemble/c05_101Mm.dat outputs/events/event_ensemble/c05_101Mm.txt \
+  visualization/events/event_ensemble_c05_101Mm_closed.mp4
 
 # Open ensemble line
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 python3 util/animate_loop_flare.py \
-  scenarios/data/event_ensemble/o00_1040Mm.dat outputs/event_ensemble/o00_1040Mm.txt \
-  visualization/event_ensemble_o00_1040Mm_open.mp4
+  scenarios/data/event_ensemble/o00_1040Mm.dat outputs/events/event_ensemble/o00_1040Mm.txt \
+  visualization/events/event_ensemble_o00_1040Mm_open.mp4
 
 # Event starter (full loop, AR 13768)
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 python3 util/animate_loop_flare.py \
-  scenarios/data/event_20240801_AR13768.dat outputs/event_20240801_AR13768_flare.txt \
-  visualization/event_20240801_AR13768_flare.mp4
+  scenarios/data/event_20240801_AR13768.dat outputs/events/event_20240801_AR13768_flare.txt \
+  visualization/events/event_20240801_AR13768_flare.mp4
 
 """
 import os
@@ -337,8 +337,8 @@ def _render_frame(k, tmpdir, xMm, t, Ti, Te, V, ni, nn, ds_arr, phi_arr,
 
 def main():
     dat = sys.argv[1] if len(sys.argv) > 1 else "scenarios/data/loop_full_fine.dat"
-    flare = sys.argv[2] if len(sys.argv) > 2 else "outputs/loop_full_flare.txt"
-    out = sys.argv[3] if len(sys.argv) > 3 else "visualization/loop_full_flare_evolution.mp4"
+    flare = sys.argv[2] if len(sys.argv) > 2 else "outputs/loops/loop_full_flare.txt"
+    out = sys.argv[3] if len(sys.argv) > 3 else "visualization/loops/loop_full_flare_evolution.mp4"
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     meta = read_meta(dat)

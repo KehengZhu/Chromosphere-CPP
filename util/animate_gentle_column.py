@@ -233,8 +233,8 @@ def _render(k, tmpdir, h_km, prim, t, t_on, ramp, enhance,
 
 
 def main():
-    run = sys.argv[1] if len(sys.argv) > 1 else "outputs/gentle_v3_evap.txt"
-    out = sys.argv[2] if len(sys.argv) > 2 else "visualization/gentle_v3_evolution.mp4"
+    run = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_column/gentle_v3_evap.txt"
+    out = sys.argv[2] if len(sys.argv) > 2 else "visualization/model_column/gentle_v3_evolution.mp4"
     t_on    = float(sys.argv[3]) if len(sys.argv) > 3 else 3000.0
     ramp    = float(sys.argv[4]) if len(sys.argv) > 4 else 300.0
     enhance = float(sys.argv[5]) if len(sys.argv) > 5 else 3.0

@@ -13,7 +13,7 @@ This is the time-series companion to check_loop_ic.py (which checks a single sta
 .dat IC for hydrostatic balance before the run).
 
 Usage:
-  python util/check_relaxation.py outputs/gentle_relax.txt [visualization/gentle_relax_convergence.png]
+  python util/check_relaxation.py outputs/model_column/gentle_relax.txt [visualization/model_column/gentle_relax_convergence.png]
 """
 import os
 import sys
@@ -72,8 +72,8 @@ def primitives(xn):
 
 
 def main():
-    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/gentle_relax.txt"
-    out = sys.argv[2] if len(sys.argv) > 2 else "visualization/gentle_relax_convergence.png"
+    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_column/gentle_relax.txt"
+    out = sys.argv[2] if len(sys.argv) > 2 else "visualization/model_column/gentle_relax_convergence.png"
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 
     arc_km, frames = read_frames(in_path)

@@ -68,8 +68,8 @@ def prim(xn):
 
 
 def main():
-    exp_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/flare_explosive_500.txt"
-    gen_path = sys.argv[2] if len(sys.argv) > 2 else "outputs/flare_gentle.txt"
+    exp_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_flare/flare_explosive_500.txt"
+    gen_path = sys.argv[2] if len(sys.argv) > 2 else "outputs/model_flare/flare_gentle.txt"
 
     H, fe = read_frames(exp_path)
     ts = np.array([t for t, _ in fe])

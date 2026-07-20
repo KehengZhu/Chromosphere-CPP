@@ -1,7 +1,7 @@
 import numpy as np, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
 mp=1.6726219e-27;kb=1.380649e-23;g=273.95
-f=open("outputs/iso_stage2b.txt");ns,neq=map(int,f.readline().split());h=np.array(list(map(float,f.readline().split())))
+f=open("outputs/_archive/iso_stage2b.txt");ns,neq=map(int,f.readline().split());h=np.array(list(map(float,f.readline().split())))
 frames=[];cur=None;t=None
 def flush():
     if cur is None:return
@@ -33,10 +33,10 @@ for tt,c in zip(sel,cols):
 ax[0].set_xlabel('height [km]');ax[0].set_ylabel('T [K]');ax[0].set_title('T: top heats (conductive flux from hot ghost)');ax[0].legend(fontsize=8)
 ax[1].axhline(0,c='k',lw=0.5);ax[1].set_xlabel('height [km]');ax[1].set_ylabel('V [km/s]');ax[1].set_title('V: upflow + downflow front (evaporation)')
 ax[2].set_xlabel('height [km]');ax[2].set_ylabel(r'$\rho$ [kg/m³]');ax[2].set_title('density')
-plt.tight_layout();plt.savefig("visualization/iso_stage2b_evaporation.png",dpi=130)
+plt.tight_layout();plt.savefig("visualization/_archive/iso_stage2b_evaporation.png",dpi=130)
 # report the peak transient
 for tt in [2,5,10,20,40,80]:
     t,U=near(tt);V,T,rho=prim(U)
     iup=np.argmax(V);idn=np.argmin(V)
     print(f"t={t:6.1f}  Vmax(up)={V[iup]/1e3:6.2f}km/s @h={h[iup]:.0f}  Vmin(down)={V[idn]/1e3:6.2f}km/s @h={h[idn]:.0f}  Ttop={T[-5]:.0f}K")
-print("saved visualization/iso_stage2b_evaporation.png")
+print("saved visualization/_archive/iso_stage2b_evaporation.png")

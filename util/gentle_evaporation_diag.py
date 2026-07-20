@@ -16,8 +16,8 @@ departure from the preflare baseline. Antiochos & Sturrock (1978): gentle ⇒ th
 upflow stays well below the sound speed (Mach number shown).
 
 Usage:
-  python util/gentle_evaporation_diag.py outputs/gentle_evap.txt \
-      [visualization/gentle_evap_signature.png] [t_on] [ramp]
+  python util/gentle_evaporation_diag.py outputs/model_column/gentle_evap.txt \
+      [visualization/model_column/gentle_evap_signature.png] [t_on] [ramp]
 """
 import os
 import sys
@@ -63,8 +63,8 @@ def primitives(xn):
 
 
 def main():
-    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/gentle_evap.txt"
-    out = sys.argv[2] if len(sys.argv) > 2 else "visualization/gentle_evap_signature.png"
+    in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_column/gentle_evap.txt"
+    out = sys.argv[2] if len(sys.argv) > 2 else "visualization/model_column/gentle_evap_signature.png"
     t_on = float(sys.argv[3]) if len(sys.argv) > 3 else 1000.0
     ramp = float(sys.argv[4]) if len(sys.argv) > 4 else 200.0
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)

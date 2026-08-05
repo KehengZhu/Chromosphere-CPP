@@ -15,6 +15,7 @@ util/data/
 visualization/
 scenarios/data/*.dat
 outputs/
+/tmp/Chromosphere-CPP/
 
 # Generated simulation outputs and per-run logs (if written to root).
 out_*.txt

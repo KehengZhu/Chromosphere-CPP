@@ -45,10 +45,13 @@ The 6 conserved variables per cell (writeup eq 61):
 
 ```
 chromosphere.hpp         Public API: Grid struct, cons::/prim:: indices, function decls
+eos.hpp                  Stage-1–4 EOS closure, mixture decode, conservative projection
+data/eos/                Versioned Gamma1 production table, checksum, and provenance
 physics.hpp              Inline collision frequency (nu_in), conductivities (kappa_e, kappa_n),
                          Stage E ionization/recombination rates (Voronov 1997, Hummer 1994)
 chromo_main.cpp          Main entry point — CLI dispatcher
 src/
+  eos.cpp                Gamma1 loader + caloric inversion/decode/projection physics
   grid.cpp               Grid::init, Grid::broadcast
   state.cpp              cons2prim, prim2cons, get_scalar, scalar_to, ip1/im1/ip2/im2, flux_lim
   flux.cpp               cal_flux_state, cal_spectral_radius_state, cal_source_state
@@ -64,6 +67,7 @@ scenarios/
 tests/chromo_tests.cpp   Test suite (physics + numerics + scenarios)
 include/armadillo        Vendored header-only Armadillo
 util/                    Python visualizations + PFSS extraction pipeline
+  eos/                   Classical pure-H CRASH generator + C++/Python validators
 fortran/                 Legacy Fortran main + SWMF couplers (not built)
 docs/                    Al Shidi 2019 paper + Keheng's writeup
 outputs/                 chromo_main snapshot dumps (.txt/.log), organized by scenario:
@@ -194,7 +198,7 @@ Each argument is positional and optional; defaults are shown in parentheses.
 
 | Arg | Position | Values | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `output_path` | 1 | any path | `outputs/model_c7/output.txt` | snapshot file (line 1 = `ns num_of_eq`; line 2 = cumulative heights in km; then `# t = T step = S` markers each followed by `ns` rows of conserved variables) |
+| `output_path` | 1 | any path | `outputs/model_c7/output.txt` | snapshot file (line 1 = `ns num_of_eq`; line 2 = cumulative heights in km; then `# t = T step = S` markers each followed by `ns` rows of conserved variables). Gamma mode also writes `<output_path>.gamma_diag` with decoded physical fields and EOS provenance. |
 | `mode`        | 2 | `full` \| `explicit` | `full` | `full` = semi-implicit driver (Stage A explicit, B drag, C T-equil, D conduction). `explicit` zeroes `R_I` and runs pure explicit Euler |
 | `ionization`  | 3 | `ionization` \| `no-ionization` | `ionization` | toggles Stage E (Voronov 1997 ionization + Hummer 1994 recombination) |
 | `scenario`    | 4 | `model_column` \| `model_c7` \| `model_flare` \| `analytic_canopy` \| `pfss_field_line` | `model_column` | which IC + BC pair to dispatch (see [Scenarios](#scenarios)). `model_isentropic` and `model_gentle` are backward-compat aliases of `model_column` (the latter applies the resolved-corona full-physics gentle preset) |
@@ -202,6 +206,20 @@ Each argument is positional and optional; defaults are shown in parentheses.
 | `time_mult`   | 6 | float | `1.0` | multiplier on the default total simulation time `10·L/Cs`. Step cap scales with this so longer runs aren't truncated |
 
 A companion `outputs/_archive/output.log` is appended with the configured `total_time`.
+
+For reproducible long diagnostics, `CHROMO_T_END=<seconds>` overrides the
+derived stop time with an exact positive absolute time, while
+`CHROMO_FRAME_STRIDE=<steps>` sets the positive snapshot interval. Both are
+optional and leave the historical behavior unchanged when unset. The existing
+`time_mult` still controls the step budget, so it must be large enough for a
+`CHROMO_T_END` run to reach its requested endpoint.
+
+Performance diagnostics are opt-in. `CHROMO_PROFILE=1` prints region timings,
+EOS inversion/iteration statistics, conduction Newton counts, and the active
+timestep limiter at shutdown. `CHROMO_OUTPUT=0` and `CHROMO_GAMMA_DIAG=0`
+independently disable the conserved-state and EOS-aware files for clean timing
+runs; both default to enabled. Profiling and output controls do not alter the
+solver state or timestep.
 
 ### Examples
 
@@ -288,6 +306,13 @@ field line (B = 1, gravity on) initialized from the real Model C7 atmosphere (vi
 `c7_full_profile` in the C7 library) with the density re-integrated hydrostatically
 for a clean V ≈ 0 start and a realistic frozen ionization profile.
 
+When `GAMMA_TABLE` is active, the Model C7 temperature is instead evaluated by
+a shape-preserving monotone cubic Hermite (PCHIP) interpolant before the
+Saha-HSE density integration. It preserves all C7 knot values and makes
+`dT/dh` continuous, avoiding artificial steps in the initial conductive-flux
+profile. The fixed-gamma path deliberately retains the historical linear
+interpolation.
+
 - **Numerics (always on, no toggles):** the validated "bestwb" configuration —
   well-balanced explicit reconstruction, log-space MUSCL, the MC3/Koren limiter
   (β = 2), equilibrium-reference δ-form well-balancing, and an inner discrete-HSE
@@ -299,6 +324,23 @@ for a clean V ≈ 0 start and a realistic frozen ionization profile.
   heating H(s) (`ISO_CHEAT*`), or a one-time IC coronal superheat (`ISO_TBOOST*`);
   radiative sink (`ISO_COOLING`), two-fluid (`ISO_TWO_FLUID`), and the ionization
   network (`ISO_IONIZATION`). See the header for the full knob list.
+- **Upper-BC experiment (default off):** `ISO_HYDRO_T_DECOUPLE=1` lets the outer
+  *hydro* ghost temperature zero-gradient-extrapolate the live top cell while the
+  Stage-D conduction solver keeps the unchanged fixed hot Dirichlet wall
+  (`Grid::outer_conduction_temperature`). Removes the last-cell velocity reversal
+  but not the 2130–2150 km mass-flux ripple — see
+  `docs/upper_bc_hydro_temperature_decoupling_recap.md`.
+- **Face mass-flux diagnostic (default off):** `CHROMO_FACE_FLUX_DIAG=1` writes a
+  `<out>.faceflux` sidecar holding a read-only copy-out of the *production* Rusanov
+  total-mass face flux and its central/diffusive split from `rhs_explicit_mixture`
+  (`CHROMO_FACE_FLUX_TOP`, `CHROMO_FACE_FLUX_STRIDE`; analysed by
+  `util/face_flux_diag.py`). It changed nothing bit-for-bit. Because `eq_wb`
+  subtracts the frozen reference residual from the continuity rows, the conserved
+  flux is `f_total − f_ref`, and that flux is smooth through the 2130–2150 km
+  region while cell-centred `ρV` ripples — the ripple is a decomposition effect,
+  not a continuity violation. `ISO_LIMITER=mc3|minmod|first` is a diagnostic-only
+  reconstruction override (unset = the production MC3 β=2). See
+  `docs/top_ripple_face_flux_diagnosis.md`.
 - **Aliases:** `model_isentropic` → `model_column` (identical); `model_gentle` →
   `model_column` with the documented stable resolved-corona full-physics preset
   (`ISO_CORONA ISO_H_BASE=1003 ISO_HEAT_FLUX ISO_COOLING ISO_IONIZATION ISO_TWO_FLUID`).
@@ -404,6 +446,67 @@ layers:
 - `flux_lim` matches the minmod formula `max(0, min(1, r))` (writeup eq 15;
   the docstring claims `ospre` but the code is minmod)
 - `cons2prim ∘ prim2cons = identity`
+- log-domain textbook Saha residual/limits, domain rejection, and shared EOS/Grid constants
+- strict v1 Gamma1 metadata, shape/axis/value, boundary/OOB, two-axis debug-clamp,
+  and bilinear log-grid interpolation checks
+- tracked production table dimensions, bounds, representative node/interpolation,
+  and SHA-256 verification through dedicated CTests
+- Stage-3 `e_int↔T` round trips with and without a temperature guess, analytic
+  energy-γ, CRASH Γ₁ lookup, state-carried-potential decode, and separate
+  physical `x_eq` versus stored-carrier `x_row`
+- pre-inversion production-density enforcement, invalid/out-of-bracket guess
+  independence, and near-endpoint caloric inversion behavior
+- Stage-4 mass/momentum/energy conservation, center-of-mass drift
+  thermalization, approved `E_I/E_N/E_E` mapping, projection idempotency, and
+  storage-floor independence
+- Stage-4 lower/upper density rejection before projection output, packed
+  all-or-nothing failure behavior, neutral/ionized trace-floor limits, and
+  zero-total-momentum drift thermalization
+- Stage-5/5.5 equilibrium face construction and total-flux identities,
+  shared-face gravitational-potential packing, mixture-only internal MUSCL
+  prediction in double precision, production-table boundary reconstruction,
+  projected Euler stepping, and explicit RK/incompatible-mode guards
+- Stage-5.6 storage-floor independence at faces and Stage-6 common CRASH-Γ₁
+  mixture sound speed, including quadratic Δt convergence of projection heating
+- Stage-7 total-energy heating/cooling, decoded-composition transport, and the
+  nonlinear single-mixture conduction solve with analytic effective heat capacity
+- Stage-8 density-anchored Saha-HSE Model C7 initialization, four EOS-packed
+  ghost states, boundary energy identities, and a controlled Euler step
+- Stage-9 neutral/ionized monatomic limits, all-grid-line interpolation
+  continuity, small-amplitude adiabatic acoustic characteristics across the
+  10%, 50%, and 90% ionization transition plus the ionized limit, a matched
+  fixed-5/3 versus gamma-table evaporation response, and strict three-floor
+  invariance in both trace-ion and trace-neutral limits after float packing and
+  runtime decoding of mass/energy/flux, thermodynamics, conductivities, and
+  radiation
+- Independent analytic-Saha `Gamma1` versus raw CRASH `GammaS` at all 28,557
+  production nodes, including reported worst-case coordinates
+- Offline Stage-9 CRASH validation on a 2x-refined grid at all 28,000
+  production-cell midpoints (`bash util/eos/build_and_run.sh`)
+
+Gamma-table mode is activated by `GAMMA_TABLE=/path/to/table` for the
+`model_column` scenario (and its `model_isentropic` compatibility alias) with the
+full semi-implicit Euler integrator. It requires single-fluid equilibrium,
+`ENABLE_TE=0`, and an explicit `no-ionization` command-line selection. Explicit
+`ENABLE_TE=1` and `SINGLE_FLUID=0` requests are rejected before scenario IC.
+Other scenarios, the explicit-only
+driver, and RK4 remain fail-closed until separately converted. `GAMMA_TABLE` and
+an explicitly supplied `ISO_GAMMA` are mutually exclusive.
+
+Each gamma snapshot has an EOS-aware `.gamma_diag` sidecar containing
+`rho_total`, `v_cm`, `T`, `x_eq`, `n_e`, `n_HI`, `p_total`, `Gamma1`, and the
+solver-effective conductivity (including TRAC and numerical diffusivity), plus
+the table path, its runtime SHA-256, and the gravitational-potential convention.
+`util/animate_gentle_column.py` automatically prefers this sidecar and computes
+conductive flux from the decoded physical electron and neutral densities.
+
+The gamma Euler path decodes each immutable conserved state once into a
+two-ghost-layer `DecodedMixtureField`. CFL, source evaluation, and MUSCL
+reconstruction share that state-bound field; predicted and post-source states
+receive separate cache generations. Ghosts retain their boundary-face
+gravitational potentials. The nonlinear conduction workspace and gamma-MUSCL
+arrays are owned by each `Grid` and reused between steps, avoiding function-
+static state and repeated hot-loop allocation.
 
 **Physics formulas vs. writeup**
 - Pressure relation `p_i = 2 n_i k_b T_i`, `p_n = n_n k_b T_n` (writeup eq 38)
@@ -424,7 +527,7 @@ layers:
 - Total ion and neutral mass are preserved across one explicit step on that
   fixed-point state
 
-Currently 34 test cases / 5552 individual checks; all passing.
+Currently 70 test cases / 6735 individual checks; all passing.
 
 ## Known issues (worth attending to before more physics is added)
 

@@ -1,0 +1,235 @@
+# CRASH gamma-only EOS: Stage 9 validation recap
+
+Date: 2026-07-20
+
+## Result
+
+Status: **signed off**.
+
+Stage 9 is implemented and passes the local production, regression, and CRASH
+validation workflows. No activation boundary was broadened: fixed-gamma mode
+continues through its existing paths, while gamma-table mode remains restricted
+to the single-fluid/common-temperature `model_column` Euler configuration.
+
+The tracked 501x57 production table regenerated with its existing SHA-256:
+
+```text
+758dfe315cc907097a15368c1cfe242d279251c1f9c2f72ac1df7544d1635908
+```
+
+## New validation coverage
+
+### Limits, continuity, and acoustic speed
+
+`eos_validate_production_table` now checks neutral and fully ionized endpoint
+limits. CRASH `Gamma1` recovers 5/3 in both. At the finite 1e8 K ceiling,
+analytic `gamma_E` is within 3.51e-4 of 5/3 because the caloric zero retains the
+already-paid hydrogen ionization energy. Every internal table grid line is
+probed from both adjacent cells; the maximum continuity jump is 1.92766e-11.
+
+Small adiabatic perturbations use `du = p/rho^2 d rho`, independently re-invert
+the caloric EOS, and numerically evaluate `(dp/drho)_S`. The test covers
+`x_eq=0.1`, `0.5`, and `0.9` at `n_H=1e20 m^-3`, plus the retained nearly fully
+ionized limit. Each characteristic speed matches `sqrt(Gamma1 p/rho)` within
+`5e-4` relative; the measured transition-region discrepancy that forced the
+old ideal-limit-only gate to be widened was `2.22e-4`.
+
+### Conduction nonlinear convergence
+
+The Newton loop re-evaluates the complete nonlinear residual after any small
+temperature update before it can report stagnation. Its final allowed update
+is followed by an evaluation-only iteration, so a solution reached on that
+update is accepted instead of being rejected without a residual check.
+
+### Evaporation comparison
+
+A matched short `model_column` temperature-jump/conduction run advances both
+closures for eight CFL steps:
+
+| Closure | Maximum upward mass flux | max T [K] | top p [Pa] |
+|---|---:|---:|---:|
+| fixed 5/3 | 1.10074e-3 | 6813.14 | 3.43710 |
+| gamma table | 3.55232e-3 | 6938.71 | 3.62138 |
+
+The test enforces 10% mass-flux, 3% temperature, and 5% pressure golden windows,
+plus a gamma/fixed maximum-upward-mass-flux ratio between 2 and 5. This is a
+bounded regression comparison, not a claim that eight steps represent a
+converged evaporation solution.
+
+### Storage-floor independence
+
+Two physical equilibrium faces are repacked at `f_min = 1e-6, 1e-8, 1e-10`
+into actual seven-row `Vec<float>` states. The nearly neutral case has
+`x_eq=9.76e-11` and explicitly verifies `rho_i(f6)>rho_i(f8)>rho_i(f10)`; the
+nearly ionized case has `1-x_eq=4.85e-11` and verifies the corresponding neutral
+row ordering. Thus every requested floor actually changes `x_row` in both
+limits. For each packed state, the read-only runtime decoder reconstructs
+`x_eq`, `T`, total pressure, `n_e`, and `n_HI`; only those decoded quantities
+are passed to electron/neutral conductivity and combined thick/thin radiation.
+All physical and transport/source diagnostics agree at float-roundoff tolerance.
+
+The high-density case also exposed a float intermediate overflow in optically
+thin cooling: `n_e*n_H` could overflow before multiplication by a tiny
+`Lambda(T)` even when the final loss was finite. `radiative_loss_thin()` now
+multiplies `n_e*Lambda(T)` first, an algebraically identical ordering that
+remains finite across the tested EOS domain.
+
+### Independent analytic Gamma1 cross-check
+
+`eos_validate_saha` now differentiates the C++ Saha relation analytically to
+form `chi_rho`, `chi_T`, and
+`Gamma1 = chi_rho + p chi_T^2/(T C_V)`. This is evaluated independently at all
+28,557 production nodes and compared directly with raw CRASH `GammaS`, not the
+runtime table copy. The worst absolute and relative errors occur at the same
+state:
+
+```text
+T=3200 K, n_H=1.77828e17 m^-3
+analytic Gamma1=1.66615, CRASH GammaS=1.66667
+max_abs=5.17732e-4, max_rel=3.10639e-4
+```
+
+Both gates are `1e-3`. The separate runtime-node comparison is retained only as
+a file/loader consistency check.
+
+### 2x-refined/direct-CRASH validation
+
+`tabulate_gamma.exe refined` creates a disposable 1001x113 grid under
+`outputs/eos_gamma/`. It preserves every production node and directly calls
+CRASH at each new midpoint; it never replaces the tracked table.
+
+`eos_validate_refined_table` exhaustively checks all 28,000 refined nodes that
+are production-cell midpoints:
+
+```text
+Gamma1 coarse vs direct CRASH max_abs       0.00537477
+Gamma1 coarse vs refined max_abs            0.00537477
+Gamma1 refined node vs direct max_abs        1.02141e-14
+analytic gamma_E vs direct max_abs           1.97016e-05
+analytic Cv_eff vs direct max_rel            7.38292e-04
+T(rho,e_CRASH) inversion max_rel             3.49572e-07
+```
+
+The exhaustive production between-node `Gamma1` gate is 0.006 absolute.
+Refined artifacts are ignored outputs regenerated by
+`bash util/eos/build_and_run.sh`.
+
+## Checklist disposition
+
+1. Feature-off regression: full pre-existing suite passes.
+2. Neutral/high-T limits: production-table validator.
+3. Table continuity: every internal grid line.
+4. Caloric round trips: production densities/temperatures.
+5. Static Saha-HSE: retained, including controlled evolution.
+6. Acoustic speed: adiabatic characteristics through 10%, 50%, and 90%
+   ionization, plus the ionized limit.
+7. Conduction energy conservation: retained for uniform/nonuniform and strong
+   nonlinear TRAC cases.
+8. Evaporation comparison: matched fixed/gamma golden-window regression.
+9. C++ Saha versus CRASH `zAv`: all 28,557 production rows.
+10. Delta-t projection convergence: retained.
+11. Conservative projection/drift thermalization: retained.
+12. Cache-free reconstruction/ghost inversion: retained.
+13. RK4/explicit rejection: retained.
+14. On-manifold face reconstruction: retained.
+15. Trace-floor face convergence: retained and extended by item 19.
+16. Table resolution/off-node accuracy: new 2x/direct-CRASH validator.
+17. Four-ghost consistency: retained.
+18. Face total-flux identities: retained.
+19. Floor independence: three genuinely active float-packed floors in both
+    trace-ion and trace-neutral limits, decoded through the runtime path before
+    evaluating all requested transport/source quantities.
+20. Independent analytic-Saha `Gamma1` versus raw CRASH `GammaS`: all 28,557
+    production nodes, with absolute/relative worst cases reported.
+21. Common-face-potential cancellation: retained.
+
+## Post-sign-off extended-column regression
+
+The 2,000-cell, 0--2152.6 km conduction run exposed a safeguarded-Newton edge
+case in `temperature_from_rho_eint()`: an in-bracket Newton proposal could land
+within roundoff of the opposite endpoint and cycle without reducing the
+bracket. The inversion now accepts a Newton proposal only when it removes at
+least 10% of the current bracket from both ends; otherwise it bisects. A
+regression pins the formerly cycling state (`rho=5.55517e-10 kg/m^3`,
+`e_int=0.802803 J/m^3`, initial guess `11434.3 K`). The complete extended run
+then advances 10,000 steps to `t=115.835 s` with all 1,001 output frames finite.
+
+## Post-sign-off Option-2 PCHIP refinement and 1,000 s run
+
+The step-like initial heat-flux diagnostic was traced to the historical
+piecewise-linear interpolation between the sparse Model C7 temperature knots:
+temperature was continuous, but `dT/dh` was piecewise constant. Gamma-table
+`model_column` initialization now evaluates temperature with a
+Fritsch-Carlson/Fritsch-Butland shape-preserving cubic Hermite interpolant. It
+passes exactly through every C7 temperature knot, is monotone within monotone
+segments, and is C1 across the internal knots. The historical
+`c7_full_profile()` and fixed-gamma initialization remain unchanged.
+
+The density profile is re-integrated in Saha hydrostatic equilibrium from this
+smooth temperature profile before EOS packing. Regression tests verify the old
+linear interpolant, PCHIP nodal values and derivative continuity, and decoded
+gamma-mode cell temperatures.
+
+The requested 2,000-cell, 0--2152.6 km conduction run used a 22 kK top
+reservoir and advanced to exactly `t=1000 s`:
+
+```text
+steps                         85,892
+conserved-state frames           431
+EOS-aware sidecar frames          431
+NaN/Inf                            0
+```
+
+The resulting 400-frame H.264 animation is 2040x960 at 20 fps. Visual checks of
+the initial and late-time frames confirm that the conductive heat flux is
+smooth at initialization and remains smooth during the evolution.
+
+## Files revised
+
+- `eos.hpp`, `src/eos.cpp`: checked table-axis coordinate accessors.
+- `tests/chromo_tests.cpp`: acoustic, floor, and evaporation regressions.
+- `util/eos/tabulate_gamma.f90`: optional non-destructive refined mode.
+- `util/eos/validate_refined_table.cpp`: off-node/direct-CRASH validator.
+- `util/eos/validate_saha.cpp`: whole-grid independent analytic `Gamma1` check.
+- `util/eos/validate_production_table.cpp`: limit and continuity checks.
+- `physics.hpp`: overflow-safe optically thin loss multiplication order.
+- `util/eos/build_and_run.sh`, `CMakeLists.txt`: refined validator workflow.
+- `README.md`, `util/eos/README.md`: validation workflow and counts.
+- `scenarios/model_c7.hpp`, `scenarios/model_c7.cpp`: monotone C7 temperature
+  PCHIP used by the gamma-table initialization.
+- `scenarios/model_column.cpp`: gamma-mode PCHIP temperature and Saha-HSE
+  initialization; fixed-gamma behavior remains unchanged.
+- `chromo_main.cpp`: optional exact `CHROMO_T_END` and snapshot
+  `CHROMO_FRAME_STRIDE` runtime controls.
+- `visualize_commands.md`: reproducible 1,000 s run and animation commands.
+
+## Verification commands
+
+```text
+cmake -S . -B build
+cmake --build build -j4
+ctest --test-dir build --output-on-failure
+bash util/eos/build_and_run.sh
+python -m py_compile util/animate_gentle_column.py util/plot_eos_gamma.py
+bash -n util/eos/build_and_run.sh
+git diff --check
+```
+
+Stage-9 sign-off results:
+
+- direct unit executable: 70 cases / 6,781 checks, zero failures;
+- CTest: 7/7 passed;
+- production CRASH/Saha validation: 28,557 rows passed;
+- refined/direct-CRASH validation: all 28,000 production-cell midpoints passed;
+- tracked table checksum, Python syntax, shell syntax, and diff whitespace: passed.
+
+CMake did not find OpenMP in this macOS environment; the supported serial build
+completed and ran the full validation suite.
+
+Post-sign-off Option-2 results:
+
+- direct unit executable: 70 cases / 6,833 checks, zero failures;
+- CTest: 7/7 passed;
+- 1,000 s extended-column run: 85,892 steps, 431/431 finite state/sidecar
+  frames;
+- animation: 400 frames, H.264 2040x960, 20 fps, 20 s.

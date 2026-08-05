@@ -11,6 +11,12 @@ Defaults to outputs/_archive/iso_stage2b.txt (conduction + radiative cooling: th
 TR + condensation downflow front) -> visualization/_archive/iso_stage2b_evolution.mp4.
 Set ANIM_MAX_FRAMES to cap the number of rendered frames (default 400; the run is
 subsampled uniformly in time).
+Set Q_PHYS_YMAX_WM2 to a positive value for a symmetric, shared physical-flux
+display range; boundary spikes outside that range remain in the data but clip.
+
+Gamma-table runs automatically use the newer <input.txt>.gamma_diag sidecar so
+temperature, pressure, composition, and conductivity are decoded by the runtime
+EOS rather than by the legacy fixed-gamma conserved-energy formula.
 """
 import os
 import sys
@@ -21,6 +27,7 @@ matplotlib.use("Agg")
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _anim_parallel import save_frames_parallel
+from conductive_flux import physical_heat_flux
 
 MP = 1.6726219e-27
 KB = 1.380649e-23
@@ -31,6 +38,10 @@ F_ION = 1e-3  # frozen ionization fraction used in the iso staged runs
 # 5/3). Set ISO_GAMMA=1.05 in the environment to plot a near-isothermal run.
 GAMMA = float(os.environ.get("ISO_GAMMA", 5.0 / 3.0))
 GM1 = GAMMA - 1.0
+
+# Backward-compatible import used by older one-frame/poster scripts. Both modes
+# now route through the same shared implementation.
+heat_flux = physical_heat_flux
 
 
 def load(fn):
@@ -61,10 +72,12 @@ def load(fn):
     for line in f:
         if stop:
             break
-        if line.startswith('#'):
+        if line.startswith('# t ='):
             flush()
             t = float(line.split('t =')[1].split('step')[0])
             cur = []
+        elif line.startswith('#'):
+            continue
         else:
             try:
                 cur.append(list(map(float, line.split())))
@@ -72,6 +85,16 @@ def load(fn):
                 cur.append([])
     flush()
     return h, frames
+
+
+def has_gamma_sidecar(run_path, diag_path):
+    """Use explicit run provenance; the two files may close milliseconds apart."""
+    if not os.path.exists(diag_path):
+        return False
+    with open(run_path) as run_file:
+        run_file.readline()  # ns, neq
+        run_file.readline()  # height coordinates
+        return "EOS_MODE=gamma_table" in run_file.readline()
 
 
 def primitives(U, phi):
@@ -90,31 +113,17 @@ def primitives(U, phi):
     return V, T, rho, (p_i + p_n), n_e, n_n
 
 
-def kappa_e(n_e, n_n, T):
-    """Electron field-aligned heat conductivity [SI], matching physics.hpp eq 53
-    (Spitzer e–i numerator + Vranjes & Krstic e–n denominator term)."""
-    return 9.2048e-12 * n_e * T ** 2.5 / (n_e + 2.836e-11 * n_n * T ** 2)
+def gamma_primitives(diag, _phi):
+    """Physical fields written by chromo_main's EOS-aware diagnostic sidecar."""
+    # Index by the stable physical-field prefix so both legacy 9-column and new
+    # 10-column sidecars remain readable. Conductivity is recomputed below from
+    # these fields; the legacy last column was solver-effective and must not be
+    # used for an apples-to-apples physical-flux plot.
+    return diag[:, 1], diag[:, 2], diag[:, 0], diag[:, 6], diag[:, 4], diag[:, 5]
 
 
-def kappa_n(n_i, n_n, T):
-    """Neutral field-aligned heat conductivity [SI], matching physics.hpp eq 59
-    (single fluid here, so T_i = T_n = T)."""
-    return (0.0342006 * n_n * T) / (
-        1.20613 * n_i * np.sqrt(2.0 * T) + 1.70573 * n_n * np.sqrt(T))
-
-
-def heat_flux(h_km, T, n_e, n_n):
-    """Field-aligned conductive heat flux q = -(κ_e + κ_n) dT/ds [W/m²].
-    Positive = up the field (toward the corona); the strong negative spike at the
-    TR is the downward conductive flux that drives evaporation. Spitzer flux (no
-    TRAC broadening — that factor only redistributes the TR while preserving the
-    integral)."""
-    s = h_km * 1.0e3                       # km → m
-    dTds = np.gradient(T, s)
-    return -(kappa_e(n_e, n_n, T) + kappa_n(n_e, n_n, T)) * dTds
-
-
-def _render_frame(k, tmpdir, h, V, T, rho, p, q, mflux, t, nF, ylims, title, xsplit):
+def _render_frame(k, tmpdir, h, V, T, rho, p, q, mflux, t, nF, ylims, title,
+                  xsplit, q_boundary_clipped):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -136,8 +145,13 @@ def _render_frame(k, tmpdir, h, V, T, rho, p, q, mflux, t, nF, ylims, title, xsp
     ax[0, 2].plot(h, q / 1e3, lw=1.4, color="C1")
     ax[0, 2].axhline(0, c="k", lw=0.5)
     ax[0, 2].set_ylabel(r"$q$ [kW/m²]")
-    ax[0, 2].set_title("Conductive heat flux  (>0 up; <0 = downward into TR)")
+    ax[0, 2].set_title(r"Physical $q_\parallel=-(\kappa_e+\kappa_n)dT/ds$"
+                       "\n(no TRAC or numerical diffusion)")
     ax[0, 2].set_ylim(*ylims["q"])
+    if q_boundary_clipped:
+        ax[0, 2].text(0.98, 0.05, "right-boundary spike clipped",
+                      transform=ax[0, 2].transAxes, ha="right", va="bottom",
+                      fontsize=8.5, color="0.35")
 
     ax[1, 0].semilogy(h, rho, lw=1.4, color="C2")
     ax[1, 0].set_ylabel(r"$\rho$ [kg/m³]")
@@ -193,7 +207,9 @@ def main():
     max_frames = int(os.environ.get("ANIM_MAX_FRAMES", "400"))
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
-    h, frames = load(in_path)
+    diag_path = in_path + ".gamma_diag"
+    gamma_mode = has_gamma_sidecar(in_path, diag_path)
+    h, frames = load(diag_path if gamma_mode else in_path)
     phi = G * (h - h[0]) * 1000.0
 
     # Subsample uniformly to at most max_frames.
@@ -206,9 +222,10 @@ def main():
     print(f"read {nAll} frames, using {nF}, ns = {h.size}, "
           f"t in [{frames[0][0]:.1f}, {frames[-1][0]:.1f}] s")
 
-    prims = [primitives(fr[1], phi) for fr in frames]  # (V, T, rho, p, n_e, n_n)
-    # Field-aligned conductive heat flux per frame (kW/m²), >0 up the field.
-    qflux = [heat_flux(h, pr[1], pr[4], pr[5]) for pr in prims]
+    decoder = gamma_primitives if gamma_mode else primitives
+    prims = [decoder(fr[1], phi) for fr in frames]  # (V, T, rho, p, n_e, n_HI)
+    # One cell-centred physical-flux diagnostic for both closure modes.
+    qflux = [physical_heat_flux(h, pr[1], pr[4], pr[5]) for pr in prims]
     # Field-aligned mass flux ρV [kg/m²/s] per frame, >0 up the field (evaporation).
     mflux = [pr[2] * pr[0] for pr in prims]
 
@@ -231,9 +248,20 @@ def main():
         "q": lim([qi / 1e3 for qi in qflux]),
         "mflux": lim(mflux),
     }
+    q_ymax_wm2 = os.environ.get("Q_PHYS_YMAX_WM2")
+    q_boundary_clipped = False
+    if q_ymax_wm2 is not None:
+        q_ymax_wm2 = float(q_ymax_wm2)
+        if not np.isfinite(q_ymax_wm2) or q_ymax_wm2 <= 0.0:
+            raise ValueError("Q_PHYS_YMAX_WM2 must be finite and positive")
+        ylims["q"] = (-q_ymax_wm2 / 1.0e3, q_ymax_wm2 / 1.0e3)
+        q_boundary_clipped = any(np.max(np.abs(qi)) > q_ymax_wm2 for qi in qflux)
+        print(f"physical-flux display range: +/-{q_ymax_wm2:g} W/m^2"
+              f"; boundary clipped = {q_boundary_clipped}")
 
     stem = os.path.splitext(os.path.basename(in_path))[0]
-    title = f"model_isentropic — {stem}"
+    closure = "Saha + CRASH Gamma1" if gamma_mode else f"fixed gamma={GAMMA:g}"
+    title = f"model_column — {stem} — {closure}"
 
     # Split x-axis for a tall (resolved-corona) domain (> 3 Mm): zoom the thin
     # chromosphere+TR into CHROMO_FRAC of the width, compress the corona into the
@@ -257,7 +285,8 @@ def main():
     save_frames_parallel(
         _render_frame,
         [(k, h, prims[k][0], prims[k][1], prims[k][2], prims[k][3], qflux[k],
-          mflux[k], frames[k][0], nF, ylims, title, xsplit) for k in range(nF)],
+          mflux[k], frames[k][0], nF, ylims, title, xsplit, q_boundary_clipped)
+         for k in range(nF)],
         out_path, fps,
     )
 

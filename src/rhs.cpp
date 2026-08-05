@@ -1,8 +1,10 @@
 #include "chromosphere.hpp"
 #include "physics.hpp"
+#include "profiling.hpp"
 
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 
 namespace chromosphere {
 
@@ -65,6 +67,400 @@ static Vec bcast_state(const Grid& grid, const Vec& v_i) {
     return s;
 }
 
+void DecodedMixtureField::require_matches(const Grid& grid,
+                                          const Vec& state) const {
+    if (source_grid != &grid || source_state != &state
+        || source_memory != state.memptr()
+        || source_elements != state.n_elem)
+        throw std::logic_error(
+            "decoded mixture cache does not match the immutable conserved state");
+    const Vec* boundaries[] = {&grid.inner_boundary0_i,&grid.inner_boundary1_i,
+                               &grid.outer_boundary0_i,&grid.outer_boundary1_i};
+    for (arma::uword block=0; block<4; ++block)
+        for (arma::uword row=0; row<num_of_eq; ++row)
+            if (boundary_signature[block*num_of_eq+row] != (*boundaries[block])(row))
+                throw std::logic_error(
+                    "decoded mixture cache was invalidated by a boundary update");
+}
+
+DecodedMixtureField decode_mixture_field(
+    const Grid& grid, const Vec& state, std::uint64_t generation,
+    const DecodedMixtureField* previous) {
+    DecodedMixtureField out;
+    decode_mixture_field_into(grid,state,out,generation,previous);
+    return out;
+}
+
+void decode_mixture_field_into(
+    const Grid& grid, const Vec& state, DecodedMixtureField& out,
+    std::uint64_t generation, const DecodedMixtureField* previous) {
+    ProfileScope timer(ProfileRegion::Decode);
+    if (grid.eos_gamma_table.empty())
+        throw std::logic_error("decoded mixture field requires a Gamma1 table");
+    if (state.n_elem != grid.n_state)
+        throw std::invalid_argument("decoded mixture field state size mismatch");
+
+    out.source_grid = &grid;
+    out.source_state = &state;
+    out.source_memory = state.memptr();
+    out.source_elements = state.n_elem;
+    out.state_generation = generation;
+    const Vec* boundaries[] = {&grid.inner_boundary0_i,&grid.inner_boundary1_i,
+                               &grid.outer_boundary0_i,&grid.outer_boundary1_i};
+    for (arma::uword block=0; block<4; ++block)
+        for (arma::uword row=0; row<num_of_eq; ++row)
+            out.boundary_signature[block*num_of_eq+row] = (*boundaries[block])(row);
+    out.cells.resize(grid.ns);
+    const arma::uword ext_n = grid.ns+4;
+    out.extended_primitive.set_size(ext_n*3);
+    const auto state_size = arma::size(grid.ns, num_of_eq);
+    const auto ext_size = arma::size(ext_n, 3);
+    auto put = [&](arma::uword ext_i, const MixtureThermo& th,
+                   double momentum) {
+        out.extended_primitive(arma::sub2ind(ext_size, ext_i, 0)) = std::log(th.rho);
+        out.extended_primitive(arma::sub2ind(ext_size, ext_i, 1)) = momentum/th.rho;
+        out.extended_primitive(arma::sub2ind(ext_size, ext_i, 2)) = std::log(th.T);
+    };
+    const bool has_guesses = previous && previous->source_grid == &grid
+        && previous->cells.size() == grid.ns;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        auto at = [&](arma::uword row) {
+            return static_cast<double>(state(arma::sub2ind(state_size, i, row)));
+        };
+        const double phi = 0.5*static_cast<double>(
+            grid.phi_g_imh(i)+grid.phi_g_iph(i));
+        const double guess = has_guesses ? previous->cells[i].T
+            : std::numeric_limits<double>::quiet_NaN();
+        out.cells[i] = decode_equilibrium_mixture(
+            grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
+            at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
+            phi, guess, grid.eos_gamma_debug_clamp);
+        // Refresh the shared hint, but do NOT read it here: this site has its own
+        // guess (`previous`), validated against source_grid and cell count. The
+        // shared hint carries no such provenance, and substituting it as a fallback
+        // makes test_stage7 blow up — that test reuses one Grid across a 10^4 change
+        // in density, so the cached T is meaningless for the new profile.
+        grid.store_eos_temperature_hint(i, out.cells[i].T);
+        put(i+2, out.cells[i], at(cons::MOM_I)+at(cons::MOM_N));
+    }
+
+    if (USE_NEUMANN_BC) {
+        for (arma::uword slot = 0; slot < 3; ++slot) {
+            out.extended_primitive(arma::sub2ind(ext_size, 0, slot)) =
+                out.extended_primitive(arma::sub2ind(ext_size, 2, slot));
+            out.extended_primitive(arma::sub2ind(ext_size, 1, slot)) =
+                out.extended_primitive(arma::sub2ind(ext_size, 2, slot));
+            out.extended_primitive(arma::sub2ind(ext_size, grid.ns+2, slot)) =
+                out.extended_primitive(arma::sub2ind(ext_size, grid.ns+1, slot));
+            out.extended_primitive(arma::sub2ind(ext_size, grid.ns+3, slot)) =
+                out.extended_primitive(arma::sub2ind(ext_size, grid.ns+1, slot));
+        }
+    } else {
+        auto decode_ghost = [&](const Vec& ghost, double phi,
+                                arma::uword ext_i) {
+            const MixtureThermo th = decode_equilibrium_mixture(
+                grid.eos_gamma_table, ghost(cons::RHO_I), ghost(cons::RHO_N),
+                ghost(cons::MOM_I), ghost(cons::MOM_N), ghost(cons::E_I),
+                ghost(cons::E_N), phi,
+                std::numeric_limits<double>::quiet_NaN(),
+                grid.eos_gamma_debug_clamp);
+            put(ext_i, th, static_cast<double>(ghost(cons::MOM_I)+ghost(cons::MOM_N)));
+        };
+        const double phi_inner = grid.phi_g_imh(0);
+        const double phi_outer = grid.phi_g_iph(grid.ns-1);
+        decode_ghost(grid.inner_boundary1_i, phi_inner, 0);
+        decode_ghost(grid.inner_boundary0_i, phi_inner, 1);
+        decode_ghost(grid.outer_boundary0_i, phi_outer, grid.ns+2);
+        decode_ghost(grid.outer_boundary1_i, phi_outer, grid.ns+3);
+    }
+}
+
+namespace {
+
+enum MixtureSlot : arma::uword { MIX_LOG_RHO = 0, MIX_V = 1, MIX_LOG_T = 2 };
+
+struct MixtureFaceBundle {
+    Vec& conserved;
+    Vec& flux;
+    Vec& spectral_radius;
+};
+
+using MixtureVec = arma::Col<double>;
+
+void mixture_stencil_view(const Grid& grid,
+                          const DecodedMixtureField& decoded,
+                          int offset, MixtureVec& result) {
+    result.zeros(grid.n_state);
+    const arma::uword ext_n = grid.ns+4;
+    const auto ext_size = arma::size(ext_n, 3);
+    const auto packed_size = arma::size(grid.ns, num_of_eq);
+    for (arma::uword slot = 0; slot < 3; ++slot) {
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            const arma::uword ext_i = static_cast<arma::uword>(
+                static_cast<int>(i)+2+offset);
+            result(arma::sub2ind(packed_size, i, slot)) =
+                decoded.extended_primitive(arma::sub2ind(ext_size, ext_i, slot));
+        }
+    }
+}
+
+void bcast_mixture(const Grid& grid, const Vec& values, MixtureVec& packed) {
+    packed.zeros(grid.n_state);
+    for (arma::uword k = 0; k < 3; ++k) {
+        for (arma::uword i = 0; i < grid.ns; ++i)
+            packed(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, k)) = values(i);
+    }
+}
+
+void mixture_minmod(const MixtureVec& ratio, MixtureVec& result) {
+    result.set_size(ratio.n_elem);
+    for (arma::uword i = 0; i < ratio.n_elem; ++i) {
+        const double r = ratio(i);
+        result(i) = std::isfinite(r) ? std::max(0.0, std::min(1.0, r)) : 0.0;
+    }
+}
+
+void mixture_mc3(const MixtureVec& ratio, double beta, bool plus,
+                 MixtureVec& result) {
+    result.set_size(ratio.n_elem);
+    for (arma::uword i = 0; i < ratio.n_elem; ++i) {
+        const double r = ratio(i);
+        if (!std::isfinite(r)) {
+            result(i) = 0.0;
+            continue;
+        }
+        const double third_order = plus ? (2.0*r + 1.0)/3.0 : (r + 2.0)/3.0;
+        result(i) = std::max(0.0, std::min(std::min(beta*r, beta), third_order));
+    }
+}
+
+void build_mixture_face(const Grid& grid, const MixtureVec& mixture,
+                        const Vec& phi_face, MixtureFaceBundle out) {
+    out.conserved.zeros(grid.n_state);
+    out.flux.zeros(grid.n_state);
+    out.spectral_radius.zeros(grid.n_state);
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const double rho = std::exp(mixture(arma::sub2ind(sz, i, MIX_LOG_RHO)));
+        const double velocity = mixture(arma::sub2ind(sz, i, MIX_V));
+        const double temperature = std::exp(mixture(arma::sub2ind(sz, i, MIX_LOG_T)));
+        const MixtureFaceState face = equilibrium_mixture_face_state(
+            grid.eos_gamma_table, rho, velocity, temperature,
+            static_cast<double>(phi_face(i)), grid.eos_trace_fraction_floor,
+            grid.eos_gamma_debug_clamp);
+        const ProjectedMixture& u = face.conserved;
+        const std::array<double, 7> flux = equilibrium_mixture_flux(face);
+        const double values[7] = {u.rho_i, u.rho_n, u.momentum_i, u.momentum_n,
+                                  u.energy_i, u.energy_n, u.energy_e};
+        const float a = static_cast<float>(std::abs(velocity) + face.sound_speed);
+        for (arma::uword k = 0; k < num_of_eq; ++k) {
+            out.conserved(arma::sub2ind(sz, i, k)) = static_cast<float>(values[k]);
+            out.flux(arma::sub2ind(sz, i, k)) = static_cast<float>(flux[k]);
+            out.spectral_radius(arma::sub2ind(sz, i, k)) = a;
+        }
+    }
+}
+
+void mixture_source(const Grid& grid, const Vec& state,
+                    const DecodedMixtureField& decoded, Vec& source) {
+    decoded.require_matches(grid, state);
+    source.zeros(grid.n_state);
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    const Vec gb = -(grid.phi_g_iph - grid.phi_g_imh) / grid.ds_i;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        auto at = [&](arma::uword k) -> double {
+            return static_cast<double>(state(arma::sub2ind(sz, i, k)));
+        };
+        const MixtureThermo& thermo = decoded.cells[i];
+        source(arma::sub2ind(sz, i, cons::MOM_I)) = static_cast<float>(
+            thermo.p_i * grid.B_i(i) * grid.dinvB_ds_i(i)
+            + at(cons::RHO_I) * gb(i));
+        source(arma::sub2ind(sz, i, cons::MOM_N)) = static_cast<float>(
+            thermo.p_n * grid.B_i(i) * grid.dinvB_ds_i(i)
+            + at(cons::RHO_N) * gb(i));
+    }
+}
+
+// Diagnostic-only copy-out of the production face reconstruction and Rusanov
+// TOTAL-mass flux at the i+1/2 faces (chromosphere.hpp::GammaFaceFluxCapture).
+// Reads the same arrays the continuity row is differenced from; writes nothing
+// the solver consumes.
+void capture_gamma_face_flux(const Grid& grid, const MixtureVec& w,
+                            const MixtureVec& wl, const MixtureVec& wr,
+                            const MixtureFaceBundle& fl,
+                            const MixtureFaceBundle& fr,
+                            const Vec& a_face, const Vec& flux,
+                            const MixtureVec& r, const MixtureVec& r_ip1,
+                            const MixtureVec& lp_r, const MixtureVec& lm_rip1) {
+    GammaFaceFluxCapture& c = grid.face_flux_capture;
+    c.resize(grid.ns);
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    const bool has_eq = grid.eq_wb && !grid.eq_residual.is_empty();
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        auto W = [&](const MixtureVec& v, arma::uword slot) {
+            return v(arma::sub2ind(sz, i, slot));
+        };
+        auto P = [&](const Vec& v, arma::uword row) {
+            return static_cast<double>(v(arma::sub2ind(sz, i, row)));
+        };
+        c.rho_cell[i] = std::exp(W(w, MIX_LOG_RHO));
+        c.v_cell[i]   = W(w, MIX_V);
+        c.T_cell[i]   = std::exp(W(w, MIX_LOG_T));
+        c.rho_L[i]    = std::exp(W(wl, MIX_LOG_RHO));
+        c.rho_R[i]    = std::exp(W(wr, MIX_LOG_RHO));
+        c.v_L[i]      = W(wl, MIX_V);
+        c.v_R[i]      = W(wr, MIX_V);
+        c.T_L[i]      = std::exp(W(wl, MIX_LOG_T));
+        c.T_R[i]      = std::exp(W(wr, MIX_LOG_T));
+        // Every spectral_radius row of a one-sided bundle carries |V|+c_s of that
+        // state (build_mixture_face), so the sound speed is recoverable exactly.
+        c.cs_L[i]     = P(fl.spectral_radius, cons::RHO_I) - std::abs(c.v_L[i]);
+        c.cs_R[i]     = P(fr.spectral_radius, cons::RHO_I) - std::abs(c.v_R[i]);
+        c.a_face[i]   = P(a_face, cons::RHO_I);
+        const double mass_flux_L = P(fl.flux, cons::RHO_I) + P(fl.flux, cons::RHO_N);
+        const double mass_flux_R = P(fr.flux, cons::RHO_I) + P(fr.flux, cons::RHO_N);
+        const double rho_cons_L  = P(fl.conserved, cons::RHO_I) + P(fl.conserved, cons::RHO_N);
+        const double rho_cons_R  = P(fr.conserved, cons::RHO_I) + P(fr.conserved, cons::RHO_N);
+        c.f_central[i] = 0.5 * (mass_flux_L + mass_flux_R);
+        c.f_diff[i]    = -0.5 * c.a_face[i] * (rho_cons_R - rho_cons_L);
+        c.f_total[i]   = P(flux, cons::RHO_I) + P(flux, cons::RHO_N);
+        c.eq_residual_mass[i] = has_eq
+            ? P(grid.eq_residual, cons::RHO_I) + P(grid.eq_residual, cons::RHO_N)
+            : 0.0;
+        c.r_rho[i]         = W(r,        MIX_LOG_RHO);
+        c.phi_plus_rho[i]  = W(lp_r,     MIX_LOG_RHO);
+        c.r_ip1_rho[i]     = W(r_ip1,    MIX_LOG_RHO);
+        c.phi_minus_rho[i] = W(lm_rip1,  MIX_LOG_RHO);
+        c.r_v[i]           = W(r,        MIX_V);
+        c.phi_plus_v[i]    = W(lp_r,     MIX_V);
+        c.r_T[i]           = W(r,        MIX_LOG_T);
+        c.phi_plus_T[i]    = W(lp_r,     MIX_LOG_T);
+    }
+    c.valid = true;
+}
+
+Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
+                         const DecodedMixtureField& decoded) {
+    ProfileScope timer(ProfileRegion::Rhs);
+    decoded.require_matches(grid, xn_state);
+
+    auto& m=grid.gamma_rhs_scratch.mixture;
+    MixtureVec& w=m[0]; MixtureVec& w_ip1=m[1]; MixtureVec& w_im1=m[2];
+    MixtureVec& w_ip2=m[3]; MixtureVec& w_im2=m[4];
+    MixtureVec& dw_iph=m[5]; MixtureVec& dw_imh=m[6];
+    MixtureVec& r=m[7]; MixtureVec& r_ip1=m[8]; MixtureVec& r_im1=m[9];
+    MixtureVec& W1=m[10]; MixtureVec& W3=m[11]; MixtureVec& W4=m[12];
+    MixtureVec& wr_iph=m[13]; MixtureVec& wl_iph=m[14];
+    MixtureVec& wr_imh=m[15]; MixtureVec& wl_imh=m[16];
+    MixtureVec& wt=m[17]; MixtureVec& wt_ip1=m[18]; MixtureVec& wt_im1=m[19];
+    MixtureVec& lp_r=m[20]; MixtureVec& lm_r=m[21];
+    MixtureVec& lm_rip1=m[22]; MixtureVec& lp_rim1=m[23];
+    mixture_stencil_view(grid,decoded,0,w);
+    mixture_stencil_view(grid,decoded,1,w_ip1);
+    mixture_stencil_view(grid,decoded,-1,w_im1);
+    mixture_stencil_view(grid,decoded,2,w_ip2);
+    mixture_stencil_view(grid,decoded,-2,w_im2);
+
+    dw_iph=w_ip1-w;
+    dw_imh=w-w_im1;
+    r=dw_imh/dw_iph;
+    r_ip1=dw_iph/(w_ip2-w_ip1);
+    r_im1=(w_im1-w_im2)/dw_imh;
+    if (!grid.uniform_mesh) {
+        const Vec w1_i = 0.5f * grid.ds_i / grid.ds_iph_i;
+        bcast_mixture(grid,w1_i,W1);
+        bcast_mixture(grid,ip1(grid,w1_i,SLICE),W3);
+        bcast_mixture(grid,im1(grid,w1_i,SLICE),W4);
+        MixtureVec metric;
+        bcast_mixture(grid,grid.ds_iph_i/grid.ds_imh_i,metric); r%=metric;
+        bcast_mixture(grid,ip1(grid,grid.ds_iph_i,SLICE)/grid.ds_iph_i,metric); r_ip1%=metric;
+        bcast_mixture(grid,grid.ds_imh_i/im1(grid,grid.ds_imh_i,SLICE),metric); r_im1%=metric;
+    }
+    r.elem(arma::find_nonfinite(r)).zeros();
+    r_ip1.elem(arma::find_nonfinite(r_ip1)).zeros();
+    r_im1.elem(arma::find_nonfinite(r_im1)).zeros();
+    const double beta = grid.limiter_beta;
+    auto lim_plus=[&](const MixtureVec& q,MixtureVec& out) {
+        if (grid.mc3_limiter) mixture_mc3(q,beta,true,out);
+        else mixture_minmod(q,out);
+    };
+    auto lim_minus=[&](const MixtureVec& q,MixtureVec& out) {
+        if (grid.mc3_limiter) mixture_mc3(q,beta,false,out);
+        else mixture_minmod(q,out);
+    };
+    lim_plus(r,lp_r); lim_minus(r,lm_r);
+    lim_minus(r_ip1,lm_rip1); lim_plus(r_im1,lp_rim1);
+    if (grid.uniform_mesh) {
+        wr_iph=w_ip1-0.5*lm_rip1%(w_ip2-w_ip1);
+        wl_iph=w+0.5*lp_r%(w_ip1-w);
+        wr_imh=w-0.5*lm_r%(w_ip1-w);
+        wl_imh=w_im1+0.5*lp_rim1%(w-w_im1);
+    } else {
+        wr_iph=w_ip1-W3%lm_rip1%(w_ip2-w_ip1);
+        wl_iph=w+W1%lp_r%(w_ip1-w);
+        wr_imh=w-W1%lm_r%(w_ip1-w);
+        wl_imh=w_im1+W4%lp_rim1%(w-w_im1);
+    }
+
+    auto& p=grid.gamma_rhs_scratch.packed;
+    MixtureFaceBundle fr_iph{p[0],p[1],p[2]};
+    MixtureFaceBundle fl_iph{p[3],p[4],p[5]};
+    MixtureFaceBundle fr_imh{p[6],p[7],p[8]};
+    MixtureFaceBundle fl_imh{p[9],p[10],p[11]};
+    build_mixture_face(grid,wr_iph,grid.phi_g_iph,fr_iph);
+    build_mixture_face(grid,wl_iph,grid.phi_g_iph,fl_iph);
+    build_mixture_face(grid,wr_imh,grid.phi_g_imh,fr_imh);
+    build_mixture_face(grid,wl_imh,grid.phi_g_imh,fl_imh);
+
+    // Internal MUSCL predictor: update conservatively, then independently invert
+    // the caloric EOS. This path intentionally never calls legacy cons2prim.
+    Vec& predicted=p[12];
+    predicted=xn_state-grid.dt_state/grid.ds_state%(fl_iph.flux-fr_imh.flux);
+    DecodedMixtureField& decoded_predicted=grid.gamma_rhs_scratch.predicted;
+    decode_mixture_field_into(
+        grid,predicted,decoded_predicted,decoded.state_generation+1,&decoded);
+    mixture_stencil_view(grid,decoded_predicted,0,wt);
+    mixture_stencil_view(grid,decoded_predicted,1,wt_ip1);
+    mixture_stencil_view(grid,decoded_predicted,-1,wt_im1);
+
+    if (grid.uniform_mesh) {
+        wr_iph=0.5*(w_ip1+wt_ip1)-0.5*lm_rip1%(w_ip2-w_ip1);
+        wl_iph=0.5*(w+wt)+0.5*lp_r%(w_ip1-w);
+        wr_imh=0.5*(w+wt)-0.5*lm_r%(w_ip1-w);
+        wl_imh=0.5*(w_im1+wt_im1)+0.5*lp_rim1%(w-w_im1);
+    } else {
+        wr_iph=0.5*(w_ip1+wt_ip1)-W3%lm_rip1%(w_ip2-w_ip1);
+        wl_iph=0.5*(w+wt)+W1%lp_r%(w_ip1-w);
+        wr_imh=0.5*(w+wt)-W1%lm_r%(w_ip1-w);
+        wl_imh=0.5*(w_im1+wt_im1)+W4%lp_rim1%(w-w_im1);
+    }
+
+    build_mixture_face(grid,wr_iph,grid.phi_g_iph,fr_iph);
+    build_mixture_face(grid,wl_iph,grid.phi_g_iph,fl_iph);
+    build_mixture_face(grid,wr_imh,grid.phi_g_imh,fr_imh);
+    build_mixture_face(grid,wl_imh,grid.phi_g_imh,fl_imh);
+    Vec& a_imh=p[13]; Vec& a_iph=p[14];
+    Vec& flux_imh=p[15]; Vec& flux_iph=p[16]; Vec& rhs=p[17];
+    a_imh=arma::max(fl_imh.spectral_radius,fr_imh.spectral_radius);
+    a_iph=arma::max(fl_iph.spectral_radius,fr_iph.spectral_radius);
+    flux_imh=0.5f*(fl_imh.flux+fr_imh.flux
+        -a_imh%(fr_imh.conserved-fl_imh.conserved));
+    flux_iph=0.5f*(fl_iph.flux+fr_iph.flux
+        -a_iph%(fr_iph.conserved-fl_iph.conserved));
+    Vec& source=p[18];
+    mixture_source(grid,xn_state,decoded,source);
+    rhs=-grid.B_state%(flux_iph/grid.B_state_iph
+        -flux_imh/grid.B_state_imh)/grid.ds_state
+        +source;
+    if (grid.eq_wb && !grid.eq_residual.is_empty()) rhs -= grid.eq_residual;
+    if (grid.capture_face_flux)
+        capture_gamma_face_flux(grid,w,wl_iph,wr_iph,fl_iph,fr_iph,
+                                a_iph,flux_iph,r,r_ip1,lp_r,lm_rip1);
+    return Vec(rhs);
+}
+
+} // namespace
+
 // ============================================================================
 // Explicit RHS: TVD-MUSCL reconstruction + predictor-corrector +
 // Rusanov flux differencing, minus the explicit source.
@@ -72,6 +468,10 @@ static Vec bcast_state(const Grid& grid, const Vec& v_i) {
 // ============================================================================
 
 Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
+    if (!grid.eos_gamma_table.empty()) {
+        const DecodedMixtureField decoded = decode_mixture_field(grid, xn_state);
+        return rhs_explicit_mixture(grid, xn_state, decoded);
+    }
     // ---- shifted neighbours (conserved) ---------------------------------
     Vec cons_xn_state_ip1 = ip1(grid, xn_state);
     Vec cons_xn_state_im1 = im1(grid, xn_state);
@@ -356,6 +756,12 @@ Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
         rhs -= grid.eq_residual;
     }
     return rhs;
+}
+
+Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state,
+                       const DecodedMixtureField& decoded) {
+    if (grid.eos_gamma_table.empty()) return rhs_explicit_state(grid, xn_state);
+    return rhs_explicit_mixture(grid, xn_state, decoded);
 }
 
 // ============================================================================

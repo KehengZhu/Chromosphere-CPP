@@ -10,11 +10,15 @@ The effective gamma = 1 + P/e is bilinearly interpolated from the CRASH statisti
 sum EOS table (util/eos/tabulate_gamma.f90 -> outputs/eos_gamma/gamma_hydrogen.dat)
 at each cell's (T, n_H) with n_H = n_HI + n_e (hydrogen nuclei).
 
-Output: visualization/eos_gamma/c7_gamma_profile.png
+Outputs:
+  visualization/eos_gamma/c7_gamma_profile.png
+  visualization/eos_gamma/c7_gamma_profile_classical_saha.png
 
 Usage:
   python util/plot_c7_gamma_profile.py
+  python util/plot_c7_gamma_profile.py --classical-saha
 """
+import argparse
 import os
 import re
 import numpy as np
@@ -26,8 +30,13 @@ CPP = "scenarios/model_c7.cpp"
 GAMMA_TABLE = "outputs/eos_gamma/gamma_hydrogen.dat"
 OUTDIR = "visualization/eos_gamma"
 OUT = os.path.join(OUTDIR, "c7_gamma_profile.png")
+OUT_CLASSICAL = os.path.join(OUTDIR, "c7_gamma_profile_classical_saha.png")
 
 M_H = 1.6726219e-27          # proton mass [kg]
+M_E = 9.1093837015e-31
+K_B = 1.380649e-23
+H_PLANCK = 6.62607015e-34
+CHI_H = 2.179872361e-18
 GAMMA_IDEAL = 5.0 / 3.0
 GAMMA_MODEL = 1.05           # constant index used by the iso_t22k column configuration
 H_TOP_KM = 2650.0            # top of the plot (photosphere -> upper TR / corona base)
@@ -60,14 +69,14 @@ def c7_full_profile(h_km, photo, c7):
     return Ti, nei, nHIi
 
 
-def load_gamma_grid(path):
+def load_gamma_grid(path, column=COL["G"]):
     """Return (Tvals[nT], Navals[nNa], Gamma[nNa,nT]) from the CRASH EOS table."""
     d = np.loadtxt(path)
     Na_all = d[:, COL["Na"]]
     Navals = np.unique(Na_all)
     Tvals = np.unique(d[Na_all == Navals[0], COL["T"]])
     nNa, nT = len(Navals), len(Tvals)
-    G = d[:, COL["G"]].reshape(nNa, nT)
+    G = d[:, column].reshape(nNa, nT)
     return Tvals, Navals, G
 
 
@@ -88,16 +97,40 @@ def gamma_at(T, Na, Tvals, Navals, G):
             + fN * ((1 - fT) * g10 + fT * g11))
 
 
+def textbook_saha_gamma_energy(n_h, temperature):
+    """Classical pure-H gamma_E=1+p/e with excitation/Fermi/Coulomb off."""
+    log_c = 1.5 * np.log(2.0 * np.pi * M_E * K_B / H_PLANCK**2)
+    log_a = (log_c + 1.5 * np.log(temperature)
+             - CHI_H / (K_B * temperature) - np.log(n_h))
+    x = np.empty_like(log_a)
+    high = log_a >= 0.0
+    x[high] = 2.0 / (1.0 + np.sqrt(1.0 + 4.0 * np.exp(-log_a[high])))
+    u = np.exp(0.5 * log_a[~high])
+    x[~high] = 2.0 * u / (u + np.sqrt(u * u + 4.0))
+    pressure = (1.0 + x) * n_h * K_B * temperature
+    energy = 1.5 * pressure + x * n_h * CHI_H
+    return 1.0 + pressure / energy
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--classical-saha", action="store_true",
+        help="plot the signed-off classical pure-H Saha gamma_E and Gamma1")
+    parser.add_argument("--output", help="override the output image path")
+    args = parser.parse_args()
+
     os.makedirs(OUTDIR, exist_ok=True)
     photo, c7 = parse_c7_tables(CPP)
-    Tvals, Navals, G = load_gamma_grid(GAMMA_TABLE)
+    gamma_column = COL["GS"] if args.classical_saha else COL["G"]
+    Tvals, Navals, G = load_gamma_grid(GAMMA_TABLE, gamma_column)
 
     h = np.linspace(0.0, H_TOP_KM, 1200)
     T, ne, nHI = c7_full_profile(h, photo, c7)
     nH = nHI + ne                       # hydrogen nuclei (n_HI + n_p, n_p ~ n_e)
     rho = M_H * nH                       # pure-H mass density [kg/m^3]
     gam = gamma_at(T, nH, Tvals, Navals, G)
+    gamma_energy = textbook_saha_gamma_energy(nH, T) if args.classical_saha else gam
 
     # coverage note: EOS table starts at Na = 1e15; below that gamma is clamped.
     below = nH < Navals[0]
@@ -105,7 +138,7 @@ def main():
         print("note: %d/%d samples have n_H < %.0e (gamma clamped)"
               % (below.sum(), len(h), Navals[0]))
 
-    c_T, c_rho, c_g = "#1f6fb4", "#111111", "#c0392b"
+    c_T, c_rho, c_g, c_g1 = "#1f6fb4", "#111111", "#c0392b", "#6f42c1"
     fig, axT = plt.subplots(figsize=(9.2, 5.8))
     fig.subplots_adjust(right=0.80)
 
@@ -129,7 +162,17 @@ def main():
     # second right axis (offset): effective gamma
     axG = axT.twinx()
     axG.spines["right"].set_position(("axes", 1.16))
-    lG, = axG.plot(h, gam, color=c_g, lw=2.4, label=r"effective $\gamma=1+P/e$")
+    if args.classical_saha:
+        lG, = axG.plot(
+            h, gamma_energy, color=c_g, lw=2.4,
+            label=r"textbook Saha $\gamma_E=1+P/e$")
+        lG1, = axG.plot(
+            h, gam, color=c_g1, lw=2.1, ls="--",
+            label=r"classical CRASH $\Gamma_1$")
+    else:
+        lG, = axG.plot(h, gam, color=c_g, lw=2.4,
+                      label=r"effective $\gamma=1+P/e$")
+        lG1 = None
     axG.set_ylabel(r"effective adiabatic index  $\gamma$", color=c_g)
     axG.tick_params(axis="y", colors=c_g)
     axG.spines["right"].set_color(c_g)
@@ -149,15 +192,29 @@ def main():
     axT.text(2400, axT.get_ylim()[1] * 0.45, "TR", color="steelblue",
              fontsize=9, ha="center")
 
-    axT.legend(handles=[lT, lR, lG], loc="center left", fontsize=9.5,
+    handles = [lT, lR, lG] + ([lG1] if lG1 is not None else [])
+    axT.legend(handles=handles, loc="center left", fontsize=9.5,
                framealpha=0.9)
-    axT.set_title("Model C7 atmosphere and CRASH effective $\\gamma(T,n_{\\rm H})$ "
-                  "vs height\n(Avrett & Loeser 2008, Table 26)")
+    if args.classical_saha:
+        axT.set_title(
+            "Model C7 with classical pure-H Saha EOS vs height\n"
+            "excitation, Fermi, and Coulomb corrections off")
+    else:
+        axT.set_title("Model C7 atmosphere and CRASH effective $\\gamma(T,n_{\\rm H})$ "
+                      "vs height\n(Avrett & Loeser 2008, Table 26)")
     axT.grid(True, which="both", ls=":", alpha=0.3)
 
-    fig.savefig(OUT, dpi=160, bbox_inches="tight")
+    output = args.output or (OUT_CLASSICAL if args.classical_saha else OUT)
+    os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+    fig.savefig(output, dpi=160, bbox_inches="tight")
     plt.close(fig)
-    print("wrote", OUT)
+    if args.classical_saha:
+        i_e = int(np.argmin(gamma_energy))
+        i_1 = int(np.argmin(gam))
+        print("textbook gamma_E min=%.6f at h=%.1f km" %
+              (gamma_energy[i_e], h[i_e]))
+        print("classical Gamma1 min=%.6f at h=%.1f km" % (gam[i_1], h[i_1]))
+    print("wrote", output)
 
 
 if __name__ == "__main__":

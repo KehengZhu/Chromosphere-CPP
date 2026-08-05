@@ -6,10 +6,10 @@ This project has a saved CodexPro workspace profile for:
 /Users/zkeheng/SWMFSoftware/Chromosphere2026
 ```
 
-The profile uses the ngrok stable dev domain:
+The profile uses a dedicated Cloudflare named tunnel:
 
 ```text
-unlatch-doorpost-very.ngrok-free.dev
+https://codex-chromosphere2026.kehengphysics.site
 ```
 
 The saved profile lives outside the repository under `~/.codexpro/profiles/` and contains the private CodexPro token. Do not copy that token into this repository.
@@ -25,17 +25,17 @@ codexpro start
 or, equivalently:
 
 ```bash
-codexpro ngrok \
+codexpro stable \
   --root /Users/zkeheng/SWMFSoftware/Chromosphere2026 \
-  --hostname unlatch-doorpost-very.ngrok-free.dev \
-  --bash safe
+  --hostname codex-chromosphere2026.kehengphysics.site \
+  --tunnel-name codex-chromosphere2026
 ```
 
 Leave that terminal running while ChatGPT is connected.
 
 ## ChatGPT Plugin Connector
 
-Use ChatGPT Developer Mode, then create a developer-mode plugin/app entry for the CodexPro MCP server.
+Use ChatGPT Developer Mode, then create or update the developer-mode plugin for the CodexPro MCP server.
 
 In ChatGPT:
 
@@ -54,23 +54,25 @@ Authentication: None / No Authentication
 The server URL has this shape:
 
 ```text
-https://unlatch-doorpost-very.ngrok-free.dev/mcp?codexpro_token=...
+https://codex-chromosphere2026.kehengphysics.site/mcp?codexpro_token=...
 ```
 
 CodexPro prints and copies the full URL, including the private token, when it starts.
 
-If ChatGPT uses the word "Plugins" instead of "Apps", that is expected. The developer-mode plugin entry is still the place where the CodexPro MCP Server URL goes.
+Replace the old ngrok Server URL in the plugin with this newly printed URL. The token is private; do not paste it into project files or chat messages.
 
 ## Current Profile Settings
 
 ```text
-Tunnel: ngrok
-Hostname: unlatch-doorpost-very.ngrok-free.dev
-Local port: 8787
+Tunnel: cloudflare-named
+Tunnel name: codex-chromosphere2026
+Hostname: codex-chromosphere2026.kehengphysics.site
+Local port: 8793
 Mode: agent
 Bash: safe
 Write: workspace
 Tool mode: standard
+.gitignore: on
 Codex sessions: off
 ```
 
@@ -88,10 +90,20 @@ Check runtime readiness:
 codexpro doctor
 ```
 
-Change the saved ngrok hostname:
+Re-save the stable Cloudflare profile:
 
 ```bash
-codexpro settings set --tunnel ngrok --hostname NEW-HOSTNAME.ngrok-free.dev
+codexpro settings set \
+  --root /Users/zkeheng/SWMFSoftware/Chromosphere2026 \
+  --port 8793 \
+  --tunnel cloudflare-named \
+  --hostname codex-chromosphere2026.kehengphysics.site \
+  --tunnel-name codex-chromosphere2026 \
+  --mode agent \
+  --bash safe \
+  --write workspace \
+  --tool-mode standard \
+  --honor-gitignore
 ```
 
 Remove this workspace's saved CodexPro profile:

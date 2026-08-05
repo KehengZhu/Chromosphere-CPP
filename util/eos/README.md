@@ -1,69 +1,63 @@
-# Effective-γ from the SWMF/CRASH equation of state
+# Classical pure-hydrogen Saha / Γ₁ tables from SWMF/CRASH
 
-This tool extracts two effective thermodynamic indices of a partially ionized
-plasma from the SWMF/CRASH statistical-sum EOS. They can be compared with the
-constant `ISO_GAMMA=1.05` currently used in the chromosphere model, but a table
-lookup of γ alone is **not** a thermodynamically complete replacement for the
-EOS.
+This tool builds the validation and runtime inputs for stages 0–9 of
+`docs/crash_gamma_eos_plan.md`. CRASH supplies the equilibrium sound-speed
+index `Γ₁(T,n_H)`; Chromosphere2026 computes the pure-H Saha ionization and
+caloric closure analytically.
 
-## What the CRASH EOS is
+## EOS configuration
 
-`SWMF/util/CRASH/src/` is the equation-of-state package of the CRASH
-radiation-hydrodynamics code (originally for xenon/beryllium ICF targets, but
-the underlying physics is general). For a given element/mixture at electron
-temperature `Te` and heavy-particle number density `Na` it solves **Saha
-ionization equilibrium** and returns thermodynamics that include:
+CRASH's statistical-sum EOS can include excitation, electron degeneracy, and
+Coulomb corrections. For this project's first implementation all three are
+explicitly disabled:
 
-- ideal translation of ions and electrons,
-- **ionization energy** (the dominant effect — this is what softens γ),
-- bound-state **excitation** (H, He tabulated),
-- electron **Fermi degeneracy**,
-- **Coulomb / Debye** correction.
+- `UseExcitation = .false.`
+- `UseFermiGas = .false.`
+- `UseCoulombCorrection = .false.`
 
-This is a local-thermodynamic-equilibrium (LTE) material EOS. Radiation energy,
-radiative loss, thermal conduction, photoionization, and finite-rate
-ionization/recombination are *not* folded into γ. Those are separate radiation,
-transport, or kinetic source terms.
+Hydrogen ground-state statistical weights are explicitly enabled. The neutral
+ground degeneracy 2 cancels CRASH's explicit electron-spin factor 2, matching
+the textbook Saha function already used in `physics.hpp`:
+`(2πm_e k_B T/h²)^(3/2) exp(-χ_H/k_B T)`. The output is pure hydrogen; the
+former H/He comparison is not part of this closure.
 
-## The two gammas (`get_gamma` in `ModStatSum.f90`)
+CRASH returns two useful indices:
 
-- **energy γ** `= 1 + P/e` — reproduces the EOS internal energy at one state via
-  `e = P/(γ−1)`. This is the closest match to the model's present algebraic
-  energy closure. `GammaOut` in the code.
-- **adiabatic Γ₁** `= (∂lnP/∂lnρ)_S` — governs the sound speed / wave dynamics.
-  `GammaSOut` in the code.
+- energy `γ_E = 1 + P/e`, retained only to validate the analytic caloric
+  closure;
+- adiabatic `Γ₁ = (∂lnP/∂lnρ)_S`, the runtime sound-speed table.
 
-Both dive from 5/3 toward ~1.1 through the ionization zone and recover to 5/3
-once neutral or fully ionized; γ is a function of `(T, n, element)`, with the
-ionization degree `Z = Z(T, n)` derived internally.
+`zAv`, pressure, energy, and `Cv` are also retained in the raw file for strict
+whole-grid checks. Radiation, conduction, cooling, photoionization, and
+finite-rate ionization are not part of this LTE table. Gamma-table equilibrium
+mode must keep the existing finite-rate ionization stage off to avoid counting
+the hydrogen ionization energy twice.
 
-These two quantities generally differ in the ionization zone. Substituting the
-energy γ into every place where the current code uses one constant γ would make
-the stored energy more EOS-like, but would not automatically give the correct
-sound speed, Jacobian, or conservative flux. A full implementation should
-tabulate at least `P(ρ,e)`, temperature, and thermodynamic derivatives (including
-Γ₁), rather than treating γ as the only state variable.
+## Files and range
 
-## Interaction with the existing ionization stage
+- `tabulate_gamma.f90` sweeps `T=3.2e3..1e8 K` and
+  `n_H=1e12..1e26 m^-3`. The 3200 K edge is just above CRASH's built-in
+  `0.02 chi_H` forced-neutral cutoff and below the coolest expected C7 state.
+- `build_and_run.sh` compiles the driver against `libCRASH.a`, `libSHARE`, and
+  `libTIMING`, generates the production table plus a disposable 2x-refined
+  Stage-9 grid, then runs strict validation. It invokes
+  `eos_validate_saha` so every CRASH `zAv` row is compared with the actual C++
+  log-domain Saha function and every raw `GammaS` row is compared with an
+  independent analytic C++ `Gamma1` derived from Saha pressure and caloric
+  derivatives. It verifies the tracked table checksum and then runs the broader
+  Python thermodynamic checks. `eos_validate_refined_table`
+  exhaustively checks all 28,000 production-cell midpoint nodes from the
+  refined direct-CRASH grid, including coarse-grid Gamma1 interpolation,
+  analytic gamma_E and Cv, and temperature inversion.
 
-`src/integrators.cpp::apply_ionization_stage` already evolves a finite-rate
-hydrogen network and explicitly accounts for the 13.6 eV ionization potential.
-The CRASH LTE EOS also includes ionization energy in `e(T,ρ)`. Therefore:
+The generated files are:
 
-- using the CRASH EOS is appropriate for an LTE-equilibrium closure in which
-  the EOS determines the ionization state; or
-- keeping the present non-equilibrium ionization stage requires an EOS whose
-  independent composition/ionization fraction is supplied explicitly.
-
-Using the current CRASH equilibrium γ table together with the existing
-ionization-energy source unchanged would double-count latent ionization energy.
-
-## Files
-
-- `tabulate_gamma.f90` — standalone driver: sweeps a `(T, Na)` grid for pure
-  hydrogen and an H0.9/He0.1 mix, writes `outputs/eos_gamma/*.dat`.
-- `build_and_run.sh` — compiles the driver against the prebuilt `libCRASH.a`
-  (+ `libSHARE`, `libTIMING`) and runs it.
+- `outputs/eos_gamma/gamma_hydrogen.dat`: ignored 11-column validation table;
+- `data/eos/gamma1_hydrogen_v1.dat`: tracked three-column production table;
+- `data/eos/gamma1_hydrogen_v1.dat.sha256`: reviewed production checksum.
+- `outputs/eos_gamma/gamma_hydrogen_refined.dat`: ignored 1001x113 direct-CRASH
+  Stage-9 reference (every production interval split in two);
+- `outputs/eos_gamma/gamma1_hydrogen_refined.dat`: ignored refined runtime table.
 
 ## How to run
 
@@ -71,27 +65,64 @@ ionization-energy source unchanged would double-count latent ionization energy.
 # one-time: build the CRASH EOS library (gfortran + Open MPI required)
 cd SWMF/util/CRASH/src && make LIB && cd -
 
-# compile the tabulator and generate the tables
+# compile, generate, and validate
 bash util/eos/build_and_run.sh
 
-# plot
-python util/plot_eos_gamma.py     # -> visualization/eos_gamma/*.png
+# validate again and generate Stage-0 figures
+python util/plot_eos_gamma.py
 ```
 
-## Note on `make test_eosgodunov`
-
-The BATSRUS recipe `make test_eosgodunov` (GM/BATSRUS) cannot be built from this
-SWMF checkout: it needs the user module `ModUserEos.f90`, which lives in the
-optional/restricted `srcUserExtra` repository that is not present here. The
-standalone `make GODUNOV` in `util/CRASH/src` has the same problem — its exact
-Riemann reference routines (`pu_star`, `sample`) are absent from the checkout.
-Neither is needed for tabulating γ: the shock tube is only a solver
-demonstration, whereas the γ values come straight from the CRASH EOS library,
-which builds and runs cleanly (`make LIB`).
-
-## Table columns
+The raw validation columns are:
 
 ```
-1 T[K]  2 Na[m^-3]  3 Rho[kg/m^3]  4 Zbar  5 P[Pa]  6 Edens[J/m^3]
-7 Gamma  8 GammaS  9 Gammae  10 GammaSe  11 Cv[k_B/atom]
+1 T[K]  2 n_H[m^-3]  3 Rho[kg/m^3]  4 zAv  5 P[Pa]  6 Edens[J/m^3]
+7 GammaE  8 Gamma1  9 Gammae  10 GammaSe  11 Cv[k_B/heavy-particle]
 ```
+
+The runtime table contains exactly:
+
+```
+1 log10(T[K])  2 log10(n_H[m^-3])  3 Gamma1
+```
+
+Its v1 key/value header is part of the file contract. The C++ loader rejects
+missing, duplicate, or unknown keys, unsupported physics/configuration values,
+wrong constants, invalid declared dimensions, malformed rows, nonascending
+axes, and nonpositive/nonfinite Gamma1. See `data/eos/README.md` for provenance
+and update policy.
+
+The BATSRUS `test_eosgodunov` target is not required. That demonstration needs
+the optional `srcUserExtra/ModUserEos.f90`, which is absent from this checkout;
+the standalone tabulator calls the already-built CRASH EOS library directly.
+
+## Stage-3 consumer
+
+`eos.hpp` and `src/eos.cpp` use this table in the narrow read-only mixture
+closure. The analytic Saha model supplies `x_eq`, total internal energy, and
+energy gamma; this file supplies only Γ₁. The self-contained temperature
+inversion uses the table temperature bounds as a bracket and safeguarded
+Newton/bisection, with any supplied previous temperature treated only as an
+optional initial guess.
+
+`decode_equilibrium_mixture` subtracts the two stored rows' original kinetic
+energies and the gravitational potential carried by that state. It does not
+project or mutate the rows. Conservative center-of-mass projection is Stage 4;
+Stages 5--8 connect the closure to reconstruction, fluxes, source/conduction
+splitting, and Model C7 initial/boundary states.
+
+Stage 4 adds `project_equilibrium_single_fluid`. Unlike the read-only decoder,
+the projection subtracts center-of-mass kinetic energy, so relative drift is
+thermalized while total mass, momentum, and `E_I+E_N` remain conserved. It
+rebuilds both carrier rows with the approved pressure/chemical-energy mapping
+and keeps `E_E=3p_e/2`. The packed-float wrapper is used by the restricted
+gamma-table Euler path and remains separate from read-only decode.
+
+The production density range is enforced before caloric root-finding, even
+though the analytic energy formula itself can be evaluated outside the table.
+This prevents a future projection from completing where no production Γ₁
+exists. An explicit debug flag bypasses the density gate and pairs with the
+table's debug-only Γ₁ edge clamp; production code must leave it disabled.
+
+Checksum verification uses `cmake/check_eos_checksum.cmake` and CMake's built-in
+`file(SHA256)`, so configuring or testing the fixed-γ solver does not require an
+external `shasum` or `sha256sum` executable.

@@ -724,7 +724,7 @@ The **best well-balanced** ns=2000 γ=1.05 config: `ISO_INNER_WB=1` (2nd-ghost p
 ```bash
 # best well-balanced, conduction ON — the "newest best result" (item 1)
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_INNER_WB_RHO=1 ISO_EQ_WB=1 ISO_MC3=1 ISO_MC3_BETA=2 ISO_NS=2000 ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2300s
-ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_bestwb.mp4
+ISO_GAMMA=1.05 Q_PHYS_YMAX_WM2=0.05 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_bestwb.mp4 20
 
 # same config, conduction OFF (ISO_HEAT_FLUX=0) — the equilibrium reference for the comparison
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=0 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_INNER_WB_RHO=1 ISO_EQ_WB=1 ISO_MC3=1 ISO_MC3_BETA=2 ISO_NS=2000 ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condoff.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2300s
@@ -876,36 +876,371 @@ ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py \
 
 ---
 
-## 12. Effective-γ EOS table (SWMF/CRASH Saha equation of state)
+## 12. Classical pure-H Saha / CRASH Γ₁ table (Stages 0–2)
 
-Tabulates the **real effective adiabatic index γ** of a partially ionized plasma from the SWMF/CRASH statistical-sum EOS (`SWMF/util/CRASH/src/`, reached via the `SWMF` symlink at the project root), to compare against the model's constant `ISO_GAMMA=1.05`. The EOS solves Saha ionization equilibrium and returns two distinct γ's: the **energy γ = 1 + P/e** (closes `e = P/(γ−1)`) and the **adiabatic Γ₁ = (∂lnP/∂lnρ)_S** (sound speed). Physics: ideal ions + Fermi-degenerate electrons + ionization + bound-state excitation + Coulomb correction; no radiation. γ is a function of `(T, n_H, element)`; ionization degree `Z=Z(T,n_H)` is derived.
+`util/eos/tabulate_gamma.f90` builds the approved classical pure-hydrogen
+cross-validation table with excitation, Fermi, and Coulomb corrections disabled.
+The raw 11-column table retains `zAv`, energy γ_E, Γ₁, energy, and `Cv` for
+validation; the tracked production table at
+`data/eos/gamma1_hydrogen_v1.dat` contains only
+`log10(T), log10(n_H), Γ₁`, with strict v1 metadata and a SHA-256 sidecar.
+The grid is `T=3.2×10³–10⁸ K` (501 log points) by
+`n_H=10¹²–10²⁶ m⁻³` (57 log points).
 
-**Prerequisite (one-time): build the CRASH EOS library and the tabulator.**
 ```bash
-# 1. build libCRASH.a (needs gfortran + Open MPI; libSHARE/libTIMING already built)
-cd SWMF/util/CRASH/src && make LIB && cd -
-
-# 2. compile the driver against libCRASH and run it → writes outputs/eos_gamma/*.dat
+# Generate outputs/eos_gamma/gamma_hydrogen.dat and refresh the tracked
+# data/eos/gamma1_hydrogen_v1.dat, verify its checksum, then run the strict
+# whole-grid Saha/energy/Cv/Gamma1 validation.
 bash util/eos/build_and_run.sh
-```
-Driver source: `util/eos/tabulate_gamma.f90` (grid: T∈[2e3,5e6] K ×360 log, n_H∈[1e15,1e24] m⁻³ ×46 log; materials: pure H and H0.9/He0.1). Tables: `outputs/eos_gamma/gamma_hydrogen.dat`, `outputs/eos_gamma/gamma_H90He10.dat`.
 
-### `eos_gamma/gamma_hydrogen.png` — γ(T) + ionization(T) for four densities
-Two-panel: energy γ (solid) and adiabatic Γ₁ (dashed) vs T for n_H = 10¹⁶–10²² m⁻³, with ionization ⟨Z⟩ below. Shows γ diving from 5/3 (neutral) to ~1.08–1.17 in the H-ionization zone (~6–20 kK) then recovering to 5/3 when fully ionized; the valley shifts to higher T with density.
-
-### `eos_gamma/gamma_hydrogen_2d.png` — γ(T, n_H) heatmap
-`pcolormesh` of energy γ over the full (T, n_H) grid with Z=0.1/0.5/0.9 contours and the γ-minimum locus.
-
-### `eos_gamma/gamma_H_vs_HHe.png` — pure-H vs H/He mix at n_H=10¹⁹ m⁻³
-Adds the He I→II ionization bump (~2–4×10⁴ K) visible in Γ₁.
-
-```bash
-python util/plot_eos_gamma.py
+# Generate all three figures below (project root as working directory).
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_eos_gamma.py
 ```
 
-### `eos_gamma/c7_gamma_profile.png` — Model C7 T, ρ, γ vs height
-Single plot, three y-axes: temperature (left, log), mass density (first right, log), and the CRASH effective γ=1+P/e (second offset right, linear) **evaluated along the C7 profile**. The C7 (h, n_e, n_HI, T) tables are parsed straight from `scenarios/model_c7.cpp` (MODEL_C7_PHOTO + MODEL_C7) and sampled exactly as `c7_full_profile()`; γ is bilinearly interpolated from `gamma_hydrogen.dat` at each cell's (T, n_H = n_HI + n_e). Shows γ collapsing to ~1.09 in the chromospheric H-ionization zone (near the model's constant 1.05) and recovering to 5/3 once hydrogen is fully ionized in the TR/corona. Photosphere→upper TR (0–2650 km).
+### `eos_gamma/gamma_hydrogen.png` — γ_E, Γ₁, and ionization vs T
+
+Energy γ_E (solid), sound-speed Γ₁ (dashed), and equilibrium ionization
+for four densities spanning `10¹⁴–10²⁶ m⁻³`. Both indices recover to 5/3
+at the neutral and fully ionized limits and soften through the Saha transition.
+
+### `eos_gamma/gamma_hydrogen_2d.png` — production Γ₁(T,n_H) surface
+
+Heatmap of the sound-speed index over the entire runtime grid with
+`x={0.01,0.1,0.5,0.9,0.99}` ionization contours. This is the column loaded by
+the Stage-2 C++ interpolator; CRASH pressure and energy are not runtime inputs.
+
+### `eos_gamma/c7_eos_consistency.png` — C7 track and Stage-0 consistency
+
+Walks the complete Model C7 atmosphere parsed from `scenarios/model_c7.cpp` and
+shows C7 ionization against textbook Saha, CRASH γ_E and Γ₁, and the required
+central-`ln T` `C_V^eff=(∂e_int/∂T)_rho` against CRASH `Cv`. The chromosphere/TR
+is expanded and the extended corona compressed with a split height scale.
+
+### `eos_gamma/c7_gamma_profile_classical_saha.png` — signed-off classical EOS along Model C7
 
 ```bash
-python util/plot_c7_gamma_profile.py
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_c7_gamma_profile.py --classical-saha
+```
+
+Preserves the earlier `c7_gamma_profile.png` and generates a separately named
+height profile for the signed-off classical pure-H EOS. It overlays the
+textbook-Saha energy index `γ_E=1+P/e` and the CRASH sound-speed index `Γ₁`
+with excitation, Fermi, and Coulomb corrections disabled, alongside the same
+Model C7 temperature and density context used by the original figure.
+
+### `eos_gamma/c7_ionization_profile.png` — Model C7 ionization degree
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_c7_ionization_profile.py
+```
+
+Model C7 hydrogen ionization degree `x=n_e/(n_HI+n_e)` vs height, alongside
+the same temperature and mass-density context as `c7_gamma_profile.png`.
+
+### `eos_gamma/c7_ionization_profile_classical_saha.png` — classical-Saha ionization degree
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_c7_ionization_profile.py
+```
+
+Classical pure-H Saha ionization degree evaluated at the local Model C7
+temperature and hydrogen-nuclei density, plotted separately from the C7 curve.
+
+### `eos_gamma/c7_ionization_profile_compare.png` — C7 vs classical-Saha vs excitation-enabled CRASH
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_c7_ionization_profile.py --mode compare
+```
+
+Direct overlay of the Model C7 ionization degree, analytic equilibrium
+classical-Saha fraction, and the excitation-enabled CRASH code's tabulated
+`zAv` evaluated along the same C7 atmosphere. An inset magnifies the
+2119–2147 km transition-region interval where C7 and CRASH briefly diverge by
+more than 20%; a small rectangle marks that interval on the main panel and an
+arrow links it to the inset. The CRASH diagnostic table is generated separately,
+preserving the signed-off excitation-off production table:
+
+```bash
+bash util/eos/build_and_run.sh excitation
+```
+
+The default plotting command writes all three ionization-profile figures.
+
+### `eos_gamma/crash_excitation_full_table_c7.png` — full CRASH excitation comparison with C7 track
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_crash_excitation_full_table.py
+```
+
+Three-panel view of the complete CRASH `(T,n_H)` grid: equilibrium hydrogen
+ionization with bound excitation off, with excitation on, and the percentage
+reduction caused by excitation. The complete Model C7 thermodynamic track is
+overlaid on every panel and labeled at the photosphere, temperature minimum,
+upper chromosphere, TR base, and upper TR. Contours identify the 1%, 10%, and
+30% excitation-sensitive regions.
+
+---
+
+## 13. Pure-H Saha / CRASH-Γ₁ model-column evolution
+
+### `model_column/model_column_saha_gamma_evolution.mp4`
+
+Default 600-cell, well-balanced `model_column` evolved with the signed-off
+classical pure-H EOS table. The supported gamma-table configuration uses the
+full Euler integrator in single-fluid/common-temperature mode, with the
+non-equilibrium ionization network and extra heating/cooling mechanisms off.
+The EOS-aware `.gamma_diag` sidecar supplies physical temperature, pressure,
+equilibrium composition, Γ₁, and conductivity to the six-panel animation.
+
+```bash
+GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat ./build/chromo_main \
+    outputs/model_column/model_column_saha_gamma.txt full no-ionization model_column - 1.0
+Q_PHYS_YMAX_WM2=0.05 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+    .venv/bin/python util/animate_isentropic.py \
+    outputs/model_column/model_column_saha_gamma.txt \
+    visualization/model_column/model_column_saha_gamma_evolution.mp4 20
+```
+
+### `model_column/model_column_saha_gamma_t22k_ns2000_evolution.mp4`
+
+Extended-domain counterpart on the exact historical
+`iso_t22k_evolution_ns2000_gamma105_bestwb` geometry: 0--2152.6 km, 2,000
+uniform cells, a fixed 22 kK outer reservoir, and conduction enabled. The
+well-balanced/log-MUSCL/MC3 stack is now intrinsic to `model_column`; the
+finite-rate ionization network and radiative cooling remain off. The standard
+10,000-step run reaches t=115.835 s and supplies 1,001 finite native frames;
+the movie samples 400 at 20 fps.
+
+```bash
+GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat ISO_H_BASE=0 ISO_DH=2152.6 \
+    ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_NS=2000 \
+    ./build/chromo_main \
+    outputs/model_column/model_column_saha_gamma_t22k_ns2000.txt \
+    full no-ionization model_column - 1.0 no-cooling
+ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+    .venv/bin/python util/animate_isentropic.py \
+    outputs/model_column/model_column_saha_gamma_t22k_ns2000.txt \
+    visualization/model_column/model_column_saha_gamma_t22k_ns2000_evolution.mp4 20
+```
+
+The visibly piecewise heat-flux profile in the shorter-domain movie is not an
+EOS-table discontinuity. `c7_full_profile()` linearly interpolates temperature
+between sparse Model C7 height knots, so `dT/dh` is piecewise constant and the
+diagnostic `q=-kappa*dT/dh` changes slope abruptly at those knots. That earlier
+run also had conduction disabled, making the panel a diagnostic estimate rather
+than an active solver flux. This extended run enables conduction explicitly.
+
+### `model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s_evolution.mp4`
+
+Option-2 rerun of the extended column after replacing the gamma-table Model C7
+temperature initialization with a shape-preserving monotone cubic Hermite
+(PCHIP) profile. The historical fixed-gamma/linear-C7 path is unchanged. PCHIP
+preserves every tabulated C7 temperature while making both temperature and its
+first derivative continuous, so the initial conductive-flux profile is smooth
+instead of inheriting steps from piecewise-constant `dT/dh`. The active-
+conduction run reaches exactly 1,000 s in 85,892 steps and writes 431 native
+frames; the movie samples 400 frames at 20 fps.
+
+```bash
+GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+    ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 \
+    ISO_HEAT_FLUX=1 ISO_NS=2000 \
+    CHROMO_T_END=1000 CHROMO_FRAME_STRIDE=200 \
+    ./build/chromo_main \
+    outputs/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s.txt \
+    full no-ionization model_column - 9.0 no-cooling
+ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+    .venv/bin/python util/animate_isentropic.py \
+    outputs/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s.txt \
+    visualization/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s_evolution.mp4 20
+```
+
+### `model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_evolution.mp4`
+
+High-chromosphere/transition-region-only rerun of the same gamma-table,
+22 kK conductive-reservoir experiment. The physical domain is exactly
+1600--2153 km with 1,000 uniform cells (0.553 km spacing); the run reaches
+exactly 1,000 s in 177,896 steps and stores all 357 native frames.
+
+```bash
+GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+    ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 \
+    ISO_HEAT_FLUX=1 ISO_NS=1000 \
+    CHROMO_T_END=1000 CHROMO_FRAME_STRIDE=500 \
+    ./build/chromo_main \
+    outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s.txt \
+    full no-ionization model_column - 30.0 no-cooling
+ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+    .venv/bin/python util/animate_isentropic.py \
+    outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s.txt \
+    visualization/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_evolution.mp4 20
+```
+
+Generated with the **pre-fix CENTERED outer ghost** (`p_g0 = p[ns-2] − 2Δs·ρ_top·g`);
+kept as the before-side of the upper-BC comparison below. The current code produces
+the `_onesidedbc` run instead.
+
+### `model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_onesidedbc_evolution.mp4`
+
+Same run with the reworked outer ghost: a one-sided hydrostatic ladder
+(`p_{k+1} = p_k − Δs·½(ρ_k+ρ_{k+1})·g`) anchored on a fixed reservoir
+back-pressure captured from the IC top cell, instead of extrapolating across the
+boundary cell from `p[ns-2]`. This removes the inverted top-face pressure
+gradient, but the mass-flux ripple over 2130--2153 km is **unchanged**
+(rel-std 0.101 → 0.105; V[last] −12.4 → −15.9 m/s), so the ripple is not caused
+by the ghost pressure anchor. Identical command apart from the output paths.
+
+```bash
+GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+    ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 \
+    ISO_HEAT_FLUX=1 ISO_NS=1000 \
+    CHROMO_T_END=1000 CHROMO_FRAME_STRIDE=500 \
+    ./build/chromo_main \
+    outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_onesidedbc.txt \
+    full no-ionization model_column - 30.0 no-cooling
+ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+    .venv/bin/python util/animate_isentropic.py \
+    outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_onesidedbc.txt \
+    visualization/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_onesidedbc_evolution.mp4 20
+```
+
+### Upper-BC hydro-T / conduction-T decoupling (`ISO_HYDRO_T_DECOUPLE`)
+
+Controlled pair on the same 1600--2153 km, `ns=1000` transition-region column. The
+**baseline** keeps the outer hydro ghost pinned at the 22 kK wall; the **decoupled**
+run zero-gradient-extrapolates the hydro ghost temperature from the live top cell
+(`T_hydro_g0 = T_hydro_g1 = T_top`) while Stage-D conduction keeps the identical
+22 kK Dirichlet wall via `grid.outer_conduction_temperature`. Everything else --
+domain, IC, EOS table, back-pressure `kOuterPRef = 0.0102845 Pa`, Mach cap, cooling,
+TRAC, CFL, output cadence -- is identical. Result: the last-cell velocity reversal
+disappears (`V_last` -31.6 -> +91.3 m/s) but the 2130--2150 km mass-flux ripple is
+unchanged-to-slightly-worse. Full analysis in
+`docs/upper_bc_hydro_temperature_decoupling_recap.md`.
+
+`upper_bc_hydroT_decouple_500s_top90.png` -- top-90-cell `rho V`, `V` and `T`
+profiles of the two runs at 500 s (the figure that shows the ripple is common to
+both and only the final point differs).
+`upper_bc_hydroT_decouple_500s_metrics.json` -- all twelve requested metrics at
+t = 100/300/400/500 s plus the full `q_top(t)`, `E_cond(t)`, `M(t)` series.
+`upper_bc_hydroT_decouple_1000s_top90.png` / `..._1000s_metrics.json` -- the same
+figure and metrics for the 1000 s pair (t = 700/1000 s), whose baseline reproduces
+the archived `_onesidedbc` run to 4--5 significant figures.
+`model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_hydroT{base,decoupled}_evolution.mp4`
+-- the two 1000 s evolution movies, kept separate from the archived runs.
+
+```bash
+# the run pair (ISO_HYDRO_T_DECOUPLE=0 baseline / =1 decoupled; 500 s and 1000 s)
+GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+    ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 \
+    ISO_HEAT_FLUX=1 ISO_NS=1000 ISO_HYDRO_T_DECOUPLE=0 \
+    CHROMO_T_END=500 CHROMO_FRAME_STRIDE=500 \
+    ./build/chromo_main \
+    outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_500s_hydroTbase.txt \
+    full no-ionization model_column - 30.0 no-cooling \
+    > outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_500s_hydroTbase.console.log 2>&1
+# ... same with ISO_HYDRO_T_DECOUPLE=1 -> ..._500s_hydroTdecoupled.{txt,console.log}
+# ... same with CHROMO_T_END=1000       -> ..._1000s_hydroTbase / ..._1000s_hydroTdecoupled
+
+# metrics table + JSON + top-region comparison figure
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/upper_bc_decouple_diag.py \
+    --run baseline=outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_500s_hydroTbase.txt \
+    --run decoupled=outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_500s_hydroTdecoupled.txt \
+    --decoupled decoupled --p-back baseline=0.0102845 --p-back decoupled=0.0102845 \
+    --times 100 300 400 500 \
+    --json outputs/model_column/upper_bc_hydroT_decouple_500s_metrics.json \
+    --plot visualization/model_column/upper_bc_hydroT_decouple_500s_top90.png --plot-time 500
+# ... same with the _1000s_ runs, --times 700 1000, and the _1000s_ json/png names
+
+# evolution movies (1000 s pair)
+ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+    .venv/bin/python util/animate_isentropic.py \
+    outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_hydroTbase.txt \
+    visualization/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_hydroTbase_evolution.mp4 20
+ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+    .venv/bin/python util/animate_isentropic.py \
+    outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_hydroTdecoupled.txt \
+    visualization/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_hydroTdecoupled_evolution.mp4 20
+```
+
+### Top-region face mass-flux decomposition (`CHROMO_FACE_FLUX_DIAG`)
+
+Answers whether the cell-centred `rho V` ripple below the top boundary also exists
+in the finite-volume Rusanov face mass flux. It does not -- see
+`docs/top_ripple_face_flux_diagnosis.md`. All numbers come from a read-only
+copy-out of the production `rhs_explicit_mixture` arrays (`.faceflux` sidecar),
+never from a Python reimplementation of the reconstruction.
+
+Metric definitions (also in the script docstring): index `i` is the UPPER face
+`i+1/2` of cell `i`; `f_central = 0.5[(rho v)_L + (rho v)_R]`;
+`f_diff = -0.5 a (rho_R - rho_L)`; `f_total = f_central + f_diff` (read from the
+production flux, not recomputed); `f_ref` = `f_total` at t=0, i.e. the frozen
+`eq_wb` reference flux; **`f_eff = f_total - f_ref` is the flux the update actually
+sees, because `eq_wb` subtracts the reference residual from the continuity rows**;
+`R = -(F[i]-F[i-1])/ds`; `roughness(x) = mean|D2 x| / mean|x|` (same definition as
+`util/upper_bc_decouple_diag.py`).
+
+`faceflux_500s_decomposition.png` / `faceflux_1000s_decomposition.png` -- four
+panels over the top 90 cells: cell `rho V`, face total vs central flux, face
+diffusive flux, and `f_eff`. The bottom panel is the result: `f_eff` is smooth and
+monotone straight through the ripple region in both runs.
+`faceflux_500s_limiter_compare.png` -- MC3(beta=2) vs minmod vs first order.
+`faceflux_500s_cfl_compare.png` -- CFL 0.25 / 0.125 / 0.0625.
+`faceflux_{500,1000}s_report.txt` -- the printed metric tables plus the per-peak
+state dumps. `faceflux_*_metrics.json` -- the same as JSON.
+
+```bash
+# the four base runs (baseline/decoupled x 500/1000 s). CHROMO_FRAME_STRIDE is huge
+# so only the first and last snapshots land on disk; the .faceflux sidecar captures
+# step 0 (the eq_wb reference) and the final step.
+for D in 0 1; do for T in 500 1000; do
+  [ $D = 0 ] && L=base || L=decoupled
+  O=outputs/model_column/faceflux_${T}s_hydroT${L}
+  GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+    ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 \
+    ISO_HEAT_FLUX=1 ISO_NS=1000 ISO_HYDRO_T_DECOUPLE=$D \
+    CHROMO_T_END=$T CHROMO_FRAME_STRIDE=1000000 \
+    CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=150 \
+    ./build/chromo_main $O.txt full no-ionization model_column - 30.0 no-cooling \
+    > $O.console.log 2>&1
+done; done
+
+# scheme-comparison legs: same as the baseline above plus one extra variable each.
+# ISO_LIMITER is a DIAGNOSTIC-ONLY override; unset (production) = MC3 beta=2.
+#   ... ISO_LIMITER=minmod   -> outputs/model_column/faceflux_500s_lim_minmod.txt
+#   ... ISO_LIMITER=first    -> outputs/model_column/faceflux_500s_lim_first.txt
+#   ... CHROMO_CFL=0.125     -> outputs/model_column/faceflux_500s_cfl0125.txt
+#   ... CHROMO_CFL=0.0625    -> outputs/model_column/faceflux_500s_cfl00625.txt
+
+# metrics + per-peak dumps + figure (repeat with _1000s_ names and --times equivalents)
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/face_flux_diag.py \
+    --run baseline=outputs/model_column/faceflux_500s_hydroTbase.txt.faceflux \
+    --run decoupled=outputs/model_column/faceflux_500s_hydroTdecoupled.txt.faceflux \
+    --json outputs/model_column/faceflux_500s_metrics.json \
+    --plot visualization/model_column/faceflux_500s_decomposition.png \
+    > outputs/model_column/faceflux_500s_report.txt 2>&1
+
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/face_flux_diag.py \
+    --run mc3=outputs/model_column/faceflux_500s_hydroTbase.txt.faceflux \
+    --run minmod=outputs/model_column/faceflux_500s_lim_minmod.txt.faceflux \
+    --run first=outputs/model_column/faceflux_500s_lim_first.txt.faceflux \
+    --json outputs/model_column/faceflux_500s_limiter_metrics.json \
+    --plot visualization/model_column/faceflux_500s_limiter_compare.png
+
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/face_flux_diag.py \
+    --run cfl0.25=outputs/model_column/faceflux_500s_hydroTbase.txt.faceflux \
+    --run cfl0.125=outputs/model_column/faceflux_500s_cfl0125.txt.faceflux \
+    --run cfl0.0625=outputs/model_column/faceflux_500s_cfl00625.txt.faceflux \
+    --json outputs/model_column/faceflux_500s_cfl_metrics.json \
+    --plot visualization/model_column/faceflux_500s_cfl_compare.png
+```
+
+### Fixed gamma=1.05 vs gamma-table physical conductive flux at 1000 s
+
+Matched-height, matched-time comparison using the shared cell-centred
+`q_physical = -(kappa_e+kappa_n) dT/ds` diagnostic. The figure excludes TRAC,
+numerical diffusivity, and imposed boundary flux; the JSON records below-500 km
+maxima for the temperature gradient, densities, conductivity components, and flux.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_physical_flux_compare.py --fixed outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt --gamma outputs/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s.txt --time 1000 --fixed-gamma 1.05 --out visualization/model_column/iso_t22k_fixed105_vs_gamma_physical_flux_t1000.png --metrics-out outputs/model_column/iso_t22k_fixed105_vs_gamma_physical_flux_t1000_metrics.json
 ```

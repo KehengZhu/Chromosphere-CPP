@@ -4,6 +4,13 @@
 
 namespace chromosphere {
 
+void GammaConductionScratch::resize(std::size_t n) {
+    rho.resize(n); e_old.resize(n); temperature.resize(n); target.resize(n);
+    conductivity.resize(n); capacity.resize(n); n_e.resize(n); n_hi.resize(n);
+    g_left.resize(n); g_right.resize(n);
+    a.resize(n); b.resize(n); c.resize(n); rhs.resize(n); delta.resize(n);
+}
+
 void Grid::init(arma::uword ns_in, float CFL_in) {
     ns      = ns_in;
     n_state = ns * num_of_eq;
@@ -12,14 +19,14 @@ void Grid::init(arma::uword ns_in, float CFL_in) {
     // Physical constants are already set by the default member initializers
     // in the header. (Re-stated here for clarity.)
     gamma_mono = 5.0f / 3.0f;
-    m_i        = 1.6726219e-27f;
+    m_i        = static_cast<float>(eos_constants::m_h);
     m_n        = m_i;
-    m_e        = 9.10938356e-31f;
+    m_e        = static_cast<float>(eos_constants::m_e);
     g          = 0.27395e3f;
     mu_0       = 4.0f * static_cast<float>(arma::datum::pi) * 1.0e-7f;
-    k_b        = 1.380649e-23f;
+    k_b        = static_cast<float>(eos_constants::k_b);
     q_e        = 1.602176634e-19f;
-    chi_H_J    = 2.179872361e-18f;
+    chi_H_J    = static_cast<float>(eos_constants::chi_h);
 
     ds_i.zeros(ns);
     B_imh.zeros(ns); B_iph.zeros(ns); B_i.zeros(ns);

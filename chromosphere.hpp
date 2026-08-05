@@ -11,6 +11,10 @@
 #pragma once
 
 #include <armadillo>
+#include <array>
+#include <cstdint>
+#include <vector>
+#include "eos.hpp"
 
 namespace chromosphere {
 
@@ -67,6 +71,82 @@ const arma::uword CUBE  = num_of_eq;
 // otherwise pull from the ghost buffers in Grid.
 const bool USE_NEUMANN_BC = false;
 
+/// Per-Grid reusable storage for the nonlinear gamma conduction solve. This is
+/// scratch only, never a thermodynamic cache; keeping it on the owning Grid
+/// preserves reentrancy and avoids function-static state.
+struct GammaConductionScratch {
+    std::vector<double> rho, e_old, temperature, target;
+    std::vector<double> conductivity, capacity, n_e, n_hi;
+    std::vector<double> g_left, g_right;
+    std::vector<double> a, b, c, rhs, delta;
+
+    void resize(std::size_t n);
+};
+
+struct Grid;
+
+/// Thermodynamics decoded from one immutable packed conserved state. Physical
+/// cells and two explicitly decoded ghost layers share the same state-carried
+/// gravitational-potential convention as the uncached path.
+struct DecodedMixtureField {
+    const Grid* source_grid = nullptr;
+    const Vec* source_state = nullptr;
+    const float* source_memory = nullptr;
+    arma::uword source_elements = 0;
+    std::uint64_t state_generation = 0;
+    std::array<float, 4*num_of_eq> boundary_signature{};
+    std::vector<MixtureThermo> cells;
+    arma::Col<double> extended_primitive;
+
+    void require_matches(const Grid& grid, const Vec& state) const;
+};
+
+/// Reusable storage for the gamma MUSCL predictor/reconstruction. The numeric
+/// arrays are deliberately untyped scratch; thermodynamic validity remains in
+/// the state-bound DecodedMixtureField objects.
+struct GammaRhsScratch {
+    DecodedMixtureField predicted;
+    std::array<arma::Col<double>, 24> mixture;
+    std::array<Vec, 20> packed;
+};
+
+/// READ-ONLY capture of the production gamma-table reconstruction and Rusanov
+/// TOTAL-mass face flux for ONE explicit RHS evaluation. Filled by
+/// rhs_explicit_mixture (the active gamma path) only when Grid::capture_face_flux
+/// is true, and never read back by any solver stage — so enabling it cannot
+/// change a numerical result. Index i refers to the UPPER face i+1/2 of cell i,
+/// which is exactly the face the continuity row of rhs_explicit_mixture differences
+/// (flux_iph); the cell-centred slots are the reconstruction INPUTS w of the same
+/// evaluation, so a capture record is self-contained. The mass flux is the SUM of
+/// the RHO_I and RHO_N rows: the equilibrium projection redistributes the ionised /
+/// neutral carrier split every step, so only the total is a conserved density.
+struct GammaFaceFluxCapture {
+    // cell-centred (length ns): the decoded state the reconstruction saw
+    std::vector<double> rho_cell, v_cell, T_cell;
+    // frozen equilibrium-reference residual, total-mass row (0 when eq_wb is off)
+    std::vector<double> eq_residual_mass;
+    // one-sided reconstructed face states at i+1/2 (L = from cell i, R = cell i+1)
+    std::vector<double> rho_L, rho_R, v_L, v_R, T_L, T_R, cs_L, cs_R;
+    // Rusanov spectral radius a = max(|V_L|+c_L, |V_R|+c_R) and the mass-flux split
+    std::vector<double> a_face, f_central, f_diff, f_total;
+    // limiter inputs/outputs actually used for this face, per reconstruction slot:
+    // r/phi_plus build the L state from cell i, r_ip1/phi_minus the R state from i+1
+    std::vector<double> r_rho, phi_plus_rho, r_ip1_rho, phi_minus_rho;
+    std::vector<double> r_v, phi_plus_v, r_T, phi_plus_T;
+    bool valid = false;
+
+    void resize(arma::uword ns) {
+        std::vector<double>* all[] = {
+            &rho_cell,&v_cell,&T_cell,&eq_residual_mass,
+            &rho_L,&rho_R,&v_L,&v_R,&T_L,&T_R,&cs_L,&cs_R,
+            &a_face,&f_central,&f_diff,&f_total,
+            &r_rho,&phi_plus_rho,&r_ip1_rho,&phi_minus_rho,
+            &r_v,&phi_plus_v,&r_T,&phi_plus_T};
+        for (std::vector<double>* v : all) v->assign(ns, 0.0);
+        valid = false;
+    }
+};
+
 // ============================================================================
 // Grid: owns all solver state.
 // ============================================================================
@@ -79,6 +159,35 @@ struct Grid {
 
     // --- physical constants (SI) ------------------------------------------
     float gamma_mono = 5.0f / 3.0f;
+    // Stage-2 CRASH Gamma1 input. An empty value is feature-off and leaves the
+    // fixed-gamma solver path untouched. Stages 5--6 consume it in the hydro RHS
+    // and projected Euler integrator; production scenario activation remains
+    // fail-closed until the Stage 7--8 source/IC/boundary lifecycle is complete.
+    EosGammaTable eos_gamma_table;
+    bool eos_gamma_debug_clamp = false;
+    // Carrier-row conditioning only; x_eq remains the unclamped Saha value for
+    // all physics. Stage 4 projection uses this to keep both float rows nonzero.
+    float eos_trace_fraction_floor = 1.0e-8f;
+    // Per-cell temperature hint for the EOS inversion — the last T decoded in this
+    // cell by ANY stage. Purely an accelerator: it seeds Newton, never changes the
+    // converged root or the residual tolerance, and a stale or absent hint only
+    // costs the ordinary safeguarded solve. Measured on the h1600 ns=1000 column:
+    // a seeded call converges in 1.13 iterations with ZERO bisections, an unseeded
+    // one takes 8.68 iterations and 4.05 bisections. Mutable so the const-Grid
+    // decode paths (flux, projection, conduction) can refresh it.
+    mutable std::vector<double> eos_T_hint;
+
+    /// Last decoded temperature in cell i, or NaN when none is recorded.
+    double eos_temperature_hint(arma::uword i) const {
+        return i < eos_T_hint.size() ? eos_T_hint[i]
+                                     : std::numeric_limits<double>::quiet_NaN();
+    }
+    /// Record cell i's decoded temperature for the next inversion in that cell.
+    void store_eos_temperature_hint(arma::uword i, double temperature) const {
+        if (eos_T_hint.size() != ns)
+            eos_T_hint.assign(ns, std::numeric_limits<double>::quiet_NaN());
+        if (i < ns) eos_T_hint[i] = temperature;
+    }
     // Adiabatic-index factors derived from gamma_mono so the equation of state
     // and every energy↔pressure / heat-capacity conversion tracks a single γ.
     // The thermal energy density of an ideal gas is ε = p/(γ−1), so the pressure
@@ -91,14 +200,14 @@ struct Grid {
     inline float gm1()      const { return gamma_mono - 1.0f; }           // γ−1
     inline float inv_gm1()  const { return 1.0f / (gamma_mono - 1.0f); }  // 1/(γ−1)
     inline float half_gm1() const { return 0.5f * (gamma_mono - 1.0f); }  // (γ−1)/2
-    float m_i        = 1.6726219e-27f;
-    float m_n        = 1.6726219e-27f;
-    float m_e        = 9.10938356e-31f;
+    float m_i        = static_cast<float>(eos_constants::m_h);
+    float m_n        = static_cast<float>(eos_constants::m_h);
+    float m_e        = static_cast<float>(eos_constants::m_e);
     float g          = 0.27395e3f;
     float mu_0       = 4.0f * static_cast<float>(arma::datum::pi) * 1.0e-7f;
-    float k_b        = 1.380649e-23f;
+    float k_b        = static_cast<float>(eos_constants::k_b);
     float q_e        = 1.602176634e-19f;
-    float chi_H_J    = 2.179872361e-18f;     // hydrogen ionization potential, 13.6 eV in J
+    float chi_H_J    = static_cast<float>(eos_constants::chi_h); // 13.6 eV
 
     // --- runtime toggles ---------------------------------------------------
     // Enable Stage E (hydrogen ionization / recombination) in advance_Euler_state.
@@ -284,6 +393,23 @@ struct Grid {
     // Default off so existing tests keep the Dirichlet conduction BC.
     bool  impose_outer_heat_flux = false;
     float outer_heat_flux        = 0.0f;
+
+    // Conduction-only OUTER Dirichlet temperature override. Normally the Stage-D
+    // outer Dirichlet datum is whatever temperature the HYDRO outer ghost happens
+    // to carry (grid.outer_boundary0_i decoded), so one ghost state serves two
+    // roles at once: the hydro Riemann/reconstruction state AND the thermal wall
+    // that drives conduction. When outer_conduction_temperature_override is true
+    // the conduction rows instead use the explicit outer_conduction_temperature
+    // [K], letting a scenario relax the hydro ghost temperature (e.g. zero-gradient
+    // extrapolation from the live top cell) while the conductive driving stays the
+    // unchanged fixed hot wall. Affects the outer Dirichlet value AND the outer
+    // ghost conductivity temperature on every active conduction row (charged and
+    // neutral, gamma-mixture and fixed-gamma paths). The ghost DENSITY is still the
+    // hydro ghost's, so κ_outer keeps its ghost n_e / n_HI. No effect when
+    // impose_outer_heat_flux is true (that path has no outer Dirichlet datum).
+    // Default false ⇒ byte-identical to the pre-existing behaviour.
+    bool  outer_conduction_temperature_override = false;
+    float outer_conduction_temperature          = 0.0f;
 
     // Inner-boundary conduction BC. Default false ⇒ Dirichlet: the innermost
     // conduction face couples cell 0 to the inner ghost temperature (the
@@ -478,6 +604,17 @@ struct Grid {
     // read it. Not used by steady scenarios.
     float sim_time                = 0.0f;
 
+    mutable GammaConductionScratch gamma_conduction_scratch;
+    mutable GammaRhsScratch gamma_rhs_scratch;
+
+    // Diagnostic-only: when true, the NEXT rhs_explicit_mixture evaluation copies
+    // its final reconstructed face states, limiter values and Rusanov total-mass
+    // flux into face_flux_capture. Pure output — no solver stage ever reads the
+    // capture back, so the flag cannot change the numerical result. Default false.
+    // The driver (chromo_main, CHROMO_FACE_FLUX_DIAG) sets it per step.
+    bool capture_face_flux = false;
+    mutable GammaFaceFluxCapture face_flux_capture;
+
     // --- cell-centered & face arrays (length ns) --------------------------
     Vec ds_i;
     Vec B_i, B_imh, B_iph;
@@ -538,6 +675,7 @@ struct Grid {
     void broadcast();
 };
 
+
 // ============================================================================
 // Packed-state helpers
 // ============================================================================
@@ -562,6 +700,21 @@ Vec im2(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
 
 Vec cons2prim(const Grid& grid, const Vec& cons_state);
 Vec prim2cons(const Grid& grid, const Vec& prim_state);
+
+/// Conservative equilibrium projection of every packed cell. Gamma-table Euler
+/// calls this after its explicit mixture-space hydro predictor.
+Vec project_equilibrium_single_fluid(const Grid& grid, const Vec& cons_state);
+
+/// Decode one immutable gamma-table state plus its two existing ghost layers.
+/// An optional previous field supplies same-cell temperature guesses and ghost
+/// values; failed guesses always fall back to the full bracketed inversion.
+DecodedMixtureField decode_mixture_field(
+    const Grid& grid, const Vec& state, std::uint64_t state_generation = 0,
+    const DecodedMixtureField* previous = nullptr);
+void decode_mixture_field_into(
+    const Grid& grid, const Vec& state, DecodedMixtureField& output,
+    std::uint64_t state_generation = 0,
+    const DecodedMixtureField* previous = nullptr);
 
 // ============================================================================
 // Numerics: flux, source, spectral radius, MUSCL limiter
@@ -595,6 +748,8 @@ Vec cal_source_state(const Grid& grid, const Vec& xn_state);
 
 /// Explicit RHS: TVD-MUSCL + Rusanov flux differencing + cal_source_state.
 Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state);
+Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state,
+                       const DecodedMixtureField& decoded);
 
 /// Implicit RHS: ion-neutral drag, collisional + frictional heating, and
 /// field-aligned heat conduction (writeup §4.3–4.4).
@@ -609,6 +764,13 @@ Vec cal_max_v_i(const Grid& grid, const Vec& xn_state);
 
 /// Uniform CFL-limited timestep.
 Vec cal_dt_i(const Grid& grid, const Vec& xn_state);
+Vec cal_dt_i(const Grid& grid, const Vec& xn_state,
+             const DecodedMixtureField& decoded);
+
+/// Maximum cellwise normalized residual of the gamma-mode backward-Euler
+/// mixture-conduction equation, for diagnostics and regression tests.
+double gamma_conduction_residual_max(const Grid& grid, const Vec& before,
+                                     const Vec& after, double dt);
 
 /// Semi-implicit (backward-Euler) integrator. Explicit MUSCL+Rusanov step
 /// for R_E, then point-implicit drag + frictional heating, point-implicit
@@ -616,6 +778,8 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state);
 /// solve per species, and (if grid.enable_ionization) the point-implicit
 /// ionization Stage E (writeup §3.7, §5.3). Mutates grid.dt_state.
 Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
+Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i,
+                        const DecodedMixtureField& decoded);
 
 /// Stage E: backward-Euler ionization / recombination on a single cell, scalar
 /// quadratic solve in ionization fraction f = ρ_i / (ρ_i + ρ_n). Operates on

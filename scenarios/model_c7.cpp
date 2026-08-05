@@ -2,9 +2,11 @@
 #include "physics.hpp"
 #include "scenario.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 namespace chromosphere {
 
@@ -255,6 +257,64 @@ void c7_full_profile(float h_km, float& T, float& n_e, float& n_HI) {
     T    = a[3] + t * (b[3] - a[3]);
     n_e  = std::exp(std::log(a[1]) + t * (std::log(b[1]) - std::log(a[1])));
     n_HI = std::exp(std::log(a[2]) + t * (std::log(b[2]) - std::log(a[2])));
+}
+
+double c7_full_temperature_pchip(double h_km) {
+    // Fritsch-Carlson/Fritsch-Butland monotone cubic Hermite slopes, including
+    // the standard one-sided endpoint limiter. The complete C7 temperature is
+    // not globally monotone (it has a photospheric minimum), so slopes are
+    // limited interval-by-interval and vanish at sign-changing extrema.
+    struct TemperaturePchip {
+        std::vector<double> h;
+        std::vector<double> temperature;
+        std::vector<double> slope;
+
+        TemperaturePchip() {
+            auto row = [](int k) -> const float* {
+                return (k < N_C7_PHOTO) ? MODEL_C7_PHOTO[k]
+                                        : MODEL_C7[k-N_C7_PHOTO];
+            };
+            const int n = N_C7_PHOTO+N_C7;
+            h.resize(n); temperature.resize(n); slope.assign(n, 0.0);
+            for (int i = 0; i < n; ++i) {
+                h[i] = row(i)[0];
+                temperature[i] = row(i)[3];
+            }
+            std::vector<double> width(n-1), secant(n-1);
+            for (int i = 0; i+1 < n; ++i) {
+                width[i] = h[i+1]-h[i];
+                secant[i] = (temperature[i+1]-temperature[i])/width[i];
+            }
+            for (int i = 1; i+1 < n; ++i) {
+                if (secant[i-1]*secant[i] <= 0.0) continue;
+                const double w1 = 2.0*width[i]+width[i-1];
+                const double w2 = width[i]+2.0*width[i-1];
+                slope[i] = (w1+w2)/(w1/secant[i-1]+w2/secant[i]);
+            }
+            auto endpoint = [](double h0, double h1, double d0, double d1) {
+                double value = ((2.0*h0+h1)*d0-h0*d1)/(h0+h1);
+                if (value*d0 <= 0.0) return 0.0;
+                if (d0*d1 < 0.0 && std::abs(value) > 3.0*std::abs(d0))
+                    return 3.0*d0;
+                return value;
+            };
+            slope.front() = endpoint(width[0], width[1], secant[0], secant[1]);
+            slope.back() = endpoint(width[n-2], width[n-3],
+                                    secant[n-2], secant[n-3]);
+        }
+    };
+    static const TemperaturePchip data;
+    if (h_km <= data.h.front()) return data.temperature.front();
+    if (h_km >= data.h.back()) return data.temperature.back();
+    const std::size_t i = static_cast<std::size_t>(
+        std::upper_bound(data.h.begin(), data.h.end(), h_km)-data.h.begin()-1);
+    const double width = data.h[i+1]-data.h[i];
+    const double s = (h_km-data.h[i])/width;
+    const double s2 = s*s, s3 = s2*s;
+    return (2.0*s3-3.0*s2+1.0)*data.temperature[i]
+         + (s3-2.0*s2+s)*width*data.slope[i]
+         + (-2.0*s3+3.0*s2)*data.temperature[i+1]
+         + (s3-s2)*width*data.slope[i+1];
 }
 
 // Route-B photoionization closure (docs/photoionization_c7_inversion_plan.md;

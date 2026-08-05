@@ -69,6 +69,39 @@ inline Vec kappa_n(const Vec& n_i, const Vec& n_n, const Vec& T_i, const Vec& T_
           + 1.70573f * n_n % arma::sqrt(T_n));
 }
 
+/// Scalar common-temperature conductivity components used by EOS diagnostics.
+/// These deliberately contain no TRAC or numerical-diffusion contribution.
+inline double physical_kappa_e(double n_e, double n_n, double temperature) {
+    return 9.2048e-12*n_e*std::pow(temperature, 2.5)
+         / (n_e + 2.836e-11*n_n*temperature*temperature);
+}
+
+inline double physical_kappa_n(double n_i, double n_n, double temperature) {
+    return 0.0342006*n_n*temperature
+         / (1.20613*n_i*std::sqrt(2.0*temperature)
+          + 1.70573*n_n*std::sqrt(temperature));
+}
+
+inline double physical_conductivity(double n_e, double n_n, double temperature) {
+    return physical_kappa_e(n_e, n_n, temperature)
+         + physical_kappa_n(n_e, n_n, temperature);
+}
+
+/// Solver-effective conductivity estimate for diagnostic comparison only.
+/// The nonlinear conduction solve uses face conductivities; this is its
+/// cell-centred coefficient before face averaging.
+inline double solver_effective_conductivity(const Grid& grid, double n_e,
+                                            double n_n, double temperature,
+                                            double heat_capacity) {
+    double trac = 1.0;
+    if (grid.enable_trac && grid.trac_cutoff_T > grid.trac_T_chrom
+        && temperature >= grid.trac_T_chrom && temperature < grid.trac_cutoff_T)
+        trac = std::pow(static_cast<double>(grid.trac_cutoff_T)/temperature, 2.5);
+    return trac*physical_kappa_e(n_e, n_n, temperature)
+         + physical_kappa_n(n_e, n_n, temperature)
+         + grid.numerical_diffusivity*heat_capacity;
+}
+
 /// Ion-neutral collision frequency, target-density form (writeup eq 57):
 ///   ν_in = (2 a₀)² n_n √(8 π k_b (T_i + T_n) / m_i)
 inline Vec nu_in(const Grid& grid, const Vec& n_n, const Vec& T_i, const Vec& T_n) {
@@ -442,7 +475,10 @@ inline Vec radiative_loss_thin(const Grid& /*grid*/, const Vec& n_i,
     const Vec n_H = n_i + n_n;                                   // total hydrogen
     // Smooth switch-on across ~2e4 K (stitch to optically-thick CL2012 below).
     const Vec w = 0.5f * (1.0f + arma::tanh((Tc - 2.0e4f) / 5.0e3f));
-    return w % (n_i % n_H % Lambda_SI);                         // W m^-3
+    // Multiply by the tiny loss coefficient before n_H. At the high-density,
+    // low-ionization edge of the EOS domain, n_e*n_H can overflow float even
+    // though n_e*Lambda(T)*n_H is finite and physically small.
+    return w % ((n_i % Lambda_SI) % n_H);                       // W m^-3
 }
 
 // ============================================================================

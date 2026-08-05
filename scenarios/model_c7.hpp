@@ -56,6 +56,13 @@ Vec model_c7_ic(Grid& grid, bool extended = false, bool tr_jump_bc = false);
 /// profile (so the corona is ionized and conducts via Spitzer κ_e).
 void c7_full_profile(float h_km, float& T, float& n_e, float& n_HI);
 
+/// Shape-preserving C1 interpolation of the complete Model C7 temperature
+/// table. Unlike c7_full_profile's historical piecewise-linear temperature,
+/// this has a continuous dT/dh and therefore does not seed knot-scale jumps in
+/// conductive heat flux. Used only by gamma-table model_column initialization;
+/// fixed-gamma scenarios retain their existing interpolation exactly.
+double c7_full_temperature_pchip(double h_km);
+
 /// Route-B photoionization closure (docs/photoionization_c7_inversion_plan.md,
 /// writeup §3.1): given cell-centered (T, n_i, n_n) and heights [km], return the
 /// per-cell photoionization rate P_phot that makes the profile a fixed point of

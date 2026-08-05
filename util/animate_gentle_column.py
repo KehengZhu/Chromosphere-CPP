@@ -18,6 +18,8 @@ type, direct labels over legends.
 
 Usage:
   python util/animate_gentle_column.py <run.txt> <out.mp4> [t_on] [ramp] [enhance]
+  Gamma-table runs automatically use <run.txt>.gamma_diag so plotted T,
+  composition, pressure, and conductivity are physical x_eq-derived fields.
 Env:
   SLOW_T0, SLOW_T1   slow-motion window [s] (default [t_on, t_on+1000])
   SLOW_FACTOR        relative slowdown inside the window (default 4)
@@ -33,6 +35,7 @@ matplotlib.use("Agg")
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _anim_parallel import save_frames_parallel
+from conductive_flux import physical_conductivity, physical_heat_flux
 
 M_I = 1.6726219e-27
 K_B = 1.380649e-23
@@ -78,6 +81,9 @@ def read_frames(path):
     h_km = np.fromstring(raw[1], sep=" ")
     frames, i = [], 2
     while i < len(raw):
+        if not raw[i].startswith("# t ="):
+            i += 1
+            continue
         toks = raw[i].split(); t = float(toks[3]); i += 1
         if i + ns > len(raw):
             break
@@ -96,7 +102,16 @@ def primitives(xn):
     p_n = 2.0 / 3.0 * xn[:, CEN] - 1.0 / 3.0 * M_I * nn * vn * vn  # neutral pressure
     Ti = p_i / (2.0 * ni * K_B)
     v_tot = (ni * v + nn * vn) / np.maximum(ni + nn, 1e-30)   # bulk (mass-weighted) velocity
-    return ni, nn, v, Ti, p_i + p_n, v_tot
+    kappa = physical_conductivity(ni, nn, Ti)
+    return ni, nn, v, Ti, p_i + p_n, v_tot, kappa
+
+
+def gamma_primitives(diag):
+    """Physical fields from the EOS-aware .gamma_diag sidecar."""
+    n_e, n_hi, v, temperature, p_total = (
+        diag[:, 4], diag[:, 5], diag[:, 1], diag[:, 2], diag[:, 6])
+    return n_e, n_hi, v, temperature, p_total, v, physical_conductivity(
+        n_e, n_hi, temperature)
 
 
 def phase_of(t, t_on, ramp, enhance):
@@ -121,9 +136,9 @@ def _render(k, tmpdir, h_km, prim, t, t_on, ramp, enhance,
             ylims, kd, kp, xticks, seps, t_max, slow):
     import matplotlib.pyplot as plt
     _apply_style()
-    ni, nn, v, Ti, p_tot, v_tot = prim
+    ni, nn, v, Ti, p_tot, v_tot, kappa = prim
     hMm = h_km / 1e3
-    q_cond = -KAPPA0 * np.power(np.clip(Ti, 1.0, None), 2.5) * np.gradient(Ti, h_km * 1e3)
+    q_cond = physical_heat_flux(h_km, Ti, ni, nn)
     fwd = lambda x: np.interp(x, kd, kp)        # piecewise-linear split transform
     inv = lambda x: np.interp(x, kp, kd)
     ct, cb = seps
@@ -189,7 +204,9 @@ def _render(k, tmpdir, h_km, prim, t, t_on, ramp, enhance,
     a_q.plot(hMm, q_cond, color=ACCENT, lw=1.6)
     a_q.axhline(0, color=INK, lw=0.7)
     a_q.set_ylabel(r"$q_\parallel$  [W m$^{-2}$]   (+ up)"); a_q.set_ylim(*ylims["q"])
-    a_q.set_xlabel("height  [Mm]"); a_q.set_title("conductive flux — the driver (ramped at top)")
+    a_q.set_xlabel("height  [Mm]")
+    a_q.set_title(r"physical $q_\parallel=-(\kappa_e+\kappa_n)dT/ds$"
+                  "  (TRAC + numerical diffusion excluded)")
 
     # ---- shared split x-axis, region bands, panel tags ----
     tags = "abcdefg"
@@ -240,7 +257,11 @@ def main():
     enhance = float(sys.argv[5]) if len(sys.argv) > 5 else 3.0
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
-    h_km, frames = read_frames(run)
+    diag_path = run+".gamma_diag"
+    gamma_mode = (os.path.exists(diag_path)
+                  and os.path.getmtime(diag_path) >= os.path.getmtime(run))
+    h_km, frames = read_frames(diag_path if gamma_mode else run)
+    primitive_decoder = gamma_primitives if gamma_mode else primitives
     times = np.array([fr[0] for fr in frames])
     t_max = float(times[-1])
 
@@ -255,7 +276,7 @@ def main():
     cumw = np.cumsum(w); cumw = cumw / cumw[-1]
     sel = np.clip(np.searchsorted(cumw, np.linspace(0, 1, MAX_FRAMES)), 0, len(frames) - 1)
 
-    prims = [primitives(frames[i][1]) for i in sel]
+    prims = [primitive_decoder(frames[i][1]) for i in sel]
     sel_t = [float(times[i]) for i in sel]
     print(f"{run}: {len(h_km)} cells, {len(frames)}→{len(sel)} frames "
           f"(slow ×{sf:.0f} in [{s0:.0f},{s1:.0f}] s), t<= {t_max:.0f} s")
@@ -274,8 +295,7 @@ def main():
     vmax = max(abs(np.concatenate([np.concatenate([p[2], p[5]]) for p in prims])).max() / 1e3, 5.0)
     ylims["V"] = (-1.12 * vmax, 1.12 * vmax)
     qall = np.concatenate([
-        -KAPPA0 * np.power(np.clip(p[3], 1.0, None), 2.5) * np.gradient(p[3], h_km * 1e3)
-        for p in prims])
+        physical_heat_flux(h_km, p[3], p[0], p[1]) for p in prims])
     qmax = max(abs(qall).max(), 1.0)
     ylims["q"] = (-1.15 * qmax, 1.15 * qmax)
 
@@ -284,7 +304,7 @@ def main():
     kd = np.array([h0, ZOOM_END_MM, htop])
     kp = np.array([0.0, CHROMO_FRAC, 1.0])
     xticks = np.array([1.0, 1.5, 2.0, 2.5, 4.0, 6.0, 8.0, 10.0])
-    seps = region_seps(h_km / 1e3, primitives(frames[0][1])[3])
+    seps = region_seps(h_km/1e3, primitive_decoder(frames[0][1])[3])
 
     fps = int(os.environ.get("ANIM_FPS", "25"))
     save_frames_parallel(

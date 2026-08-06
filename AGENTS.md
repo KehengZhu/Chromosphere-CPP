@@ -18,6 +18,7 @@ latexmk -xelatex -output-directory=latex-build main.tex
 
 - **Code outputs** (simulation results, data dumps, logs from `chromo_main` / scenarios): save under `outputs/`.
 - **Visualizations** (plots, animations, figures generated from outputs): save under `visualization/` (project root). This directory is gitignored. Plotting scripts live in `util/` and already default their output here — keep new/edited scripts defaulting to `visualization/` too. Never write figures or movies to the repo root, into `util/`, or alongside source code.
+- **Both `outputs/` and `visualization/` are organized into per-scenario subdirs** mirroring `scenarios/`: `model_c7/`, `model_column/` (the unified column, which absorbed the old `iso_*`/`gentle_*` runs), `model_flare/`, `analytic_canopy/`, `loops/`, `pfss/`, `events/` (real-event campaigns — 2024-08-01 AR13768, SOL2014, ensembles; keeps `event_ensemble/`, `event_te/`, `sol2014/` nested inside), and `two_fluid/`. `visualization/` additionally has `reference/` (physics-reference plots + their scripts). `_archive/` holds dumps/figures from now-deleted diagnostic code and retired analytic-isentrope stages. **Place new runs/figures in the matching scenario subdir** — never loose in `outputs/` or `visualization/` root.
 
 Do not scatter output files in the repo root or alongside source code.
 
@@ -31,6 +32,26 @@ When asked to generate a movie, generate frames in parallel if possible.
 When plotting field-aligned profiles that span the chromosphere through the corona (e.g. loop flare runs), use a **split x-axis**: zoom in on the thin chromosphere+TR (sub-Mm) and compress the extended corona (tens of Mm) using different x-scales (a continuous piecewise transform via matplotlib's `set_xscale("function", ...)` works well — see `util/animate_loop_flare.py`). Mark the chromosphere/TR/corona region boundaries with translucent vertical dashed lines.
 
 For a **full closed loop** (footpoint A → apex → footpoint B, `topology=full`), plot vs **arc length** `s`, not height — on a closed loop height folds the two legs onto each other. Apply the split symmetrically: zoom **both** footpoints and compress the coronal middle, laying the loop out flat `[footpoint A | apex | footpoint B]`, with the apex marked by a dotted line and region boundaries on both legs. `util/animate_loop_flare.py` auto-detects topology from the `.dat` and switches between height (half loop) and arc-length (full loop) accordingly.
+
+## Default OpenMP runtime
+
+For production-shaped simulations on the current Apple Silicon workstation, use the OpenMP build and default to 12 threads:
+
+```bash
+export OMP_DYNAMIC=FALSE
+export OMP_MAX_ACTIVE_LEVELS=1
+export OMP_NUM_THREADS=12
+```
+
+Prefer `scripts/run_chromo_omp.sh` for agent-run simulations. It applies these defaults while allowing explicit environment overrides. The 12-thread default uses the performance cores and was measured within about 1% of the 16-thread maximum-throughput result while leaving the efficiency cores available for the operating system, compilation, Python analysis, and other agent work.
+
+Exceptions:
+
+- Use `OMP_NUM_THREADS=1` for serial/OpenMP numerical-equivalence checks.
+- Use `OMP_NUM_THREADS=16` only when measuring maximum throughput on this workstation.
+- Use a build configured with `CHROMO_ENABLE_OPENMP=OFF` for a true serial baseline.
+- Do not assume 12 threads is optimal on different hardware; rerun thread scaling after changing machines.
+- Do not hard-code the thread count in C++, CMake, or the numerical algorithm.
 
 ## Reference Papers
 Reference Papers that you may need to understand a physical process or code implementation are in docs/supporting-papers. Check them first before you prompt the user to download the papers.

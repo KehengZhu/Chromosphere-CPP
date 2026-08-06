@@ -12,6 +12,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
+option(CHROMO_ENABLE_OPENMP "Enable OpenMP parallel execution" OFF)
+
 # Vendored Armadillo (header-only path in include/).
 # Built without LAPACK/BLAS: the solver only uses element-wise ops, sqrt, abs,
 # min/max, and sub2ind, which are all header-only.
@@ -53,9 +55,30 @@ target_link_libraries(eos_validate_production_table PRIVATE chromosphere)
 add_executable(eos_validate_refined_table util/eos/validate_refined_table.cpp)
 target_link_libraries(eos_validate_refined_table PRIVATE chromosphere)
 
-find_package(OpenMP)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(chromosphere PUBLIC OpenMP::OpenMP_CXX)
+if(CHROMO_ENABLE_OPENMP)
+    find_package(OpenMP QUIET)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(chromosphere PUBLIC OpenMP::OpenMP_CXX)
+    elseif(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "AppleClang|Clang")
+        set(LIBOMP_ROOT "" CACHE PATH "Root of an LLVM/OpenMP installation")
+        if(NOT LIBOMP_ROOT AND DEFINED ENV{LIBOMP_ROOT})
+            set(LIBOMP_ROOT "$ENV{LIBOMP_ROOT}")
+        endif()
+        set(_libomp_roots ${LIBOMP_ROOT} /opt/homebrew/opt/libomp /usr/local/opt/libomp)
+        find_path(LIBOMP_INCLUDE_DIR omp.h HINTS ${_libomp_roots} PATH_SUFFIXES include)
+        find_library(LIBOMP_LIBRARY NAMES omp libomp HINTS ${_libomp_roots} PATH_SUFFIXES lib)
+        if(NOT LIBOMP_INCLUDE_DIR OR NOT LIBOMP_LIBRARY)
+            message(FATAL_ERROR
+                "CHROMO_ENABLE_OPENMP=ON, but OpenMP was not found. Install libomp or set LIBOMP_ROOT.")
+        endif()
+        target_compile_options(chromosphere PUBLIC -Xpreprocessor -fopenmp)
+        target_include_directories(chromosphere PUBLIC ${LIBOMP_INCLUDE_DIR})
+        target_link_libraries(chromosphere PUBLIC ${LIBOMP_LIBRARY})
+    else()
+        message(FATAL_ERROR
+            "CHROMO_ENABLE_OPENMP=ON, but a working OpenMP C++ runtime was not found")
+    endif()
+    target_compile_definitions(chromosphere PUBLIC CHROMO_USE_OPENMP=1)
 endif()
 
 # Tests

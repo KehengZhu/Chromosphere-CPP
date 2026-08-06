@@ -1,6 +1,7 @@
 #include "chromosphere.hpp"
 #include "physics.hpp"
 #include "profiling.hpp"
+#include "parallel.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -123,7 +124,8 @@ void decode_mixture_field_into(
     };
     const bool has_guesses = previous && previous->source_grid == &grid
         && previous->cells.size() == grid.ns;
-    for (arma::uword i = 0; i < grid.ns; ++i) {
+    parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
+        const arma::uword i = static_cast<arma::uword>(raw_i);
         auto at = [&](arma::uword row) {
             return static_cast<double>(state(arma::sub2ind(state_size, i, row)));
         };
@@ -136,13 +138,11 @@ void decode_mixture_field_into(
             at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
             phi, guess, grid.eos_gamma_debug_clamp);
         // Refresh the shared hint, but do NOT read it here: this site has its own
-        // guess (`previous`), validated against source_grid and cell count. The
-        // shared hint carries no such provenance, and substituting it as a fallback
-        // makes test_stage7 blow up — that test reuses one Grid across a 10^4 change
-        // in density, so the cached T is meaningless for the new profile.
+        // guess (`previous`), validated against source_grid and cell count. Each
+        // worker writes only its own pre-sized hint slot.
         grid.store_eos_temperature_hint(i, out.cells[i].T);
         put(i+2, out.cells[i], at(cons::MOM_I)+at(cons::MOM_N));
-    }
+    });
 
     if (USE_NEUMANN_BC) {
         for (arma::uword slot = 0; slot < 3; ++slot) {
@@ -236,7 +236,8 @@ void decode_predicted_caloric_primitives_into(
         output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_LOG_T)) =
             std::log(th.T);
     };
-    for (arma::uword i = 0; i < grid.ns; ++i) {
+    parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
+        const arma::uword i = static_cast<arma::uword>(raw_i);
         auto at = [&](arma::uword row) {
             return static_cast<double>(state(arma::sub2ind(state_size, i, row)));
         };
@@ -249,7 +250,7 @@ void decode_predicted_caloric_primitives_into(
             phi, guess, grid.eos_gamma_debug_clamp);
         grid.store_eos_temperature_hint(i, th.T);
         put(i+2, th, at(cons::MOM_I)+at(cons::MOM_N));
-    }
+    });
     if (USE_NEUMANN_BC) {
         for (arma::uword slot = 0; slot < MIX_ROWS; ++slot) {
             output.extended_primitive(arma::sub2ind(ext_size,0,slot)) =
@@ -310,36 +311,68 @@ void mixture_mc3(const MixtureVec& ratio, double beta, bool plus,
     }
 }
 
-void build_mixture_face(const Grid& grid, const MixtureVec& mixture,
-                        const Vec& phi_face, MixtureFaceBundle out) {
-    // Every (i,k) slot of all three outputs is written by the loop below
-    // (sub2ind(size(ns,num_of_eq), i, k) = i + k*ns enumerates n_state exactly),
-    // so sizing without zero-filling is byte-identical and skips three
-    // n_state-length memsets per face bundle.
+void prepare_mixture_face(const Grid& grid, MixtureFaceBundle out) {
+    // Every (i,k) slot is written by one physical-cell worker. Pre-size once,
+    // outside the OpenMP region; no worker resizes shared Armadillo storage.
     out.conserved.set_size(grid.n_state);
     out.flux.set_size(grid.n_state);
     out.spectral_radius.set_size(grid.n_state);
+}
+
+void build_mixture_face_cell(const Grid& grid, const MixtureVec& mixture,
+                             const Vec& phi_face, MixtureFaceBundle out,
+                             arma::uword i) {
     const auto sz = arma::size(grid.ns, num_of_eq);
     const auto msz = mixture_size(grid);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const double log_rho = mixture(arma::sub2ind(msz, i, MIX_LOG_RHO));
-        const double velocity = mixture(arma::sub2ind(msz, i, MIX_V));
-        const double log_temperature = mixture(arma::sub2ind(msz, i, MIX_LOG_T));
-        const MixtureFaceState face = equilibrium_mixture_face_state_from_logs(
-            grid.eos_gamma_table, log_rho, velocity, log_temperature,
-            static_cast<double>(phi_face(i)), grid.eos_trace_fraction_floor,
-            grid.eos_gamma_debug_clamp);
-        const ProjectedMixture& u = face.conserved;
-        const std::array<double, 7> flux = equilibrium_mixture_flux(face);
-        const double values[7] = {u.rho_i, u.rho_n, u.momentum_i, u.momentum_n,
-                                  u.energy_i, u.energy_n, u.energy_e};
-        const float a = static_cast<float>(std::abs(velocity) + face.sound_speed);
-        for (arma::uword k = 0; k < num_of_eq; ++k) {
-            out.conserved(arma::sub2ind(sz, i, k)) = static_cast<float>(values[k]);
-            out.flux(arma::sub2ind(sz, i, k)) = static_cast<float>(flux[k]);
-            out.spectral_radius(arma::sub2ind(sz, i, k)) = a;
-        }
+    const double log_rho = mixture(arma::sub2ind(msz, i, MIX_LOG_RHO));
+    const double velocity = mixture(arma::sub2ind(msz, i, MIX_V));
+    const double log_temperature = mixture(arma::sub2ind(msz, i, MIX_LOG_T));
+    const MixtureFaceState face = equilibrium_mixture_face_state_from_logs(
+        grid.eos_gamma_table, log_rho, velocity, log_temperature,
+        static_cast<double>(phi_face(i)), grid.eos_trace_fraction_floor,
+        grid.eos_gamma_debug_clamp);
+    const ProjectedMixture& u = face.conserved;
+    const std::array<double, 7> flux = equilibrium_mixture_flux(face);
+    const double values[7] = {u.rho_i, u.rho_n, u.momentum_i, u.momentum_n,
+                              u.energy_i, u.energy_n, u.energy_e};
+    const float a = static_cast<float>(std::abs(velocity) + face.sound_speed);
+    for (arma::uword k = 0; k < num_of_eq; ++k) {
+        out.conserved(arma::sub2ind(sz, i, k)) = static_cast<float>(values[k]);
+        out.flux(arma::sub2ind(sz, i, k)) = static_cast<float>(flux[k]);
+        out.spectral_radius(arma::sub2ind(sz, i, k)) = a;
     }
+}
+
+void build_mixture_face_batch2(
+    const Grid& grid,
+    const MixtureVec& mixture0, const Vec& phi0, MixtureFaceBundle out0,
+    const MixtureVec& mixture1, const Vec& phi1, MixtureFaceBundle out1) {
+    prepare_mixture_face(grid, out0);
+    prepare_mixture_face(grid, out1);
+    parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
+        const arma::uword i = static_cast<arma::uword>(raw_i);
+        build_mixture_face_cell(grid, mixture0, phi0, out0, i);
+        build_mixture_face_cell(grid, mixture1, phi1, out1, i);
+    });
+}
+
+void build_mixture_face_batch4(
+    const Grid& grid,
+    const MixtureVec& mixture0, const Vec& phi0, MixtureFaceBundle out0,
+    const MixtureVec& mixture1, const Vec& phi1, MixtureFaceBundle out1,
+    const MixtureVec& mixture2, const Vec& phi2, MixtureFaceBundle out2,
+    const MixtureVec& mixture3, const Vec& phi3, MixtureFaceBundle out3) {
+    prepare_mixture_face(grid, out0);
+    prepare_mixture_face(grid, out1);
+    prepare_mixture_face(grid, out2);
+    prepare_mixture_face(grid, out3);
+    parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
+        const arma::uword i = static_cast<arma::uword>(raw_i);
+        build_mixture_face_cell(grid, mixture0, phi0, out0, i);
+        build_mixture_face_cell(grid, mixture1, phi1, out1, i);
+        build_mixture_face_cell(grid, mixture2, phi2, out2, i);
+        build_mixture_face_cell(grid, mixture3, phi3, out3, i);
+    });
 }
 
 void mixture_source(const Grid& grid, const Vec& state,
@@ -506,8 +539,9 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
     MixtureFaceBundle fl_iph{p[3],p[4],p[5]};
     MixtureFaceBundle fr_imh{p[6],p[7],p[8]};
     MixtureFaceBundle fl_imh{p[9],p[10],p[11]};
-    build_mixture_face(grid,wl_iph,grid.phi_g_iph,fl_iph);
-    build_mixture_face(grid,wr_imh,grid.phi_g_imh,fr_imh);
+    build_mixture_face_batch2(grid,
+        wl_iph, grid.phi_g_iph, fl_iph,
+        wr_imh, grid.phi_g_imh, fr_imh);
 
     // Internal MUSCL predictor: update conservatively, then independently invert
     // the caloric EOS. This path intentionally never calls legacy cons2prim.
@@ -532,10 +566,11 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
         wl_imh=0.5*(w_im1+wt_im1)+W4%lp_rim1%(w-w_im1);
     }
 
-    build_mixture_face(grid,wr_iph,grid.phi_g_iph,fr_iph);
-    build_mixture_face(grid,wl_iph,grid.phi_g_iph,fl_iph);
-    build_mixture_face(grid,wr_imh,grid.phi_g_imh,fr_imh);
-    build_mixture_face(grid,wl_imh,grid.phi_g_imh,fl_imh);
+    build_mixture_face_batch4(grid,
+        wr_iph, grid.phi_g_iph, fr_iph,
+        wl_iph, grid.phi_g_iph, fl_iph,
+        wr_imh, grid.phi_g_imh, fr_imh,
+        wl_imh, grid.phi_g_imh, fl_imh);
     Vec& a_imh=p[13]; Vec& a_iph=p[14];
     Vec& flux_imh=p[15]; Vec& flux_iph=p[16]; Vec& rhs=p[17];
     a_imh=arma::max(fl_imh.spectral_radius,fr_imh.spectral_radius);

@@ -1,9 +1,11 @@
 #include "chromosphere.hpp"
 #include "physics.hpp"
 #include "profiling.hpp"
+#include "parallel.hpp"
 #include "scenarios/scenario.hpp"
 
 #include <armadillo>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -135,6 +137,14 @@ int main(int argc, char** argv) {
     reset_runtime_profile();
     set_eos_operation_counting(eos_counting_on);
     reset_eos_operation_counts();
+    require_supported_parallel_runtime();
+    std::cerr << "[openmp] compiled=" << (openmp_compiled() ? 1 : 0)
+              << " max_threads=" << parallel_max_threads()
+              << " conduction_team="
+              << std::min(kMaximumConductionThreads, parallel_max_threads());
+    if (const char* requested = std::getenv("OMP_NUM_THREADS"))
+        std::cerr << " requested=" << requested;
+    std::cerr << '\n';
 
     float cfl = 0.25f;
     if (const char* e = std::getenv("CHROMO_CFL")) { try { cfl = std::stof(e); } catch (...) {} }

@@ -1,5 +1,6 @@
 #include "eos.hpp"
 #include "profiling.hpp"
+#include "parallel.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -69,7 +70,12 @@ struct Row {
 };
 
 bool eos_operation_counting_enabled = false;
-EosOperationCounts eos_operation_counter;
+struct alignas(64) EosCountSlot { EosOperationCounts counts; };
+std::array<EosCountSlot, kMaximumParallelThreads> eos_operation_slots;
+
+inline EosOperationCounts& eos_operation_counter() noexcept {
+    return eos_operation_slots[static_cast<std::size_t>(parallel_thread_index())].counts;
+}
 
 inline double require_finite_positive(double value, const char* name) {
     if (!(value > 0.0) || !std::isfinite(value))
@@ -78,12 +84,12 @@ inline double require_finite_positive(double value, const char* name) {
 }
 
 inline double temperature_log(double temperature) {
-    if (eos_operation_counting_enabled) ++eos_operation_counter.temperature_logs;
+    if (eos_operation_counting_enabled) ++eos_operation_counter().temperature_logs;
     return std::log(temperature);
 }
 
 inline double n_h_log(double n_h) {
-    if (eos_operation_counting_enabled) ++eos_operation_counter.n_h_logs;
+    if (eos_operation_counting_enabled) ++eos_operation_counter().n_h_logs;
     return std::log(n_h);
 }
 
@@ -250,11 +256,18 @@ void set_eos_operation_counting(bool enabled) noexcept {
 }
 
 void reset_eos_operation_counts() noexcept {
-    eos_operation_counter = EosOperationCounts{};
+    for (auto& slot : eos_operation_slots)
+        slot.counts = EosOperationCounts{};
 }
 
 EosOperationCounts eos_operation_counts() noexcept {
-    return eos_operation_counter;
+    EosOperationCounts merged;
+    for (const auto& slot : eos_operation_slots) {
+        merged.gamma1_queries += slot.counts.gamma1_queries;
+        merged.temperature_logs += slot.counts.temperature_logs;
+        merged.n_h_logs += slot.counts.n_h_logs;
+    }
+    return merged;
 }
 
 double saha_ionization_fraction_n_h(double n_h, double temperature) {
@@ -1115,7 +1128,7 @@ double EosGammaTable::gamma1_from_logs(
     require_finite_positive(n_h, "n_H");
     if (!std::isfinite(log_temperature) || !std::isfinite(log_n_h))
         throw std::domain_error("Gamma1 logarithmic coordinates must be finite");
-    if (eos_operation_counting_enabled) ++eos_operation_counter.gamma1_queries;
+    if (eos_operation_counting_enabled) ++eos_operation_counter().gamma1_queries;
     double log_t = log_temperature;
     double log_n = log_n_h;
     const double tolerance = 64.0 * std::numeric_limits<double>::epsilon()

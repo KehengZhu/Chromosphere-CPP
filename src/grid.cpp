@@ -55,6 +55,7 @@ void Grid::init(arma::uword ns_in, float CFL_in) {
     dt_state.zeros(n_state);
     ds_iph_state.zeros(n_state);
     ds_imh_state.zeros(n_state);
+    eos_T_hint.assign(ns, std::numeric_limits<double>::quiet_NaN());
 }
 
 void Grid::resize(arma::uword ns_new) {
@@ -86,6 +87,7 @@ void Grid::resize(arma::uword ns_new) {
     dt_state.zeros(n_state);
     ds_iph_state.zeros(n_state);
     ds_imh_state.zeros(n_state);
+    eos_T_hint.assign(ns, std::numeric_limits<double>::quiet_NaN());
 }
 
 namespace {

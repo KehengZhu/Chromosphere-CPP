@@ -1,5 +1,6 @@
 #include "chromosphere.hpp"
 #include "profiling.hpp"
+#include "parallel.hpp"
 
 #include <limits>
 #include <stdexcept>
@@ -34,7 +35,6 @@ Vec scalar_to(const Grid& grid, const Vec& xn_i, arma::uword index) {
 
 Vec ip1(const Grid& grid, const Vec& xn, arma::uword nk) {
     Vec xn_ip1(arma::size(xn));
-#pragma omp parallel for collapse(2)
     for (arma::uword i = 0; i < grid.ns - 1; ++i) {
         for (arma::uword k = 0; k < nk; ++k) {
             xn_ip1(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, k)) =
@@ -54,7 +54,6 @@ Vec ip1(const Grid& grid, const Vec& xn, arma::uword nk) {
 
 Vec im1(const Grid& grid, const Vec& xn, arma::uword nk) {
     Vec xn_im1(arma::size(xn));
-#pragma omp parallel for collapse(2)
     for (arma::uword i = 1; i < grid.ns; ++i) {
         for (arma::uword k = 0; k < nk; ++k) {
             xn_im1(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, k)) =
@@ -162,7 +161,8 @@ Vec project_equilibrium_single_fluid(const Grid& grid, const Vec& cons_state) {
         throw std::invalid_argument("equilibrium projection: gravitational arrays are not sized");
     Vec projected(arma::size(cons_state), arma::fill::zeros);
     const auto size = arma::size(grid.ns, num_of_eq);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
+    parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
+        const arma::uword i = static_cast<arma::uword>(raw_i);
         const auto at = [&](arma::uword row) {
             return static_cast<double>(cons_state(arma::sub2ind(size, i, row)));
         };
@@ -181,7 +181,7 @@ Vec project_equilibrium_single_fluid(const Grid& grid, const Vec& cons_state) {
         projected(arma::sub2ind(size, i, cons::E_I)) = static_cast<float>(cell.energy_i);
         projected(arma::sub2ind(size, i, cons::E_N)) = static_cast<float>(cell.energy_n);
         projected(arma::sub2ind(size, i, cons::E_E)) = static_cast<float>(cell.energy_e);
-    }
+    });
     return projected;
 }
 

@@ -13,6 +13,8 @@
 #include <armadillo>
 #include <array>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 #include "eos.hpp"
 
@@ -227,8 +229,10 @@ struct Grid {
     /// Record cell i's decoded temperature for the next inversion in that cell.
     void store_eos_temperature_hint(arma::uword i, double temperature) const {
         if (eos_T_hint.size() != ns)
-            eos_T_hint.assign(ns, std::numeric_limits<double>::quiet_NaN());
-        if (i < ns) eos_T_hint[i] = temperature;
+            throw std::logic_error("EOS temperature hints were not pre-sized");
+        if (i >= ns)
+            throw std::out_of_range("EOS temperature hint cell is out of range");
+        eos_T_hint[i] = temperature;
     }
     // Adiabatic-index factors derived from gamma_mono so the equation of state
     // and every energy↔pressure / heat-capacity conversion tracks a single γ.

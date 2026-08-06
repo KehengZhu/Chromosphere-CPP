@@ -17,6 +17,7 @@
 #include "../chromosphere.hpp"
 #include "../physics.hpp"
 #include "../profiling.hpp"
+#include "../parallel.hpp"
 #include "../scenarios/analytic_canopy.hpp"
 #include "../scenarios/data_file_parser.hpp"
 #include "../scenarios/mesh.hpp"
@@ -1034,6 +1035,74 @@ static void test_final_serial_one_update_and_fallback_regression() {
     EXPECT_TRUE(slow.one_update_convergences == 0);
     EXPECT_REL(fallback, target_temperature, 2e-12);
     EXPECT_REL(fallback, one_update, 2e-12);
+    set_runtime_profiling(false);
+    reset_runtime_profile();
+}
+
+static void test_openmp_thread_safety_contracts() {
+#ifdef CHROMO_USE_OPENMP
+    EXPECT_TRUE(openmp_compiled());
+#else
+    EXPECT_TRUE(!openmp_compiled());
+#endif
+    EXPECT_TRUE(parallel_max_threads() >= 1);
+    EXPECT_TRUE(parallel_max_threads() <= kMaximumParallelThreads);
+
+    Grid grid;
+    grid.init(7, 0.25f);
+    EXPECT_TRUE(grid.eos_T_hint.size() == 7);
+    for (double value : grid.eos_T_hint) EXPECT_TRUE(std::isnan(value));
+    grid.store_eos_temperature_hint(3, 8123.0);
+    EXPECT_NEAR(grid.eos_temperature_hint(3), 8123.0, 0.0);
+    grid.resize(11);
+    EXPECT_TRUE(grid.eos_T_hint.size() == 11);
+    for (double value : grid.eos_T_hint) EXPECT_TRUE(std::isnan(value));
+    grid.eos_T_hint.clear();
+    bool hint_threw = false;
+    try {
+        grid.store_eos_temperature_hint(0, 7000.0);
+    } catch (const std::logic_error&) {
+        hint_threw = true;
+    }
+    EXPECT_TRUE(hint_threw);
+
+    std::string selected_failure;
+    try {
+        parallel_for_cells(64, [](std::size_t i) {
+            if (i == 11) throw std::runtime_error("cell=11");
+            if (i == 3) throw std::runtime_error("cell=3");
+        });
+    } catch (const std::runtime_error& error) {
+        selected_failure = error.what();
+    }
+    EXPECT_TRUE(selected_failure == "cell=3");
+
+    set_eos_operation_counting(true);
+    reset_eos_operation_counts();
+    parallel_for_cells(257, [](std::size_t i) {
+        const double rho = (1.0e18 + static_cast<double>(i)*1.0e14)
+                         * eos_constants::m_h;
+        const double temperature = 5000.0 + static_cast<double>(i);
+        (void)equilibrium_caloric_state(rho, temperature);
+    });
+    const EosOperationCounts eos_counts = eos_operation_counts();
+    EXPECT_TRUE(eos_counts.gamma1_queries == 0);
+    EXPECT_TRUE(eos_counts.temperature_logs == 257);
+    EXPECT_TRUE(eos_counts.n_h_logs == 257);
+    set_eos_operation_counting(false);
+    reset_eos_operation_counts();
+
+    set_runtime_profiling(true);
+    reset_runtime_profile();
+    parallel_for_cells(257, [](std::size_t i) {
+        profile_note_inversion_call();
+        profile_note_inversion_iterations(static_cast<std::uint64_t>(i % 3));
+    });
+    const EosInversionProfile profile = eos_inversion_profile();
+    EXPECT_TRUE(profile.calls == 257);
+    EXPECT_TRUE(profile.one_update_convergences == 86);
+    EXPECT_TRUE(profile.total_iterations == 256);
+    EXPECT_TRUE(profile.maximum_iterations == 2);
     set_runtime_profiling(false);
     reset_runtime_profile();
 }
@@ -4316,6 +4385,7 @@ int main() {
     RUN(test_eos_gamma_table_loader_and_interpolation);
     RUN(test_final_serial_log_aware_eos_and_gamma1_contracts);
     RUN(test_final_serial_one_update_and_fallback_regression);
+    RUN(test_openmp_thread_safety_contracts);
     RUN(test_stage3_equilibrium_mixture_closure);
     RUN(test_stage4_conservative_equilibrium_projection);
     RUN(test_stage5_6_equilibrium_face_flux_and_sound_speed);

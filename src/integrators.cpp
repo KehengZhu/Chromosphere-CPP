@@ -1,6 +1,7 @@
 #include "chromosphere.hpp"
 #include "physics.hpp"
 #include "profiling.hpp"
+#include "parallel.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -550,7 +551,8 @@ static Vec pack_gamma_known_temperature(
     const std::vector<double>& temperature) {
     Vec packed(arma::size(state), arma::fill::zeros);
     const auto sz = arma::size(grid.ns, num_of_eq);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
+    parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
+        const arma::uword i = static_cast<arma::uword>(raw_i);
         auto at = [&](arma::uword row) {
             return static_cast<double>(state(arma::sub2ind(sz,i,row)));
         };
@@ -578,12 +580,12 @@ static Vec pack_gamma_known_temperature(
         // Compute the final row from the authoritative conserved total after
         // rounding E_I, retaining the same conservative remainder semantics as
         // the general projection path.
-        float energy_n = static_cast<float>(authoritative_total
-                                           -static_cast<double>(energy_i));
+        const float energy_n = static_cast<float>(authoritative_total
+                                                 -static_cast<double>(energy_i));
         packed(arma::sub2ind(sz,i,cons::E_I)) = energy_i;
         packed(arma::sub2ind(sz,i,cons::E_N)) = energy_n;
         packed(arma::sub2ind(sz,i,cons::E_E)) = static_cast<float>(cell.energy_e);
-    }
+    });
     return packed;
 }
 
@@ -596,162 +598,277 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
     GammaConductionScratch& s = grid.gamma_conduction_scratch;
     s.resize(ns);
     const auto sz = arma::size(grid.ns, num_of_eq);
-    for (arma::uword i = 0; i < ns; ++i) {
-        auto at = [&](arma::uword row) {
-            return static_cast<double>(state(arma::sub2ind(sz,i,row)));
-        };
-        const double phi = 0.5*static_cast<double>(
-            grid.phi_g_imh(i)+grid.phi_g_iph(i));
-        // The decode's own inversion already evaluated the caloric EOS at exactly
-        // (th.rho, th.T) — which is where the first Newton residual pass below
-        // starts. Carry that evaluation over instead of repeating it. This is the
-        // provably-equivalent form of the projection→conduction cache: the state
-        // it describes is the packed Vec<float> conserved state this decode just
-        // read, not projection's pre-rounding double state.
-        CaloricState seeded;
-        const CaloricMixtureThermo th = decode_equilibrium_caloric_mixture(
-            grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
-            at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
-            phi, grid.eos_temperature_hint(i),
-            grid.eos_gamma_debug_clamp, &seeded);
-        grid.store_eos_temperature_hint(i, th.T);
-        s.rho[i] = th.rho;
-        s.e_old[i] = th.internal_energy;
-        s.temperature[i] = th.T;
-        s.n_e[i] = seeded.n_e;
-        s.n_hi[i] = seeded.n_hi;
-        s.e_at_T[i] = seeded.internal_energy;
-        s.capacity[i] = seeded.heat_capacity;
-        s.x[i] = seeded.x;
-        s.pressure[i] = seeded.pressure;
-    }
-    bool caloric_seeded = true;
-    const CaloricMixtureThermo inner = decode_gamma_ghost(
-        grid, grid.inner_boundary0_i, grid.phi_g_imh(0));
-    const CaloricMixtureThermo outer = decode_gamma_ghost(
-        grid, grid.outer_boundary0_i, grid.phi_g_iph(ns-1));
-    // Thermal wall seen by conduction — identical to outer.T unless the scenario
-    // decoupled the hydro ghost temperature from the conductive driving.
-    const OuterConductionGhost wall = outer_conduction_ghost(grid, outer);
 
+    ParallelFailure failure;
+    std::array<double, kMaximumParallelThreads> residual_max_slots{};
+    std::array<double, kMaximumParallelThreads> step_max_slots{};
+    int team_size = 1;
+    bool stop = false;
     bool converged = false;
+    bool caloric_seeded = true;
     bool previous_step_was_small = false;
     int converged_after_updates = 0;
-    // Diagnostic-only mirrors of the OUTER face's coefficients. Rewritten every
-    // iteration, so after the loop they hold the converged solve's values.
-    double diag_kr_top = 0.0, diag_cv_r_top = 0.0;
-    for (int iteration = 0; iteration <= 40; ++iteration) {
-        for (arma::uword i = 0; i < ns; ++i) {
-            // ONE Saha evaluation per cell per Newton residual pass. This block
-            // previously called saha_ionization_fraction_n_h (ionization),
-            // equilibrium_heat_capacity (a second Saha) and — further down, at
-            // the same temperature — equilibrium_internal_energy (a third).
-            // Iteration 0 needs none of them: the decode above already evaluated
-            // the caloric EOS at this (rho, T).
-            if (!caloric_seeded) {
-                const CaloricState cs = equilibrium_caloric_state(
-                    s.rho[i], s.temperature[i]);
-                s.n_e[i] = cs.n_e;
-                s.n_hi[i] = cs.n_hi;
-                s.e_at_T[i] = cs.internal_energy;
-                s.capacity[i] = cs.heat_capacity;
-                s.x[i] = cs.x;
-                s.pressure[i] = cs.pressure;
+    CaloricMixtureThermo inner{};
+    CaloricMixtureThermo outer{};
+    OuterConductionGhost wall{};
+    double k_inner = 0.0;
+    double k_outer = 0.0;
+    double diag_kr_top = 0.0;
+    double diag_cv_r_top = 0.0;
+    const int conduction_threads = std::min(
+        kMaximumConductionThreads, parallel_max_threads());
+
+    auto face_k = [&](double kh, double kt, double dh, double dtw) {
+        if (grid.uniform_mesh) return 0.5*(kh+kt);
+        kh = std::max(kh, 1.0e-30);
+        kt = std::max(kt, 1.0e-30);
+        return (dh+dtw)/(dh/kh+dtw/kt);
+    };
+
+    // One Grid owns one mutable conduction scratch set and is intentionally not
+    // concurrently reentrant. All physical-cell writes below are index-disjoint.
+#pragma omp parallel if(conduction_threads > 1) num_threads(conduction_threads) shared(stop,converged,caloric_seeded,previous_step_was_small,converged_after_updates,inner,outer,wall,k_inner,k_outer,diag_kr_top,diag_cv_r_top,team_size,failure,residual_max_slots,step_max_slots)
+    {
+        const int tid = parallel_thread_index();
+
+#pragma omp for schedule(static)
+        for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
+            const arma::uword i = static_cast<arma::uword>(raw_i);
+            try {
+                auto at = [&](arma::uword row) {
+                    return static_cast<double>(state(arma::sub2ind(sz,i,row)));
+                };
+                const double phi = 0.5*static_cast<double>(
+                    grid.phi_g_imh(i)+grid.phi_g_iph(i));
+                CaloricState seeded;
+                const CaloricMixtureThermo th = decode_equilibrium_caloric_mixture(
+                    grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
+                    at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
+                    phi, grid.eos_temperature_hint(i),
+                    grid.eos_gamma_debug_clamp, &seeded);
+                grid.store_eos_temperature_hint(i, th.T);
+                s.rho[i] = th.rho;
+                s.e_old[i] = th.internal_energy;
+                s.temperature[i] = th.T;
+                s.n_e[i] = seeded.n_e;
+                s.n_hi[i] = seeded.n_hi;
+                s.e_at_T[i] = seeded.internal_energy;
+                s.capacity[i] = seeded.heat_capacity;
+                s.x[i] = seeded.x;
+                s.pressure[i] = seeded.pressure;
+            } catch (...) {
+                failure.capture(i, std::current_exception());
             }
-            s.conductivity[i] = gamma_kappa_e(s.n_e[i],s.n_hi[i],s.temperature[i])
-                *gamma_trac_factor(grid,s.temperature[i])
-                +gamma_kappa_n(s.n_e[i],s.n_hi[i],s.temperature[i]);
-        }
-        caloric_seeded = false;
-        const double k_inner = gamma_kappa_e(inner.n_e, inner.n_HI, inner.T)
-                             * gamma_trac_factor(grid, inner.T)
-                             + gamma_kappa_n(inner.n_e, inner.n_HI, inner.T);
-        const double k_outer = gamma_kappa_e(wall.n_e, wall.n_HI, wall.T)
-                             * gamma_trac_factor(grid, wall.T)
-                             + gamma_kappa_n(wall.n_e, wall.n_HI, wall.T);
-        auto face_k = [&](double kh, double kt, double dh, double dtw) {
-            if (grid.uniform_mesh) return 0.5*(kh+kt);
-            kh = std::max(kh, 1.0e-30); kt = std::max(kt, 1.0e-30);
-            return (dh+dtw)/(dh/kh+dtw/kt);
-        };
-        for (arma::uword i = 0; i < ns; ++i) {
-            const double kl = i == 0
-                ? face_k(s.conductivity[i],k_inner,grid.ds_i(i),grid.ds_i(i))
-                : face_k(s.conductivity[i],s.conductivity[i-1],grid.ds_i(i),grid.ds_i(i-1));
-            const double kr = i+1 == ns
-                ? face_k(s.conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i))
-                : face_k(s.conductivity[i],s.conductivity[i+1],grid.ds_i(i),grid.ds_i(i+1));
-            double cv_l=s.capacity[i], cv_r=s.capacity[i];
-            if (i>0) cv_l=0.5*(s.capacity[i]+s.capacity[i-1]);
-            if (i+1<ns) cv_r=0.5*(s.capacity[i]+s.capacity[i+1]);
-            const double k_num_l = numerical_diffusivity_at_face(
-                grid, grid.ds_imh_i(i))*cv_l;
-            const double k_num_r = numerical_diffusivity_at_face(
-                grid, grid.ds_iph_i(i))*cv_r;
-            if (i+1 == ns) { diag_kr_top = kr; diag_cv_r_top = cv_r; }
-            s.g_left[i] = grid.B_i(i)/grid.ds_i(i)
-                      * (kl+k_num_l)/grid.B_imh(i)/grid.ds_imh_i(i);
-            s.g_right[i] = grid.B_i(i)/grid.ds_i(i)
-                       * (kr+k_num_r)/grid.B_iph(i)/grid.ds_iph_i(i);
         }
 
-        double max_scaled_residual = 0.0;
-        for (arma::uword i = 0; i < ns; ++i) {
-            const double tl = i==0 ? inner.T : s.temperature[i-1];
-            const double tr = i+1==ns ? wall.T : s.temperature[i+1];
-            double divergence = s.g_right[i]*(tr-s.temperature[i])
-                              - s.g_left[i]*(s.temperature[i]-tl);
-            if (i == 0 && grid.inner_conduction_neumann) {
-                divergence += s.g_left[i]*(s.temperature[i]-tl);
-                s.g_left[i] = 0.0;
+#pragma omp single
+        {
+            team_size = parallel_team_size();
+            if (failure.failed()) {
+                stop = true;
+            } else {
+                try {
+                    inner = decode_gamma_ghost(
+                        grid, grid.inner_boundary0_i, grid.phi_g_imh(0));
+                    outer = decode_gamma_ghost(
+                        grid, grid.outer_boundary0_i, grid.phi_g_iph(ns-1));
+                    wall = outer_conduction_ghost(grid, outer);
+                    k_inner = gamma_kappa_e(inner.n_e, inner.n_HI, inner.T)
+                            * gamma_trac_factor(grid, inner.T)
+                            + gamma_kappa_n(inner.n_e, inner.n_HI, inner.T);
+                    k_outer = gamma_kappa_e(wall.n_e, wall.n_HI, wall.T)
+                            * gamma_trac_factor(grid, wall.T)
+                            + gamma_kappa_n(wall.n_e, wall.n_HI, wall.T);
+                } catch (...) {
+                    failure.capture(ns, std::current_exception());
+                    stop = true;
+                }
             }
-            if (i+1 == ns && grid.impose_outer_heat_flux) {
-                divergence = -s.g_left[i]*(s.temperature[i]-tl)
-                           + grid.outer_heat_flux/grid.ds_i(i);
-                s.g_right[i] = 0.0;
+        }
+
+        if (!stop) {
+            for (int iteration = 0; iteration <= 40; ++iteration) {
+#pragma omp for schedule(static)
+                for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
+                    const arma::uword i = static_cast<arma::uword>(raw_i);
+                    try {
+                        if (!caloric_seeded) {
+                            const CaloricState cs = equilibrium_caloric_state(
+                                s.rho[i], s.temperature[i]);
+                            s.n_e[i] = cs.n_e;
+                            s.n_hi[i] = cs.n_hi;
+                            s.e_at_T[i] = cs.internal_energy;
+                            s.capacity[i] = cs.heat_capacity;
+                            s.x[i] = cs.x;
+                            s.pressure[i] = cs.pressure;
+                        }
+                        s.conductivity[i] =
+                            gamma_kappa_e(s.n_e[i],s.n_hi[i],s.temperature[i])
+                            *gamma_trac_factor(grid,s.temperature[i])
+                            +gamma_kappa_n(s.n_e[i],s.n_hi[i],s.temperature[i]);
+                    } catch (...) {
+                        failure.capture(i, std::current_exception());
+                    }
+                }
+
+#pragma omp single
+                {
+                    caloric_seeded = false;
+                    if (failure.failed()) stop = true;
+                }
+                if (stop) break;
+
+#pragma omp for schedule(static)
+                for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
+                    const arma::uword i = static_cast<arma::uword>(raw_i);
+                    try {
+                        const double kl = i == 0
+                            ? face_k(s.conductivity[i],k_inner,grid.ds_i(i),grid.ds_i(i))
+                            : face_k(s.conductivity[i],s.conductivity[i-1],
+                                     grid.ds_i(i),grid.ds_i(i-1));
+                        const double kr = i+1 == ns
+                            ? face_k(s.conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i))
+                            : face_k(s.conductivity[i],s.conductivity[i+1],
+                                     grid.ds_i(i),grid.ds_i(i+1));
+                        double cv_l=s.capacity[i], cv_r=s.capacity[i];
+                        if (i>0) cv_l=0.5*(s.capacity[i]+s.capacity[i-1]);
+                        if (i+1<ns) cv_r=0.5*(s.capacity[i]+s.capacity[i+1]);
+                        const double k_num_l = numerical_diffusivity_at_face(
+                            grid, grid.ds_imh_i(i))*cv_l;
+                        const double k_num_r = numerical_diffusivity_at_face(
+                            grid, grid.ds_iph_i(i))*cv_r;
+                        if (i+1 == ns) {
+                            diag_kr_top = kr;
+                            diag_cv_r_top = cv_r;
+                        }
+                        s.g_left[i] = grid.B_i(i)/grid.ds_i(i)
+                                  * (kl+k_num_l)/grid.B_imh(i)/grid.ds_imh_i(i);
+                        s.g_right[i] = grid.B_i(i)/grid.ds_i(i)
+                                   * (kr+k_num_r)/grid.B_iph(i)/grid.ds_iph_i(i);
+                    } catch (...) {
+                        failure.capture(i, std::current_exception());
+                    }
+                }
+
+#pragma omp single
+                {
+                    if (failure.failed()) stop = true;
+                }
+                if (stop) break;
+
+                double local_residual_max = 0.0;
+#pragma omp for schedule(static)
+                for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
+                    const arma::uword i = static_cast<arma::uword>(raw_i);
+                    try {
+                        const double tl = i==0 ? inner.T : s.temperature[i-1];
+                        const double tr = i+1==ns ? wall.T : s.temperature[i+1];
+                        double divergence = s.g_right[i]*(tr-s.temperature[i])
+                                          -s.g_left[i]*(s.temperature[i]-tl);
+                        if (i == 0 && grid.inner_conduction_neumann) {
+                            divergence += s.g_left[i]*(s.temperature[i]-tl);
+                            s.g_left[i] = 0.0;
+                        }
+                        if (i+1 == ns && grid.impose_outer_heat_flux) {
+                            divergence = -s.g_left[i]*(s.temperature[i]-tl)
+                                       + grid.outer_heat_flux/grid.ds_i(i);
+                            s.g_right[i] = 0.0;
+                        }
+                        s.target[i] = s.e_old[i]+dt*divergence;
+                        const double residual = s.e_at_T[i]-s.target[i];
+                        s.a[i] = -dt*s.g_left[i];
+                        s.b[i] = s.capacity[i]+dt*(s.g_left[i]+s.g_right[i]);
+                        s.c[i] = -dt*s.g_right[i];
+                        s.rhs[i] = -residual;
+                        local_residual_max = std::max(local_residual_max,
+                            std::abs(residual)/std::max(s.e_old[i],1.0e-30));
+                    } catch (...) {
+                        failure.capture(i, std::current_exception());
+                    }
+                }
+                residual_max_slots[static_cast<std::size_t>(tid)] = local_residual_max;
+#pragma omp barrier
+
+#pragma omp single
+                {
+                    if (failure.failed()) {
+                        stop = true;
+                    } else {
+                        s.a[0]=0.0;
+                        s.c[ns-1]=0.0;
+                        double max_scaled_residual = 0.0;
+                        for (int slot = 0; slot < team_size; ++slot)
+                            max_scaled_residual = std::max(
+                                max_scaled_residual,
+                                residual_max_slots[static_cast<std::size_t>(slot)]);
+                        if (max_scaled_residual < 2.0e-11) {
+                            converged = true;
+                            converged_after_updates = iteration;
+                            stop = true;
+                        } else if (previous_step_was_small) {
+                            failure.capture(ns, std::make_exception_ptr(std::runtime_error(
+                                "gamma-table mixture conduction stagnated before residual convergence: "
+                                "scaled_residual="+std::to_string(max_scaled_residual))));
+                            stop = true;
+                        } else if (iteration == 40) {
+                            stop = true;
+                        } else {
+                            try {
+                                thomas_solve_double_inplace(s.a,s.b,s.c,s.rhs,s.delta);
+                            } catch (...) {
+                                failure.capture(ns, std::current_exception());
+                                stop = true;
+                            }
+                        }
+                    }
+                }
+                if (stop) break;
+
+                double local_step_max = 0.0;
+#pragma omp for schedule(static)
+                for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
+                    const arma::uword i = static_cast<arma::uword>(raw_i);
+                    try {
+                        double candidate = s.temperature[i]+s.delta[i];
+                        if (!std::isfinite(candidate))
+                            throw std::runtime_error(
+                                "gamma-table mixture conduction Newton produced non-finite T");
+                        const double tmin = grid.eos_gamma_table.min_temperature();
+                        const double tmax = grid.eos_gamma_table.max_temperature();
+                        if (candidate<=tmin)
+                            candidate=0.5*(s.temperature[i]+tmin);
+                        if (candidate>=tmax)
+                            candidate=0.5*(s.temperature[i]+tmax);
+                        local_step_max = std::max(local_step_max,
+                            std::abs(candidate-s.temperature[i])/
+                            std::max(s.temperature[i],1.0));
+                        s.temperature[i]=candidate;
+                    } catch (...) {
+                        failure.capture(i, std::current_exception());
+                    }
+                }
+                step_max_slots[static_cast<std::size_t>(tid)] = local_step_max;
+#pragma omp barrier
+
+#pragma omp single
+                {
+                    if (failure.failed()) {
+                        stop = true;
+                    } else {
+                        double max_relative_step = 0.0;
+                        for (int slot = 0; slot < team_size; ++slot)
+                            max_relative_step = std::max(
+                                max_relative_step,
+                                step_max_slots[static_cast<std::size_t>(slot)]);
+                        previous_step_was_small = max_relative_step < 2.0e-11;
+                    }
+                }
+                if (stop) break;
             }
-            s.target[i] = s.e_old[i]+dt*divergence;
-            // s.temperature has not changed since the fused evaluation above, so
-            // s.e_at_T[i] IS equilibrium_internal_energy(s.rho[i], s.temperature[i]).
-            const double residual = s.e_at_T[i]-s.target[i];
-            s.a[i] = -dt*s.g_left[i];
-            s.b[i] = s.capacity[i]+dt*(s.g_left[i]+s.g_right[i]);
-            s.c[i] = -dt*s.g_right[i];
-            s.rhs[i] = -residual;
-            max_scaled_residual = std::max(max_scaled_residual,
-                std::abs(residual)/std::max(s.e_old[i],1.0e-30));
         }
-        s.a[0]=0.0; s.c[ns-1]=0.0;
-        if (max_scaled_residual < 2.0e-11) {
-            converged = true;
-            converged_after_updates = iteration;
-            break;
-        }
-        // A small update is only a reason to re-evaluate the full nonlinear
-        // residual at T_{k+1}. If that updated residual still fails, the next
-        // pass reports stagnation. Iteration 40 is likewise evaluation-only,
-        // so the final update from iteration 39 always receives a residual test.
-        if (previous_step_was_small)
-            throw std::runtime_error(
-                "gamma-table mixture conduction stagnated before residual convergence: "
-                "scaled_residual="+std::to_string(max_scaled_residual));
-        if (iteration == 40) break;
-        thomas_solve_double_inplace(s.a,s.b,s.c,s.rhs,s.delta);
-        double max_relative_step = 0.0;
-        for (arma::uword i = 0; i < ns; ++i) {
-            double candidate = s.temperature[i]+s.delta[i];
-            if (!std::isfinite(candidate))
-                throw std::runtime_error("gamma-table mixture conduction Newton produced non-finite T");
-            const double tmin = grid.eos_gamma_table.min_temperature();
-            const double tmax = grid.eos_gamma_table.max_temperature();
-            if (candidate<=tmin) candidate=0.5*(s.temperature[i]+tmin);
-            if (candidate>=tmax) candidate=0.5*(s.temperature[i]+tmax);
-            max_relative_step = std::max(max_relative_step,
-                std::abs(candidate-s.temperature[i])/std::max(s.temperature[i],1.0));
-            s.temperature[i]=candidate;
-        }
-        previous_step_was_small = max_relative_step < 2.0e-11;
     }
+
+    failure.rethrow_lowest();
     if (!converged)
         throw std::runtime_error("gamma-table mixture conduction Newton did not converge");
     profile_note_conduction_iterations(
@@ -768,16 +885,12 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
         oc.area_ratio = grid.B_i(ns-1)/grid.B_iph(ns-1);
         const double dT_over_ds = (oc.T_wall-oc.T_top)/oc.ds_face;
         oc.q_phys = oc.kappa_phys_face*dT_over_ds;
-        oc.q_num  = oc.kappa_num_face *dT_over_ds;
+        oc.q_num  = oc.kappa_num_face*dT_over_ds;
         oc.q_total = oc.q_phys+oc.q_num;
         oc.imposed_neumann = grid.impose_outer_heat_flux;
         oc.valid = true;
     }
 
-    // Keep the simpler, provenance-safe final pack. The retained caloric cache
-    // previously allocated and copied an ns-sized vector every timestep without
-    // a repeatable wall-time benefit, while relying on an unchecked (rho,T)
-    // correspondence. The pack now performs one fused caloric evaluation itself.
     return pack_gamma_known_temperature(grid,state,s.target,s.temperature);
 }
 

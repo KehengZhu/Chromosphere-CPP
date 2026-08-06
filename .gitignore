@@ -1,7 +1,7 @@
 .cache/
 .claude/
 .agents/
-build/
+build*/
 .DS_Store
 writeup-overleaf/
 docs/presentation-build/

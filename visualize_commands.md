@@ -1234,6 +1234,121 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/face_flux_diag.py \
     --plot visualization/model_column/faceflux_500s_cfl_compare.png
 ```
 
+### Resolution convergence of the top-region ripple (`util/resolution_scan_diag.py`)
+
+Follow-up to the section above: does the cell-centred `rho V` ripple in
+2130-2150 km converge as `Delta h -> 0`, while `f_eff = f_total - f_ref` stays
+smooth? See `docs/resolution_convergence_scan_recap.md`. Same physical domain
+(1600-2153 km), same C7/pchip IC, same gamma/Saha table, same decoupled-hydro-T
+upper BC, same 22 000 K conduction wall, cooling off, TRAC off, MC3 beta=2,
+CFL 0.25, Mach cap 0.1, production `numerical_diffusivity = 2e3 * Delta h`
+(deliberately left to scale with the mesh). `ns` is the only physics-affecting
+variable; the diagnostic strides are set in STEPS so that all three runs capture
+at the same ~6 s physical cadence and the same 83 km physical extent.
+
+Answer: `A_M` (relstd of `rho V`) falls 0.150 -> 0.137 -> 0.067 and the
+face-to-cell mismatch `A_mismatch` tracks it almost exactly, while `f_eff` stays
+smooth at every resolution -- Result A. But `mean(f_eff)` falls ~linearly with
+`Delta h` (3.69 -> 2.40 -> 1.84e-9 at 1000 s) with no sign of flattening --
+Result D, concurrently. The mean evaporation rate is NOT grid-converged.
+
+`resconv_profiles_{500,1000}s.png` -- four panels vs PHYSICAL height: cell
+`rho V`, the same normalised by the window-mean `f_eff` (so the ripple
+convergence is visible independently of the mean-level shift), `f_eff`, and
+`delta F_diff`. `resconv_convergence_loglog.png` -- `A_M`/`Q_M`/`A_diff`/
+`A_mismatch`/`A_eff` vs `Delta h` with `Delta h` and `Delta h^2` guides.
+`resconv_mean_flux.png` -- mean mass flux and `R_eff` vs resolution.
+`resconv_time_compare.png` -- 500 s vs 1000 s trends side by side.
+`resconv_report.txt` / `resconv_metrics.json` -- full tables, Richardson
+extrapolation of the mean flux, extremum positions and cross-resolution peak
+matching.
+
+```bash
+# the three runs. time_mult=60.0 (argv[6]) ONLY raises step_cap (CHROMO_T_END
+# overrides total_time); ns=2000 needs >300k steps. Verified byte-identical to
+# the same runs at time_mult=30.0 for ns=500/1000.
+#   ns=500  -> CHROMO_FRAME_STRIDE=2500  CHROMO_FACE_FLUX_TOP=75  CHROMO_FACE_FLUX_STRIDE=500
+#   ns=1000 -> CHROMO_FRAME_STRIDE=5000  CHROMO_FACE_FLUX_TOP=150 CHROMO_FACE_FLUX_STRIDE=1000
+#   ns=2000 -> CHROMO_FRAME_STRIDE=10000 CHROMO_FACE_FLUX_TOP=300 CHROMO_FACE_FLUX_STRIDE=2000
+for NS in 500 1000 2000; do
+  O=outputs/model_column/resconv_ns${NS}_dec_1000s
+  GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+    ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 \
+    ISO_HEAT_FLUX=1 ISO_NS=$NS ISO_HYDRO_T_DECOUPLE=1 \
+    CHROMO_T_END=1000 CHROMO_FRAME_STRIDE=$((NS*5)) \
+    CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=$((NS*150/1000)) \
+    CHROMO_FACE_FLUX_STRIDE=$NS \
+    ./build/chromo_main $O.txt full no-ionization model_column - 60.0 no-cooling \
+    > $O.console.log 2>&1
+done
+
+# metrics, report, JSON and all five figures in one call
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/resolution_scan_diag.py \
+    --run 500=outputs/model_column/resconv_ns500_dec_1000s.txt \
+    --run 1000=outputs/model_column/resconv_ns1000_dec_1000s.txt \
+    --run 2000=outputs/model_column/resconv_ns2000_dec_1000s.txt \
+    --times 500 1000 --window 2130 2150 \
+    --json outputs/model_column/resconv_metrics.json \
+    --report outputs/model_column/resconv_report.txt \
+    --plot-dir visualization/model_column --plot-prefix resconv
+```
+
+### Is grid-scaled numerical conduction why the evaporation flux does not converge? (`util/numerical_conduction_diag.py`)
+
+Follow-up to the section above, targeting Result D only. `numerical_diffusivity =
+2000 * Delta h` enters the conduction solve as `kappa_num = numerical_diffusivity *
+C_V`, so it scales with the mesh. The new default-off `.outercond` sidecar
+(`CHROMO_OUTER_COND_DIAG=1`) captures the OUTER face of the FINAL CONVERGED
+conduction Newton iteration, so `q_phys` / `q_num` / `q_total` are the production
+face quantities, not a cell-centred proxy. The new diagnostic override
+`ISO_NUMERICAL_DIFFUSIVITY_MULT=0` zeroes ONLY that coefficient (physical
+conductivity, hydro, boundaries, EOS, limiter, CFL, well-balancing untouched);
+unset = production. 2x2 = (ns 1000, 2000) x (production, `D_num=0`). See
+`docs/numerical_conduction_convergence_recap.md`.
+
+Answer: `q_num/q_total` = 0.577 (ns=1000) and 0.385 (ns=2000), and with `D_num=0`
+the outer flux collapses ~7x and `mean(F_eff)` ~6x — so most of the production
+evaporation drive is the artificial conductivity. But `D_num=0` is still NOT
+converged (`mean(F_eff)` +34 % / +16 % from ns=1000 to 2000, opposite sign to
+production's -33 % / -25 %), and `D_num=0` at ns=2000 aborts at t = 921.5 s. Only
+a partial explanation. The `dnum0_ns2000` figures/report are therefore quoted at
+500 s and ~900 s, never 1000 s.
+
+```bash
+# the four runs. ISO_NUMERICAL_DIFFUSIVITY_MULT=1 is identical to unset (verified:
+# prod ns=1000/2000 reproduce the resconv runs' mean(F_eff) to all printed digits).
+# ncond_ns2000_dnum0 ends at t = 921.5 s (uncaught std::domain_error, see the recap).
+for NS in 1000 2000; do for MULT in 1 0; do
+  TAG=$([ $MULT = 1 ] && echo prod || echo dnum0)
+  O=outputs/model_column/ncond_ns${NS}_${TAG}_1000s
+  GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+    ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 \
+    ISO_HEAT_FLUX=1 ISO_NS=$NS ISO_HYDRO_T_DECOUPLE=1 \
+    ISO_NUMERICAL_DIFFUSIVITY_MULT=$MULT \
+    CHROMO_T_END=1000 CHROMO_FRAME_STRIDE=$((NS*5)) \
+    CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=$((NS*150/1000)) \
+    CHROMO_FACE_FLUX_STRIDE=$NS \
+    CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=$NS \
+    ./build/chromo_main $O.txt full no-ionization model_column - 60.0 no-cooling \
+    > $O.console.log 2>&1
+done; done
+
+# one table + one figure
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/numerical_conduction_diag.py \
+    --run prod_ns1000=outputs/model_column/ncond_ns1000_prod_1000s.txt \
+    --run prod_ns2000=outputs/model_column/ncond_ns2000_prod_1000s.txt \
+    --run dnum0_ns1000=outputs/model_column/ncond_ns1000_dnum0_1000s.txt \
+    --run dnum0_ns2000=outputs/model_column/ncond_ns2000_dnum0_1000s.txt \
+    --times 500 900 --window 2130 2150 \
+    --report outputs/model_column/ncond_report.txt \
+    --json outputs/model_column/ncond_metrics.json \
+    --plot visualization/model_column/ncond_numerical_conduction.png
+```
+
+`ncond_numerical_conduction.png` -- left: `q_total` at the outer face vs `N` for
+both branches (plus the `q_num` component of the production branch); right:
+`mean(F_eff)` over 2130-2150 km vs `N`. Faint = 500 s, solid = ~900 s.
+
 ### Fixed gamma=1.05 vs gamma-table physical conductive flux at 1000 s
 
 Matched-height, matched-time comparison using the shared cell-centred
@@ -1244,3 +1359,145 @@ maxima for the temperature gradient, densities, conductivity components, and flu
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_physical_flux_compare.py --fixed outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt --gamma outputs/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s.txt --time 1000 --fixed-gamma 1.05 --out visualization/model_column/iso_t22k_fixed105_vs_gamma_physical_flux_t1000.png --metrics-out outputs/model_column/iso_t22k_fixed105_vs_gamma_physical_flux_t1000_metrics.json
 ```
+
+### Outer (upper-TR) static local refinement: does it reduce the top-region `rho V` ripple?
+
+`docs/static_local_refinement.md` (§ `outer` profile) + `docs/outer_tr_refinement_recap.md`.
+Same physical domain 1600-2153 km, same coarse-equivalent `ISO_NS=1000`, same
+gamma-table / decoupled-hydro-T / conduction-wall / cooling-off configuration as the
+resolution-convergence and numerical-conduction stages -- only the mesh changes. The
+fine band is 2100-2153 km with a graded transition just below it (2080-2100 km).
+`CHROMO_*_STRIDE` are scaled by the refinement factor so all runs capture at the same
+PHYSICAL cadence (dt drops with the smallest local cell).
+
+```bash
+# U (uniform), R2 (outer refinement x2), R4 (outer refinement x4)
+for TAG in U R2 R4; do
+  case $TAG in U) F=1; S=1;; R2) F=2; S=2;; R4) F=4; S=4;; esac
+  O=outputs/model_column/outref_${TAG}_500s
+  env GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+    ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 \
+    ISO_HEAT_FLUX=1 ISO_NS=1000 ISO_HYDRO_T_DECOUPLE=1 \
+    ISO_NUMERICAL_DIFFUSIVITY_MULT=1 \
+    $( [ $TAG != U ] && echo "ISO_REFINE_PROFILE=outer ISO_REFINE_FACTOR=$F ISO_REFINE_S_LO_KM=500 ISO_REFINE_TRANSITION_KM=20" ) \
+    CHROMO_T_END=500 CHROMO_FRAME_STRIDE=$((5000*S)) \
+    CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=320 CHROMO_FACE_FLUX_STRIDE=$((1000*S)) \
+    CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=$((1000*S)) \
+    ./build/chromo_main $O.txt full no-ionization model_column - 60.0 no-cooling \
+    > $O.console.log 2>&1
+done
+
+# the one reduced-numerical-diffusivity test, on R4 only
+O=outputs/model_column/outref_R4_mult025_500s
+env GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+  ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 \
+  ISO_HEAT_FLUX=1 ISO_NS=1000 ISO_HYDRO_T_DECOUPLE=1 \
+  ISO_NUMERICAL_DIFFUSIVITY_MULT=0.25 \
+  ISO_REFINE_PROFILE=outer ISO_REFINE_FACTOR=4 ISO_REFINE_S_LO_KM=500 ISO_REFINE_TRANSITION_KM=20 \
+  CHROMO_T_END=500 CHROMO_FRAME_STRIDE=20000 \
+  CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=320 CHROMO_FACE_FLUX_STRIDE=4000 \
+  CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=4000 \
+  ./build/chromo_main $O.txt full no-ionization model_column - 60.0 no-cooling \
+  > $O.console.log 2>&1
+
+# one table + one figure (metrics imported from resolution_scan_diag / numerical_conduction_diag)
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/outer_refine_diag.py \
+    --run U=outputs/model_column/outref_U_500s.txt \
+    --run R2=outputs/model_column/outref_R2_500s.txt \
+    --run R4=outputs/model_column/outref_R4_500s.txt \
+    --run R4_mult025=outputs/model_column/outref_R4_mult025_500s.txt \
+    --time 500 --window 2130 2150 \
+    --report outputs/model_column/outref_report.txt \
+    --json outputs/model_column/outref_metrics.json \
+    --plot visualization/model_column/outref_profiles_500s.png
+```
+
+`outref_profiles_500s.png` -- top: cell width vs physical height (log `Delta s`,
+2000-2153 km) showing the coarse region, the graded transition and the fine band
+reaching the outer face; bottom: cell-centred `rho V` at t = 500 s for uniform / x2 /
+x4, with the 2130-2150 km metric window shaded.
+
+`outref_R4_mult025_500s_evolution.mp4` -- 6-panel time evolution (T, V, physical
+`q_par`, rho, p, rho*V vs height) of the latest outer-refined run: x4 upper-TR
+refinement with `ISO_NUMERICAL_DIFFUSIVITY_MULT=0.25`. Only 19 frames, because that
+run used `CHROMO_FRAME_STRIDE=20000`.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/animate_isentropic.py \
+    outputs/model_column/outref_R4_mult025_500s.txt \
+    visualization/model_column/outref_R4_mult025_500s_evolution.mp4 6
+```
+### Face-local numerical-conduction validation (U and R4-local, 500 s)
+
+No new visualization is required for this numerical-method change. The durable
+artifacts are `outputs/model_column/outref_local_{U,R4}_500s.txt` and their
+`.gamma_diag`, `.faceflux`, `.outercond`, and `.console.log` sidecars, plus
+`outputs/model_column/outref_local_report.txt` and `outref_local_metrics.json`.
+
+```bash
+rtk env GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+  ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_NS=1000 \
+  ISO_HYDRO_T_DECOUPLE=1 ISO_REFINE_FACTOR=1 ISO_NUMERICAL_DIFFUSIVITY_MULT=1 \
+  CHROMO_T_END=500 CHROMO_FRAME_STRIDE=5000 \
+  CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=320 CHROMO_FACE_FLUX_STRIDE=1000 \
+  CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=1000 \
+  ./build/chromo_main outputs/model_column/outref_local_U_500s.txt \
+  full no-ionization model_column - 60.0 no-cooling \
+  > outputs/model_column/outref_local_U_500s.console.log 2>&1
+
+rtk env GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+  ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_NS=1000 \
+  ISO_HYDRO_T_DECOUPLE=1 ISO_REFINE_PROFILE=outer ISO_REFINE_FACTOR=4 \
+  ISO_REFINE_S_LO_KM=500 ISO_REFINE_TRANSITION_KM=20 \
+  ISO_NUMERICAL_DIFFUSIVITY_MULT=1 CHROMO_T_END=500 CHROMO_FRAME_STRIDE=20000 \
+  CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=320 CHROMO_FACE_FLUX_STRIDE=4000 \
+  CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=4000 \
+  ./build/chromo_main outputs/model_column/outref_R4_local_500s.txt \
+  full no-ionization model_column - 60.0 no-cooling \
+  > outputs/model_column/outref_R4_local_500s.console.log 2>&1
+
+rtk /opt/miniconda3/bin/python util/outer_refine_diag.py \
+  --run U=outputs/model_column/outref_local_U_500s.txt \
+  --run R4_local=outputs/model_column/outref_R4_local_500s.txt \
+  --time 500 --window 2130 2150 \
+  --report outputs/model_column/outref_local_report.txt \
+  --json outputs/model_column/outref_local_metrics.json
+```
+
+The uniform result exactly reproduces the saved pre-change baseline. R4-local
+uses `chi_num=2.7604e5 m2/s` at the 138 m outer face, gives
+`q_num/q_total=0.2308`, `mean(F_eff)=1.057e-9 kg m-2 s-1`, `A_M=0.02954`, and
+`Q_M=0.00684`, and remains stable through 500 s.
+
+### Higher-resolution R4-local N=2000 convergence check (500 s)
+
+No visualization was generated. Output:
+`outputs/model_column/outref_R4_local_N2000_500s.txt` with `.gamma_diag`,
+`.faceflux`, `.outercond`, and `.console.log` sidecars. The `120.0` positional
+time multiplier only raises the driver step cap; `CHROMO_T_END=500` fixes the
+physical stop time.
+
+```bash
+rtk env GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+  ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_NS=2000 \
+  ISO_HYDRO_T_DECOUPLE=1 ISO_REFINE_PROFILE=outer ISO_REFINE_FACTOR=4 \
+  ISO_REFINE_S_LO_KM=500 ISO_REFINE_TRANSITION_KM=20 \
+  ISO_NUMERICAL_DIFFUSIVITY_MULT=1 CHROMO_T_END=500 CHROMO_FRAME_STRIDE=40000 \
+  CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=640 CHROMO_FACE_FLUX_STRIDE=8000 \
+  CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=8000 \
+  ./build/chromo_main outputs/model_column/outref_R4_local_N2000_500s.txt \
+  full no-ionization model_column - 120.0 no-cooling \
+  > outputs/model_column/outref_R4_local_N2000_500s.console.log 2>&1
+
+rtk /opt/miniconda3/bin/python util/outer_refine_diag.py \
+  --run R4_local_N1000=outputs/model_column/outref_R4_local_500s.txt \
+  --run R4_local_N2000=outputs/model_column/outref_R4_local_N2000_500s.txt \
+  --time 500 --window 2130 2150 \
+  --report outputs/model_column/outref_local_N1000_N2000_report.txt \
+  --json outputs/model_column/outref_local_N1000_N2000_metrics.json
+```
+
+Result: N=2000 produces 2638 cells with 276.45 m coarse and 69.10 m
+outer-fine spacing, completes 712,320 steps, and gives
+`mean(F_eff)=6.1003e-10 kg m-2 s-1`, a 42.3% decrease from N=1000. This is a
+stable but still under-resolved result, not a convergence claim.

@@ -187,14 +187,27 @@ struct MixtureFaceBundle {
 
 using MixtureVec = arma::Col<double>;
 
+// The gamma reconstruction limits exactly THREE variables — log(rho), the
+// mixture velocity and log(T) — but its scratch used to be packed at the
+// num_of_eq-row conserved-state stride, so every difference, ratio, limiter and
+// extrapolation moved 7 rows per cell and discarded 4 of them. All of these
+// operations are element-wise, so shrinking the stride to 3 leaves every
+// surviving element bit-for-bit unchanged while cutting the reconstruction
+// arithmetic and its scratch footprint by 7/3.
+constexpr arma::uword MIX_ROWS = 3;
+
+inline arma::SizeMat mixture_size(const Grid& grid) {
+    return arma::size(grid.ns, MIX_ROWS);
+}
+
 void mixture_stencil_view(const Grid& grid,
                           const DecodedMixtureField& decoded,
                           int offset, MixtureVec& result) {
-    result.zeros(grid.n_state);
+    result.set_size(grid.ns*MIX_ROWS);
     const arma::uword ext_n = grid.ns+4;
     const auto ext_size = arma::size(ext_n, 3);
-    const auto packed_size = arma::size(grid.ns, num_of_eq);
-    for (arma::uword slot = 0; slot < 3; ++slot) {
+    const auto packed_size = mixture_size(grid);
+    for (arma::uword slot = 0; slot < MIX_ROWS; ++slot) {
         for (arma::uword i = 0; i < grid.ns; ++i) {
             const arma::uword ext_i = static_cast<arma::uword>(
                 static_cast<int>(i)+2+offset);
@@ -204,11 +217,74 @@ void mixture_stencil_view(const Grid& grid,
     }
 }
 
+void decode_predicted_caloric_primitives_into(
+    const Grid& grid, const Vec& state, const DecodedMixtureField& previous,
+    DecodedMixtureField& output) {
+    if (state.n_elem != grid.n_state)
+        throw std::invalid_argument("predicted caloric decode state size mismatch");
+    output.cells.clear();
+    const arma::uword ext_n = grid.ns+4;
+    output.extended_primitive.set_size(ext_n*MIX_ROWS);
+    const auto state_size = arma::size(grid.ns, num_of_eq);
+    const auto ext_size = arma::size(ext_n, MIX_ROWS);
+    auto put = [&](arma::uword ext_i, const CaloricMixtureThermo& th,
+                   double momentum) {
+        output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_LOG_RHO)) =
+            std::log(th.rho);
+        output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_V)) =
+            momentum/th.rho;
+        output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_LOG_T)) =
+            std::log(th.T);
+    };
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        auto at = [&](arma::uword row) {
+            return static_cast<double>(state(arma::sub2ind(state_size, i, row)));
+        };
+        const double phi = 0.5*static_cast<double>(
+            grid.phi_g_imh(i)+grid.phi_g_iph(i));
+        const double guess = previous.cells[i].T;
+        const CaloricMixtureThermo th = decode_equilibrium_caloric_mixture(
+            grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
+            at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
+            phi, guess, grid.eos_gamma_debug_clamp);
+        grid.store_eos_temperature_hint(i, th.T);
+        put(i+2, th, at(cons::MOM_I)+at(cons::MOM_N));
+    }
+    if (USE_NEUMANN_BC) {
+        for (arma::uword slot = 0; slot < MIX_ROWS; ++slot) {
+            output.extended_primitive(arma::sub2ind(ext_size,0,slot)) =
+                output.extended_primitive(arma::sub2ind(ext_size,2,slot));
+            output.extended_primitive(arma::sub2ind(ext_size,1,slot)) =
+                output.extended_primitive(arma::sub2ind(ext_size,2,slot));
+            output.extended_primitive(arma::sub2ind(ext_size,grid.ns+2,slot)) =
+                output.extended_primitive(arma::sub2ind(ext_size,grid.ns+1,slot));
+            output.extended_primitive(arma::sub2ind(ext_size,grid.ns+3,slot)) =
+                output.extended_primitive(arma::sub2ind(ext_size,grid.ns+1,slot));
+        }
+    } else {
+        auto decode_ghost = [&](const Vec& ghost, double phi, arma::uword ext_i) {
+            const CaloricMixtureThermo th = decode_equilibrium_caloric_mixture(
+                grid.eos_gamma_table, ghost(cons::RHO_I), ghost(cons::RHO_N),
+                ghost(cons::MOM_I), ghost(cons::MOM_N), ghost(cons::E_I),
+                ghost(cons::E_N), phi, std::numeric_limits<double>::quiet_NaN(),
+                grid.eos_gamma_debug_clamp);
+            put(ext_i, th, static_cast<double>(
+                ghost(cons::MOM_I)+ghost(cons::MOM_N)));
+        };
+        const double phi_inner = grid.phi_g_imh(0);
+        const double phi_outer = grid.phi_g_iph(grid.ns-1);
+        decode_ghost(grid.inner_boundary1_i,phi_inner,0);
+        decode_ghost(grid.inner_boundary0_i,phi_inner,1);
+        decode_ghost(grid.outer_boundary0_i,phi_outer,grid.ns+2);
+        decode_ghost(grid.outer_boundary1_i,phi_outer,grid.ns+3);
+    }
+}
+
 void bcast_mixture(const Grid& grid, const Vec& values, MixtureVec& packed) {
-    packed.zeros(grid.n_state);
-    for (arma::uword k = 0; k < 3; ++k) {
+    packed.set_size(grid.ns*MIX_ROWS);
+    for (arma::uword k = 0; k < MIX_ROWS; ++k) {
         for (arma::uword i = 0; i < grid.ns; ++i)
-            packed(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, k)) = values(i);
+            packed(arma::sub2ind(mixture_size(grid), i, k)) = values(i);
     }
 }
 
@@ -236,16 +312,21 @@ void mixture_mc3(const MixtureVec& ratio, double beta, bool plus,
 
 void build_mixture_face(const Grid& grid, const MixtureVec& mixture,
                         const Vec& phi_face, MixtureFaceBundle out) {
-    out.conserved.zeros(grid.n_state);
-    out.flux.zeros(grid.n_state);
-    out.spectral_radius.zeros(grid.n_state);
+    // Every (i,k) slot of all three outputs is written by the loop below
+    // (sub2ind(size(ns,num_of_eq), i, k) = i + k*ns enumerates n_state exactly),
+    // so sizing without zero-filling is byte-identical and skips three
+    // n_state-length memsets per face bundle.
+    out.conserved.set_size(grid.n_state);
+    out.flux.set_size(grid.n_state);
+    out.spectral_radius.set_size(grid.n_state);
     const auto sz = arma::size(grid.ns, num_of_eq);
+    const auto msz = mixture_size(grid);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const double rho = std::exp(mixture(arma::sub2ind(sz, i, MIX_LOG_RHO)));
-        const double velocity = mixture(arma::sub2ind(sz, i, MIX_V));
-        const double temperature = std::exp(mixture(arma::sub2ind(sz, i, MIX_LOG_T)));
-        const MixtureFaceState face = equilibrium_mixture_face_state(
-            grid.eos_gamma_table, rho, velocity, temperature,
+        const double log_rho = mixture(arma::sub2ind(msz, i, MIX_LOG_RHO));
+        const double velocity = mixture(arma::sub2ind(msz, i, MIX_V));
+        const double log_temperature = mixture(arma::sub2ind(msz, i, MIX_LOG_T));
+        const MixtureFaceState face = equilibrium_mixture_face_state_from_logs(
+            grid.eos_gamma_table, log_rho, velocity, log_temperature,
             static_cast<double>(phi_face(i)), grid.eos_trace_fraction_floor,
             grid.eos_gamma_debug_clamp);
         const ProjectedMixture& u = face.conserved;
@@ -295,10 +376,11 @@ void capture_gamma_face_flux(const Grid& grid, const MixtureVec& w,
     GammaFaceFluxCapture& c = grid.face_flux_capture;
     c.resize(grid.ns);
     const auto sz = arma::size(grid.ns, num_of_eq);
+    const auto msz = mixture_size(grid);
     const bool has_eq = grid.eq_wb && !grid.eq_residual.is_empty();
     for (arma::uword i = 0; i < grid.ns; ++i) {
         auto W = [&](const MixtureVec& v, arma::uword slot) {
-            return v(arma::sub2ind(sz, i, slot));
+            return v(arma::sub2ind(msz, i, slot));
         };
         auto P = [&](const Vec& v, arma::uword row) {
             return static_cast<double>(v(arma::sub2ind(sz, i, row)));
@@ -349,7 +431,6 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
     MixtureVec& w_ip2=m[3]; MixtureVec& w_im2=m[4];
     MixtureVec& dw_iph=m[5]; MixtureVec& dw_imh=m[6];
     MixtureVec& r=m[7]; MixtureVec& r_ip1=m[8]; MixtureVec& r_im1=m[9];
-    MixtureVec& W1=m[10]; MixtureVec& W3=m[11]; MixtureVec& W4=m[12];
     MixtureVec& wr_iph=m[13]; MixtureVec& wl_iph=m[14];
     MixtureVec& wr_imh=m[15]; MixtureVec& wl_imh=m[16];
     MixtureVec& wt=m[17]; MixtureVec& wt_ip1=m[18]; MixtureVec& wt_im1=m[19];
@@ -366,15 +447,32 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
     r=dw_imh/dw_iph;
     r_ip1=dw_iph/(w_ip2-w_ip1);
     r_im1=(w_im1-w_im2)/dw_imh;
+    // Non-uniform reconstruction weights and slope-ratio metrics depend only on
+    // the static mesh, so they are built once per mesh generation rather than
+    // rebuilt (with six packed temporaries) on every timestep.
+    GammaRhsScratch& scratch = grid.gamma_rhs_scratch;
+    const MixtureVec& W1 = scratch.W1;
+    const MixtureVec& W3 = scratch.W3;
+    const MixtureVec& W4 = scratch.W4;
     if (!grid.uniform_mesh) {
-        const Vec w1_i = 0.5f * grid.ds_i / grid.ds_iph_i;
-        bcast_mixture(grid,w1_i,W1);
-        bcast_mixture(grid,ip1(grid,w1_i,SLICE),W3);
-        bcast_mixture(grid,im1(grid,w1_i,SLICE),W4);
-        MixtureVec metric;
-        bcast_mixture(grid,grid.ds_iph_i/grid.ds_imh_i,metric); r%=metric;
-        bcast_mixture(grid,ip1(grid,grid.ds_iph_i,SLICE)/grid.ds_iph_i,metric); r_ip1%=metric;
-        bcast_mixture(grid,grid.ds_imh_i/im1(grid,grid.ds_imh_i,SLICE),metric); r_im1%=metric;
+        if (!scratch.weights_valid
+            || scratch.weights_generation != grid.metrics_generation()
+            || scratch.W1.n_elem != grid.ns*MIX_ROWS) {
+            const Vec w1_i = 0.5f * grid.ds_i / grid.ds_iph_i;
+            bcast_mixture(grid,w1_i,scratch.W1);
+            bcast_mixture(grid,ip1(grid,w1_i,SLICE),scratch.W3);
+            bcast_mixture(grid,im1(grid,w1_i,SLICE),scratch.W4);
+            bcast_mixture(grid,grid.ds_iph_i/grid.ds_imh_i,scratch.metric_r);
+            bcast_mixture(grid,ip1(grid,grid.ds_iph_i,SLICE)/grid.ds_iph_i,
+                          scratch.metric_r_ip1);
+            bcast_mixture(grid,grid.ds_imh_i/im1(grid,grid.ds_imh_i,SLICE),
+                          scratch.metric_r_im1);
+            scratch.weights_generation = grid.metrics_generation();
+            scratch.weights_valid = true;
+        }
+        r%=scratch.metric_r;
+        r_ip1%=scratch.metric_r_ip1;
+        r_im1%=scratch.metric_r_im1;
     }
     r.elem(arma::find_nonfinite(r)).zeros();
     r_ip1.elem(arma::find_nonfinite(r_ip1)).zeros();
@@ -390,16 +488,17 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
     };
     lim_plus(r,lp_r); lim_minus(r,lm_r);
     lim_minus(r_ip1,lm_rip1); lim_plus(r_im1,lp_rim1);
+    // First (predictor) pass. The predictor update below differences ONLY
+    // fl_iph.flux − fr_imh.flux, so the i+½ RIGHT and i−½ LEFT reconstructions
+    // (wr_iph, wl_imh) and their face bundles (fr_iph, fl_imh) are dead work here
+    // — both are recomputed unconditionally by the corrector pass further down.
+    // Building 6 face bundles per step instead of 8 is byte-identical.
     if (grid.uniform_mesh) {
-        wr_iph=w_ip1-0.5*lm_rip1%(w_ip2-w_ip1);
         wl_iph=w+0.5*lp_r%(w_ip1-w);
         wr_imh=w-0.5*lm_r%(w_ip1-w);
-        wl_imh=w_im1+0.5*lp_rim1%(w-w_im1);
     } else {
-        wr_iph=w_ip1-W3%lm_rip1%(w_ip2-w_ip1);
         wl_iph=w+W1%lp_r%(w_ip1-w);
         wr_imh=w-W1%lm_r%(w_ip1-w);
-        wl_imh=w_im1+W4%lp_rim1%(w-w_im1);
     }
 
     auto& p=grid.gamma_rhs_scratch.packed;
@@ -407,18 +506,16 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
     MixtureFaceBundle fl_iph{p[3],p[4],p[5]};
     MixtureFaceBundle fr_imh{p[6],p[7],p[8]};
     MixtureFaceBundle fl_imh{p[9],p[10],p[11]};
-    build_mixture_face(grid,wr_iph,grid.phi_g_iph,fr_iph);
     build_mixture_face(grid,wl_iph,grid.phi_g_iph,fl_iph);
     build_mixture_face(grid,wr_imh,grid.phi_g_imh,fr_imh);
-    build_mixture_face(grid,wl_imh,grid.phi_g_imh,fl_imh);
 
     // Internal MUSCL predictor: update conservatively, then independently invert
     // the caloric EOS. This path intentionally never calls legacy cons2prim.
     Vec& predicted=p[12];
     predicted=xn_state-grid.dt_state/grid.ds_state%(fl_iph.flux-fr_imh.flux);
     DecodedMixtureField& decoded_predicted=grid.gamma_rhs_scratch.predicted;
-    decode_mixture_field_into(
-        grid,predicted,decoded_predicted,decoded.state_generation+1,&decoded);
+    decode_predicted_caloric_primitives_into(
+        grid,predicted,decoded,decoded_predicted);
     mixture_stencil_view(grid,decoded_predicted,0,wt);
     mixture_stencil_view(grid,decoded_predicted,1,wt_ip1);
     mixture_stencil_view(grid,decoded_predicted,-1,wt_im1);
@@ -884,6 +981,17 @@ Vec rhs_implicit_state(const Grid& grid, const Vec& xn_state) {
         Kn_iph  = face_conductivity_series(Kn, Kn_ip1, grid.ds_i, ds_i_ip1);
         Kn_imh  = face_conductivity_series(Kn, Kn_im1, grid.ds_i, ds_i_im1);
     }
+
+    // Same face-local artificial conduction as the production implicit solver:
+    // chi_num,f = C_num*ds_face and K_num,f = chi_num,f*C_V,f. The charged
+    // single-temperature capacity is 3 n_i k_B; the neutral capacity is
+    // 1.5 n_n k_B, both face-averaged with the existing ghost geometry.
+    const Vec chi_iph = numerical_diffusivity_at_face(grid, ds_iph);
+    const Vec chi_imh = numerical_diffusivity_at_face(grid, ds_imh);
+    Kei_iph += (1.5f*grid.k_b)*(n_i+n_i_ip1)%chi_iph;
+    Kei_imh += (1.5f*grid.k_b)*(n_i+n_i_im1)%chi_imh;
+    Kn_iph  += (0.75f*grid.k_b)*(n_n+n_n_ip1)%chi_iph;
+    Kn_imh  += (0.75f*grid.k_b)*(n_n+n_n_im1)%chi_imh;
 
     const Vec q_i_iph = Kei_iph / grid.B_iph % (T_i_ip1 - T_i)     / ds_iph;
     const Vec q_i_imh = Kei_imh / grid.B_imh % (T_i     - T_i_im1) / ds_imh;

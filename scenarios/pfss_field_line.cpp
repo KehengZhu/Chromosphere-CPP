@@ -107,8 +107,8 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
         grid.enable_ionization        = true;
         grid.enable_radiative_cooling = true;
 
-        const float ds_mean = arma::mean(grid.ds_i);
-        grid.numerical_diffusivity = 2.0e3f * ds_mean * env_f("FLARE_DIFF_MULT", 1.0f);
+        grid.numerical_diffusivity_per_length =
+            2.0e3f * env_f("FLARE_DIFF_MULT", 1.0f);
         grid.enable_trac  = true;
         grid.trac_T_chrom = 2.0e4f;
         {   // RTV F_c = (2/7) κ₀ T_cor^{7/2} / L (quiet-Sun defaults, as model_c7_ic).
@@ -167,8 +167,8 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
         // GENTLE; GENTLE_WELL_BALANCED=0 reverts to the old reconstruction.
         grid.well_balanced = (env_f("GENTLE_WELL_BALANCED", 1.0f) != 0.0f);
 
-        const float ds_mean = arma::mean(grid.ds_i);
-        grid.numerical_diffusivity = 2.0e3f * ds_mean * env_f("GENTLE_DIFF_MULT", 1.0f);
+        grid.numerical_diffusivity_per_length =
+            2.0e3f * env_f("GENTLE_DIFF_MULT", 1.0f);
         grid.enable_trac  = true;
         grid.trac_T_chrom = 2.0e4f;
 

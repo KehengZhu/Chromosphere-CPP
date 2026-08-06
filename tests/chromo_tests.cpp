@@ -33,6 +33,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -272,6 +273,133 @@ static std::string write_gamma_table_fixture(const std::string& name,
         }
     }
     return path;
+}
+
+// Algebraic Saha pressure inversion (equilibrium_density_from_pressure) against
+// the geometric-bisection solve it replaced, over the whole production domain:
+// the full table density axis (10^12..10^26 m^-3) crossed with 3.2e3..1e7 K,
+// i.e. from the fully-neutral photosphere to the fully-ionized corona.
+// Grid::broadcast() now fingerprints the static mesh / magnetic geometry and
+// skips the rebuild when neither changed, and fills the packed caches directly
+// instead of accumulating num_of_eq scalar_to temporaries. Both properties are
+// checked here: the packed caches must equal the accumulated construction
+// EXACTLY, and any edit to a source array must still be picked up.
+static void test_broadcast_static_metric_cache() {
+    Grid grid;
+    grid.init(9, 0.25f);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        grid.ds_i(i)       = 4.0e3f*(1.0f + 0.17f*i);      // non-uniform
+        grid.B_i(i)        = 1.0f + 0.3f*i;
+        grid.B_imh(i)      = 1.0f + 0.3f*i - 0.05f;
+        grid.B_iph(i)      = 1.0f + 0.3f*i + 0.05f;
+        grid.dinvB_ds_i(i) = (1.0f/grid.B_iph(i) - 1.0f/grid.B_imh(i))/grid.ds_i(i);
+    }
+    grid.broadcast();
+
+    // Reference construction: the accumulate-scalar_to form broadcast() used to
+    // run. Must agree bit-for-bit with the direct fill.
+    auto reference = [&](const Vec& src) {
+        Vec dst(grid.n_state, arma::fill::zeros);
+        for (arma::uword k = 0; k < num_of_eq; ++k) dst += scalar_to(grid, src, k);
+        return dst;
+    };
+    auto bitwise_equal = [&](const Vec& a, const Vec& b) {
+        if (a.n_elem != b.n_elem) return false;
+        for (arma::uword i = 0; i < a.n_elem; ++i)
+            if (!(a[i] == b[i])) return false;
+        return true;
+    };
+    EXPECT_TRUE(bitwise_equal(grid.B_state,        reference(grid.B_i)));
+    EXPECT_TRUE(bitwise_equal(grid.B_state_imh,    reference(grid.B_imh)));
+    EXPECT_TRUE(bitwise_equal(grid.B_state_iph,    reference(grid.B_iph)));
+    EXPECT_TRUE(bitwise_equal(grid.ds_state,       reference(grid.ds_i)));
+    EXPECT_TRUE(bitwise_equal(grid.dinvB_ds_state, reference(grid.dinvB_ds_i)));
+    EXPECT_TRUE(bitwise_equal(grid.ds_iph_state,   reference(grid.ds_iph_i)));
+    EXPECT_TRUE(bitwise_equal(grid.ds_imh_state,   reference(grid.ds_imh_i)));
+    EXPECT_TRUE(grid.uniform_mesh == false);
+
+    // A no-op broadcast (what a per-step boundary refresh performs) must not
+    // change anything, and must not bump the mesh generation.
+    const std::uint64_t generation = grid.metrics_generation();
+    const Vec ds_state_before = grid.ds_state;
+    const Vec s_face_before   = grid.s_face;
+    grid.broadcast();
+    grid.broadcast();
+    EXPECT_TRUE(grid.metrics_generation() == generation);
+    EXPECT_TRUE(bitwise_equal(grid.ds_state, ds_state_before));
+    EXPECT_TRUE(bitwise_equal(grid.s_face,   s_face_before));
+
+    // A geometry edit must be picked up.
+    grid.ds_i(3) *= 1.5f;
+    grid.broadcast();
+    EXPECT_TRUE(grid.metrics_generation() == generation + 1);
+    EXPECT_TRUE(bitwise_equal(grid.ds_state, reference(grid.ds_i)));
+    EXPECT_TRUE(bitwise_equal(grid.ds_iph_state, reference(grid.ds_iph_i)));
+    EXPECT_REL(grid.s_face(grid.ns), arma::sum(grid.ds_i), 1e-6);
+
+    grid.B_iph(2) *= 1.1f;
+    grid.broadcast();
+    EXPECT_TRUE(bitwise_equal(grid.B_state_iph, reference(grid.B_iph)));
+
+    // A uniform mesh must still be detected, and resize must invalidate.
+    grid.ds_i.fill(2.0e3f);
+    grid.broadcast();
+    EXPECT_TRUE(grid.uniform_mesh == true);
+    grid.resize(5);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        grid.ds_i(i) = 1.0e3f; grid.B_i(i) = 1.0f;
+        grid.B_imh(i) = 1.0f;  grid.B_iph(i) = 1.0f;
+    }
+    grid.broadcast();
+    EXPECT_TRUE(grid.B_state.n_elem == grid.n_state);
+    EXPECT_TRUE(bitwise_equal(grid.ds_state, reference(grid.ds_i)));
+}
+
+static void test_equilibrium_density_from_pressure_matches_bisection() {
+    auto pressure_at = [](double n_h, double t) {
+        return (1.0 + saha_ionization_fraction_n_h(n_h, t))
+             * n_h * eos_constants::k_b * t;
+    };
+    // The former implementation: 100 geometric bisections on the table n_H axis.
+    auto bisect_rho = [&](double pressure, double t) {
+        double lo = 1.0e12, hi = 1.0e26;
+        for (int it = 0; it < 100; ++it) {
+            const double mid = std::sqrt(lo*hi);
+            if (pressure_at(mid, t) < pressure) lo = mid; else hi = mid;
+        }
+        return std::sqrt(lo*hi)*eos_constants::m_h;
+    };
+
+    double worst_rho_rel = 0.0, worst_p_rel = 0.0;
+    for (int it = 0; it <= 24; ++it) {
+        const double t = std::pow(10.0, 3.5 + 3.5*it/24.0);        // 3162 K .. 1e7 K
+        for (int in = 0; in <= 28; ++in) {
+            const double n_h = std::pow(10.0, 12.0 + 14.0*in/28.0); // 1e12 .. 1e26
+            const double p = pressure_at(n_h, t);
+            const double rho = equilibrium_density_from_pressure(p, t);
+            // (a) recovers the density the pressure was built from
+            worst_rho_rel = std::max(worst_rho_rel,
+                std::abs(rho - n_h*eos_constants::m_h)/(n_h*eos_constants::m_h));
+            // (b) agrees with the bisection it replaced
+            EXPECT_REL(rho, bisect_rho(p, t), 1e-12);
+            // (c) reconstructs the requested pressure to near-double precision
+            const double p_back = pressure_at(rho/eos_constants::m_h, t);
+            worst_p_rel = std::max(worst_p_rel, std::abs(p_back - p)/p);
+        }
+    }
+    EXPECT_TRUE(worst_rho_rel < 1e-12);
+    EXPECT_TRUE(worst_p_rel  < 1e-13);
+    // Deep limits: fully neutral (y >> S) and fully ionized (y << S) must not
+    // overflow the exponential in either branch.
+    EXPECT_REL(equilibrium_density_from_pressure(pressure_at(1.0e26, 3200.0), 3200.0),
+               1.0e26*eos_constants::m_h, 1e-12);
+    EXPECT_REL(equilibrium_density_from_pressure(pressure_at(1.0e12, 1.0e7), 1.0e7),
+               1.0e12*eos_constants::m_h, 1e-12);
+    EXPECT_TRUE(throws_any([] { equilibrium_density_from_pressure(0.0, 1.0e4); }));
+    EXPECT_TRUE(throws_any([] { equilibrium_density_from_pressure(1.0, -1.0); }));
+    EXPECT_TRUE(throws_any([] {
+        equilibrium_density_from_pressure(
+            std::numeric_limits<double>::quiet_NaN(), 1.0e4); }));
 }
 
 static void test_eos_gamma_table_loader_and_interpolation() {
@@ -731,6 +859,183 @@ static std::string production_gamma_table_path() {
         if (input.good()) return candidate;
     }
     throw std::runtime_error("production Gamma1 table not found from test working directory");
+}
+
+static void test_final_serial_log_aware_eos_and_gamma1_contracts() {
+    const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
+    const std::vector<std::pair<double,double>> states = {
+        {3.5e3, 8.0e25},      // mostly neutral chromosphere
+        {8.0e3, 1.0e20},      // partial-ionization transition
+        {1.0e6, 1.0e15},      // mostly ionized corona
+        {1.01*table.min_temperature(), 1.01*table.min_n_h()},
+        {0.99*table.max_temperature(), 0.99*table.max_n_h()}
+    };
+    for (const auto& state : states) {
+        const double temperature = state.first;
+        const double n_h = state.second;
+        const double rho = n_h*eos_constants::m_h;
+        const CaloricState normal = equilibrium_caloric_state(rho, temperature);
+        const CaloricState log_aware = equilibrium_caloric_state_from_logs(
+            rho, temperature, std::log(temperature), std::log(n_h));
+        EXPECT_NEAR(log_aware.n_h, normal.n_h, 0.0);
+        EXPECT_NEAR(log_aware.x, normal.x, 0.0);
+        EXPECT_NEAR(log_aware.n_e, normal.n_e, 0.0);
+        EXPECT_NEAR(log_aware.n_hi, normal.n_hi, 0.0);
+        EXPECT_NEAR(log_aware.pressure, normal.pressure, 0.0);
+        EXPECT_NEAR(log_aware.internal_energy, normal.internal_energy, 0.0);
+        EXPECT_NEAR(log_aware.heat_capacity, normal.heat_capacity, 0.0);
+
+        const double gamma_normal = table.gamma1(temperature, n_h);
+        const double gamma_log = table.gamma1_from_logs(
+            temperature, n_h, std::log(temperature), std::log(n_h));
+        EXPECT_NEAR(gamma_log, gamma_normal, 0.0);
+
+        const MixtureFaceState face_normal = equilibrium_mixture_face_state(
+            table, rho, 123.0, temperature, 2.0e6, 1.0e-8);
+        const MixtureFaceState face_log = equilibrium_mixture_face_state_from_logs(
+            table, std::log(rho), 123.0, std::log(temperature), 2.0e6, 1.0e-8);
+        // Exact equality was attempted first. The physical face API receives
+        // rho,T directly, whereas the MUSCL API necessarily reconstructs them
+        // through exp(log(rho)),exp(log(T)); that round trip differs by up to a
+        // few ULPs. Use a tight floating-point-equivalence bound here. The
+        // neutral-energy row is a conservative remainder and therefore uses an
+        // absolute tolerance scaled by the total carried energy.
+        EXPECT_REL(face_log.primitive.rho, face_normal.primitive.rho, 5e-14);
+        EXPECT_NEAR(face_log.primitive.velocity, face_normal.primitive.velocity, 0.0);
+        EXPECT_REL(face_log.primitive.temperature,
+                   face_normal.primitive.temperature, 5e-14);
+        EXPECT_REL(face_log.conserved.rho_i, face_normal.conserved.rho_i, 5e-14);
+        EXPECT_REL(face_log.conserved.rho_n, face_normal.conserved.rho_n, 5e-14);
+        EXPECT_REL(face_log.conserved.momentum_i,
+                   face_normal.conserved.momentum_i, 5e-14);
+        EXPECT_REL(face_log.conserved.momentum_n,
+                   face_normal.conserved.momentum_n, 5e-14);
+        EXPECT_REL(face_log.conserved.energy_i,
+                   face_normal.conserved.energy_i, 5e-14);
+        const double energy_scale = std::max(
+            1.0, std::abs(face_normal.conserved.energy_i)
+               + std::abs(face_normal.conserved.energy_n));
+        EXPECT_NEAR(face_log.conserved.energy_n,
+                    face_normal.conserved.energy_n,
+                    32.0*std::numeric_limits<double>::epsilon()*energy_scale);
+        EXPECT_REL(face_log.conserved.energy_e,
+                   face_normal.conserved.energy_e, 5e-14);
+        EXPECT_NEAR(face_log.conserved.thermo.gamma1,
+                    face_normal.conserved.thermo.gamma1, 0.0);
+        EXPECT_REL(face_log.p_total, face_normal.p_total, 5e-14);
+        EXPECT_REL(face_log.sound_speed, face_normal.sound_speed, 5e-14);
+
+        const double inverted = temperature_from_rho_eint(
+            table, rho, normal.internal_energy, temperature*1.000001);
+        EXPECT_REL(inverted, temperature, 2e-12);
+    }
+
+    const double n_h = 1.0e18;
+    const double rho = n_h*eos_constants::m_h;
+    const double temperature = 1.0e4;
+    const double x = saha_ionization_fraction_n_h(n_h, temperature);
+    const double x_row = 0.3;
+    const double rho_i = x_row*rho;
+    const double rho_n = (1.0-x_row)*rho;
+    const double velocity_i = 120.0;
+    const double velocity_n = -45.0;
+    const double momentum_i = rho_i*velocity_i;
+    const double momentum_n = rho_n*velocity_n;
+    const double phi = 2.5e6;
+    const double p_e = x*n_h*eos_constants::k_b*temperature;
+    const double p_i = 2.0*p_e;
+    const double p_n = (1.0-x)*n_h*eos_constants::k_b*temperature;
+    const double energy_i = 1.5*p_i+x*n_h*eos_constants::chi_h
+                          +0.5*rho_i*velocity_i*velocity_i+rho_i*phi;
+    const double energy_n = 1.5*p_n
+                          +0.5*rho_n*velocity_n*velocity_n+rho_n*phi;
+
+    set_eos_operation_counting(true);
+    reset_eos_operation_counts();
+    const CaloricMixtureThermo caloric = decode_equilibrium_caloric_mixture(
+        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n, phi);
+    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 0);
+    reset_eos_operation_counts();
+    const MixtureThermo full = decode_equilibrium_mixture(
+        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n, phi);
+    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 1);
+    EXPECT_NEAR(caloric.T, full.T, 0.0);
+    EXPECT_NEAR(caloric.internal_energy, full.internal_energy, 0.0);
+
+    reset_eos_operation_counts();
+    const ProjectedMixtureRows rows = project_equilibrium_rows(
+        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n,
+        phi, 1.0e-8);
+    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 0);
+    reset_eos_operation_counts();
+    const ProjectedMixture projected = project_equilibrium_single_fluid(
+        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n,
+        phi, 1.0e-8);
+    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 1);
+    EXPECT_NEAR(rows.rho_i, projected.rho_i, 0.0);
+    EXPECT_NEAR(rows.rho_n, projected.rho_n, 0.0);
+    EXPECT_NEAR(rows.momentum_i, projected.momentum_i, 0.0);
+    EXPECT_NEAR(rows.momentum_n, projected.momentum_n, 0.0);
+    EXPECT_NEAR(rows.energy_i, projected.energy_i, 0.0);
+    EXPECT_NEAR(rows.energy_n, projected.energy_n, 0.0);
+    EXPECT_NEAR(rows.energy_e, projected.energy_e, 0.0);
+
+    const double total_momentum = momentum_i+momentum_n;
+    const double total_energy = energy_i+energy_n;
+    reset_eos_operation_counts();
+    const ProjectedMixtureRows packed_rows =
+        pack_equilibrium_rows_from_known_temperature(
+            table, rho, total_momentum, total_energy, projected.thermo.T,
+            phi, 1.0e-8, 4.0e-11);
+    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 0);
+    reset_eos_operation_counts();
+    const ProjectedMixture packed = pack_equilibrium_from_known_temperature(
+        table, rho, total_momentum, total_energy, projected.thermo.T,
+        phi, 1.0e-8, 4.0e-11);
+    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 1);
+    EXPECT_NEAR(packed_rows.energy_i, packed.energy_i, 0.0);
+    EXPECT_NEAR(packed_rows.energy_n, packed.energy_n, 0.0);
+    EXPECT_NEAR(packed_rows.energy_e, packed.energy_e, 0.0);
+
+    Grid grid;
+    const Vec rhs_state = setup_gamma_equilibrium(grid, table, 8, true);
+    DecodedMixtureField decoded;
+    decode_mixture_field_into(grid, rhs_state, decoded, 1, nullptr);
+    reset_eos_operation_counts();
+    const Vec rhs = rhs_explicit_state(grid, rhs_state, decoded);
+    EXPECT_TRUE(rhs.n_elem == grid.n_state);
+    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 6*grid.ns);
+    set_eos_operation_counting(false);
+}
+
+static void test_final_serial_one_update_and_fallback_regression() {
+    const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
+    const double rho = 1.0e20*eos_constants::m_h;
+    const double target_temperature = 8.0e3;
+    const double target_energy = equilibrium_internal_energy(rho, target_temperature);
+
+    set_runtime_profiling(true);
+    reset_runtime_profile();
+    const double one_update = temperature_from_rho_eint(
+        table, rho, target_energy, target_temperature*(1.0-1.0e-9));
+    const EosInversionProfile fast = eos_inversion_profile();
+    EXPECT_TRUE(fast.calls == 1);
+    EXPECT_TRUE(fast.initial_guess_accepts == 0);
+    EXPECT_TRUE(fast.one_update_convergences == 1);
+    EXPECT_TRUE(fast.bracket_evaluations == 0);
+    EXPECT_REL(one_update, target_temperature, 2e-12);
+
+    reset_runtime_profile();
+    const double fallback = temperature_from_rho_eint(
+        table, rho, target_energy, 0.8*table.max_temperature());
+    const EosInversionProfile slow = eos_inversion_profile();
+    EXPECT_TRUE(slow.calls == 1);
+    EXPECT_TRUE(slow.bracket_evaluations >= 2);
+    EXPECT_TRUE(slow.one_update_convergences == 0);
+    EXPECT_REL(fallback, target_temperature, 2e-12);
+    EXPECT_REL(fallback, one_update, 2e-12);
+    set_runtime_profiling(false);
+    reset_runtime_profile();
 }
 
 static Vec setup_gamma_uniform_point(Grid& grid, const EosGammaTable& table,
@@ -1201,6 +1506,8 @@ static void test_stage7_gamma_total_energy_sources_and_conduction() {
     grid.inner_conduction_neumann = true;
     grid.impose_outer_heat_flux = true;
     grid.outer_heat_flux = 0.0f;
+    // Exercise the face-local numerical term, not only physical conduction.
+    grid.numerical_diffusivity_per_length = 2.0e3f;
     grid.broadcast();
     dt.fill(1.0e-4f);
     const double conduction_e0 = weighted_domain_energy(grid, state);
@@ -1762,6 +2069,93 @@ static void test_face_flux_capture_matches_production_continuity() {
     rhs_explicit_state(grid, state);
     grid.capture_face_flux = false;
     EXPECT_TRUE(std::abs(c.f_total[ns-1] - before) > 0.0);
+
+    clear_decoupling_env();
+}
+
+// Grid::capture_outer_conduction must (a) never change a number and (b) report the
+// outer-face quantities the conduction solve actually used: the physical face
+// conductivity as the ARITHMETIC face average of the top cell and the wall ghost
+// (the ghost's kappa evaluated at the WALL temperature with the wall's Saha
+// ionization), plus C_num*ds_iph*C_V(top) — over ds_iph_i(ns-1), which is
+// the full cell width (top-cell CENTRE to ghost CENTRE), not half of it.
+static void test_outer_conduction_capture_matches_solver_face() {
+    const arma::uword ns = 200;
+    Grid grid;
+    Vec state = setup_decoupling_column(grid, true, ns);
+    model_column_update_bc(grid, state);
+    EXPECT_TRUE(grid.enable_conduction);
+    EXPECT_TRUE(!grid.impose_outer_heat_flux);
+    EXPECT_TRUE(grid.numerical_diffusivity_per_length > 0.0f);
+    const Vec dt = cal_dt_i(grid, state);
+    const DecodedMixtureField decoded = decode_mixture_field(grid, state, 1);
+
+    // (a) flag off vs on: the advanced state must be bit-for-bit identical.
+    EXPECT_TRUE(!grid.capture_outer_conduction);
+    const Vec after_off = advance_Euler_state(grid, state, dt, decoded);
+    grid.capture_outer_conduction = true;
+    const Vec after_on = advance_Euler_state(grid, state, dt, decoded);
+    grid.capture_outer_conduction = false;
+    EXPECT_TRUE(arma::approx_equal(after_on, after_off, "absdiff", 0.0));
+
+    const OuterConductionCapture& oc = grid.outer_conduction_capture;
+    EXPECT_TRUE(oc.valid);
+    EXPECT_TRUE(!oc.imposed_neumann);
+
+    // (b) the formula, rebuilt from independent pieces.
+    EXPECT_REL(oc.T_wall, grid.outer_conduction_temperature, 1e-12);
+    EXPECT_REL(oc.ds_face, grid.ds_iph_i(ns-1), 1e-12);
+    EXPECT_REL(oc.ds_face, grid.ds_i(ns-1), 1e-12);       // uniform mesh, Neumann ghost
+    EXPECT_REL(oc.area_ratio, 1.0, 1e-12);                // straight column, B ≡ 1
+
+    // Wall-side kappa: the ghost DENSITY with Saha re-evaluated at T_wall.
+    const MixtureThermo ghost = decode_outer_ghost(grid, grid.outer_boundary0_i);
+    const double x_wall = saha_ionization_fraction_n_h(ghost.n_H, oc.T_wall);
+    const double k_wall = physical_conductivity(
+        x_wall*ghost.n_H, (1.0-x_wall)*ghost.n_H, oc.T_wall);
+    // Top-cell kappa at the CONVERGED temperature the capture reports.
+    const double n_h_top = oc.T_top > 0.0
+        ? decode_cell(grid, after_off, ns-1).rho/eos_constants::m_h : 0.0;
+    const double x_top = saha_ionization_fraction_n_h(n_h_top, oc.T_top);
+    const double k_top = physical_conductivity(
+        x_top*n_h_top, (1.0-x_top)*n_h_top, oc.T_top);
+    EXPECT_REL(oc.kappa_phys_face, 0.5*(k_top+k_wall), 1e-6);
+    EXPECT_REL(oc.kappa_num_face,
+        numerical_diffusivity_at_face(grid, oc.ds_face)
+            *equilibrium_heat_capacity(decode_cell(grid, after_off, ns-1).rho, oc.T_top),
+        1e-6);
+    EXPECT_REL(oc.chi_num_face,
+        numerical_diffusivity_at_face(grid, grid.ds_iph_i(ns-1)), 1e-12);
+    EXPECT_REL(oc.q_phys,
+        oc.kappa_phys_face*(oc.T_wall-oc.T_top)/oc.ds_face, 1e-12);
+    EXPECT_REL(oc.q_num, oc.kappa_num_face*(oc.T_wall-oc.T_top)/oc.ds_face, 1e-12);
+    EXPECT_REL(oc.q_total, oc.q_phys+oc.q_num, 1e-12);
+    // The wall is hotter than the top cell here, so the flux heats the top cell.
+    EXPECT_TRUE(oc.q_total > 0.0);
+    // Numerical conduction is NOT a small correction at this resolution.
+    EXPECT_TRUE(oc.q_num > 0.2*oc.q_total);
+
+    // ISO_NUMERICAL_DIFFUSIVITY_MULT=0 must zero the numerical term ONLY.
+    const double k_phys_before = oc.kappa_phys_face;
+    setenv("ISO_NUMERICAL_DIFFUSIVITY_MULT", "0", 1);
+    Grid g0;
+    Vec s0 = setup_decoupling_column(g0, true, ns);
+    model_column_update_bc(g0, s0);
+    EXPECT_REL(g0.numerical_diffusivity_per_length, 0.0f, 0.0);
+    EXPECT_TRUE(g0.enable_conduction);
+    g0.capture_outer_conduction = true;
+    advance_Euler_state(g0, s0, cal_dt_i(g0, s0), decode_mixture_field(g0, s0, 1));
+    g0.capture_outer_conduction = false;
+    EXPECT_REL(g0.outer_conduction_capture.q_num, 0.0, 0.0);
+    EXPECT_REL(g0.outer_conduction_capture.q_total,
+               g0.outer_conduction_capture.q_phys, 1e-12);
+    // Same IC, same wall ⇒ the physical face conductivity is essentially unchanged.
+    // Not exactly: one step already reaches a slightly different converged T_top
+    // without the numerical term, and kappa_e ~ T^{5/2} amplifies that. A few tenths
+    // of a percent is the expected size; a factor-level change would mean the
+    // override had leaked into the physical conductivity.
+    EXPECT_REL(g0.outer_conduction_capture.kappa_phys_face, k_phys_before, 2e-2);
+    unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
 
     clear_decoupling_env();
 }
@@ -3143,22 +3537,22 @@ static void test_physical_conductivity_excludes_solver_terms() {
     const double physical = physical_conductivity(n_e, n_hi, temperature);
 
     grid.enable_trac = false;
-    grid.numerical_diffusivity = 0.0f;
+    grid.numerical_diffusivity_per_length = 0.0f;
     EXPECT_REL(solver_effective_conductivity(
-        grid, n_e, n_hi, temperature, heat_capacity), physical, 1e-14);
+        grid, n_e, n_hi, temperature, heat_capacity, 1.0e4), physical, 1e-14);
 
-    grid.numerical_diffusivity = 1.0e8f;
+    grid.numerical_diffusivity_per_length = 1.0e4f;
     EXPECT_REL(physical_conductivity(n_e, n_hi, temperature), physical, 1e-14);
     EXPECT_TRUE(solver_effective_conductivity(
-        grid, n_e, n_hi, temperature, heat_capacity) > physical);
+        grid, n_e, n_hi, temperature, heat_capacity, 1.0e4) > physical);
 
-    grid.numerical_diffusivity = 0.0f;
+    grid.numerical_diffusivity_per_length = 0.0f;
     grid.enable_trac = true;
     grid.trac_T_chrom = 2.0e4f;
     grid.trac_cutoff_T = 1.0e5f;
     EXPECT_REL(physical_conductivity(n_e, n_hi, temperature), physical, 1e-14);
     EXPECT_TRUE(solver_effective_conductivity(
-        grid, n_e, n_hi, temperature, heat_capacity) > physical);
+        grid, n_e, n_hi, temperature, heat_capacity, 1.0e4) > physical);
 }
 
 // TRAC adaptive cutoff: returns the floor for a resolved profile, rises above it
@@ -3403,12 +3797,19 @@ static void test_mesh_refined_diagnostic_profile() {
     EXPECT_NEAR(f.front(), 0.0, 1.0e-9);
     EXPECT_NEAR(f.back(),  L,   1.0e-6);
 
-    // Exact 700 km and 800 km faces exist.
-    double d700 = 1.0e30, d800 = 1.0e30;
-    for (double x : f) { d700 = std::min(d700, std::fabs(x - 700.0e3));
-                         d800 = std::min(d800, std::fabs(x - 800.0e3)); }
+    // Exact 700 km face (the fine-region top). The transition top is set by the
+    // grade, so it is the smallest valid width ≥ the requested 100 km: the coarse
+    // spacing must have resumed just above 800 km.
+    double d700 = 1.0e30;
+    for (double x : f) d700 = std::min(d700, std::fabs(x - 700.0e3));
     EXPECT_NEAR(d700, 0.0, 1.0e-3);
-    EXPECT_NEAR(d800, 0.0, 1.0e-3);
+    double coarse_resumes = 1.0e30;
+    for (arma::uword i = 0; i + 1 < f.size(); ++i)
+        if (f[i] > 700.0e3 && f[i + 1] - f[i] > 0.999 * coarse_ds) {
+            coarse_resumes = f[i]; break;
+        }
+    EXPECT_TRUE(coarse_resumes >= 800.0e3);
+    EXPECT_TRUE(coarse_resumes <= 805.0e3);
 
     // Strictly positive widths; adjacent ratio ≤ 1.1 everywhere.
     double max_ratio = 1.0;
@@ -3433,6 +3834,92 @@ static void test_mesh_refined_diagnostic_profile() {
     EXPECT_REL(outer_w, coarse_ds, 0.02);
 }
 
+static void test_mesh_outer_refined_profile() {
+    // Outer/TR profile: coarse [0,480] → grade [480,500] → fine [500,553] to the
+    // outer face, on the 1600–2153 km truncated domain (L = 553 km, ns_coarse = 1000).
+    RefineParams rp;
+    rp.profile = RefineProfile::Outer;
+    rp.factor = 4.0; rp.s_lo_km = 500.0; rp.transition_km = 20.0;
+    rp.s_hi_km = 1.0e9;                       // unused by the outer profile
+    const double L = 553.0e3;
+    const arma::uword nc = 1000;
+    const std::vector<double> f = build_static_mesh_faces(L, nc, rp);
+    const double coarse_ds = L / static_cast<double>(nc);
+
+    // (1,2) exact domain endpoints; (3) the requested fine-region foot s_lo is an
+    // exact face, and the transition below it is the smallest valid grade at least
+    // the requested 20 km wide (so its foot sits just below 480 km).
+    EXPECT_NEAR(f.front(), 0.0, 1.0e-9);
+    EXPECT_NEAR(f.back(),  L,   1.0e-6);
+    double d500 = 1.0e30;
+    for (double x : f) d500 = std::min(d500, std::fabs(x - 500.0e3));
+    EXPECT_NEAR(d500, 0.0, 1.0e-3);
+    double grade_foot = 1.0e30;
+    for (arma::uword i = 0; i + 1 < f.size(); ++i)
+        if (f[i + 1] - f[i] < 0.999 * coarse_ds) { grade_foot = f[i]; break; }
+    EXPECT_TRUE(grade_foot <= 480.0e3);          // ≥ the requested 20 km transition
+    EXPECT_TRUE(grade_foot >= 475.0e3);          // and not wastefully wider
+
+    // (2,3,4) strictly increasing faces, positive widths, adjacent ratio ≤ 1.1.
+    double max_ratio = 1.0;
+    bool increasing = true, all_pos = true;
+    for (arma::uword i = 0; i + 1 < f.size(); ++i) {
+        const double w = f[i + 1] - f[i];
+        if (!(f[i + 1] > f[i])) increasing = false;
+        if (!(w > 0.0) || !std::isfinite(w)) all_pos = false;
+        if (i > 0) {
+            const double wp = f[i] - f[i - 1];
+            max_ratio = std::max(max_ratio, std::max(w / wp, wp / w));
+        }
+    }
+    EXPECT_TRUE(increasing);
+    EXPECT_TRUE(all_pos);
+    EXPECT_TRUE(max_ratio <= 1.1 + 1.0e-6);
+
+    // (5,6) the fine spacing is ≈ coarse/4 and the LAST cells stay fine right
+    // through the outer boundary; (7) the coarse lower region keeps coarse_ds.
+    const double outer_w = f.back() - f[f.size() - 2];
+    EXPECT_REL(outer_w, coarse_ds / 4.0, 0.02);
+    EXPECT_REL(f[1] - f[0], coarse_ds, 0.02);
+    for (arma::uword i = 0; i + 1 < f.size(); ++i)     // every cell above s_lo is fine
+        if (f[i] >= 500.0e3 - 1.0e-6)
+            EXPECT_REL(f[i + 1] - f[i], coarse_ds / 4.0, 0.02);
+    // (8) refinement ADDS cells; the domain below the transition is not coarsened.
+    EXPECT_TRUE(f.size() - 1 > nc);
+}
+
+static void test_mesh_outer_profile_edge_cases() {
+    // The graded transition must fit strictly inside the domain below s_lo, and s_lo
+    // must be inside the domain — otherwise the builder returns the exact uniform grid.
+    const double L = 553.0e3;
+    const arma::uword nc = 100;                   // coarse Δs = 5.53 km ⇒ a wide grade
+    const double ds = L / static_cast<double>(nc);
+    auto is_uniform = [&](const RefineParams& rp) {
+        const std::vector<double> f = build_static_mesh_faces(L, nc, rp);
+        if (f.size() != nc + 1) return false;
+        for (arma::uword k = 0; k <= nc; ++k)
+            if (std::fabs(f[k] - ds * static_cast<double>(k)) > 1.0e-3) return false;
+        return true;
+    };
+    RefineParams rp; rp.profile = RefineProfile::Outer; rp.factor = 4.0;
+    rp.s_lo_km = 20.0; rp.transition_km = 20.0;   // grade does not fit below s_lo
+    EXPECT_TRUE(is_uniform(rp));
+    rp.s_lo_km = 600.0;                           // s_lo above the domain top
+    EXPECT_TRUE(is_uniform(rp));
+
+    // A transition width the ratio cap cannot support is WIDENED to the smallest one
+    // it can (never an abrupt coarse→fine jump), so even τ = 0 stays graded.
+    rp.s_lo_km = 400.0; rp.transition_km = 0.0;
+    const std::vector<double> f = build_static_mesh_faces(L, nc, rp);
+    EXPECT_TRUE(f.size() - 1 > nc);
+    double max_ratio = 1.0;
+    for (arma::uword i = 1; i + 1 < f.size(); ++i) {
+        const double w = f[i + 1] - f[i], wp = f[i] - f[i - 1];
+        max_ratio = std::max(max_ratio, std::max(w / wp, wp / w));
+    }
+    EXPECT_TRUE(max_ratio <= 1.1 + 1.0e-6);
+}
+
 static void test_refine_params_env_aliases() {
     // ISO_REFINE_* override GRID_REFINE_*; both parsed. Restore env after.
     setenv("GRID_REFINE_FACTOR", "2", 1);
@@ -3444,7 +3931,13 @@ static void test_refine_params_env_aliases() {
     RefineParams a = refine_params_from_env(/*iso_alias=*/true);
     EXPECT_NEAR(a.factor, 4.0, 1e-9);       // ISO_ override
     EXPECT_NEAR(a.s_hi_km, 500.0, 1e-9);    // falls through to GRID_
+    EXPECT_TRUE(a.profile == RefineProfile::Lower);   // default profile
+    setenv("GRID_REFINE_PROFILE", "outer", 1);
+    EXPECT_TRUE(refine_params_from_env(false).profile == RefineProfile::Outer);
+    setenv("ISO_REFINE_PROFILE", "lower", 1);        // ISO_ overrides GRID_
+    EXPECT_TRUE(refine_params_from_env(true).profile == RefineProfile::Lower);
     unsetenv("GRID_REFINE_FACTOR"); unsetenv("GRID_REFINE_S_HI_KM"); unsetenv("ISO_REFINE_FACTOR");
+    unsetenv("GRID_REFINE_PROFILE"); unsetenv("ISO_REFINE_PROFILE");
 }
 
 // =========================================================================
@@ -3514,6 +4007,50 @@ static void test_metric_caches_center_to_center() {
         s += ds[i];
     }
     EXPECT_REL(grid.s_face(grid.ns), s, 1e-5);
+}
+
+static void test_numerical_diffusivity_uniform_reduction() {
+    Grid grid;
+    const std::vector<float> ds(6, 553.0f);
+    setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    EXPECT_TRUE(grid.uniform_mesh);
+    grid.numerical_diffusivity_per_length = 2.0e3f;
+    const double old_uniform_chi = 2.0e3*553.0;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        EXPECT_REL(numerical_diffusivity_at_face(grid, grid.ds_imh_i(i)),
+                   old_uniform_chi, 1e-12);
+        EXPECT_REL(numerical_diffusivity_at_face(grid, grid.ds_iph_i(i)),
+                   old_uniform_chi, 1e-12);
+    }
+    // The coefficient folded into the conduction update is therefore exactly the
+    // previous uniform K_num = (2000*Delta_s)*C_V formula.
+    const double cv = 3.0e4;
+    EXPECT_REL(numerical_diffusivity_at_face(grid,grid.ds_iph_i(2))*cv,
+               old_uniform_chi*cv, 1e-12);
+}
+
+static void test_numerical_diffusivity_nonuniform_face_scaling() {
+    Grid grid;
+    const std::vector<float> ds = {8.0f, 8.0f, 5.0f, 2.0f, 2.0f};
+    setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    EXPECT_TRUE(!grid.uniform_mesh);
+    grid.numerical_diffusivity_per_length = 2.0e3f;
+
+    // Coarse interior, graded transition, fine interior, and mirrored outer face.
+    const arma::uword face_i[] = {0, 1, 3, 4};
+    for (arma::uword i : face_i) {
+        const double chi = numerical_diffusivity_at_face(grid, grid.ds_iph_i(i));
+        EXPECT_REL(chi, 2.0e3*grid.ds_iph_i(i), 1e-12);
+    }
+    const double chi_coarse = numerical_diffusivity_at_face(grid,grid.ds_iph_i(0));
+    const double chi_transition = numerical_diffusivity_at_face(grid,grid.ds_iph_i(1));
+    const double chi_fine = numerical_diffusivity_at_face(grid,grid.ds_iph_i(3));
+    const double chi_outer = numerical_diffusivity_at_face(grid,grid.ds_iph_i(4));
+    EXPECT_REL(chi_coarse/chi_transition,
+               grid.ds_iph_i(0)/grid.ds_iph_i(1), 1e-6);
+    EXPECT_REL(chi_coarse/chi_fine,
+               grid.ds_iph_i(0)/grid.ds_iph_i(3), 1e-6);
+    EXPECT_REL(chi_outer, 2.0e3*grid.ds_iph_i(4), 1e-12);
 }
 
 static void test_irregular_uniform_state_preserved() {
@@ -3610,7 +4147,10 @@ static void test_irregular_conduction_conserves_energy() {
         grid.outer_boundary0_i(k) = cons(arma::sub2ind(sz, grid.ns - 1, k));
         grid.outer_boundary1_i(k) = cons(arma::sub2ind(sz, grid.ns - 1, k));
     }
+    const Vec RI_physical = rhs_implicit_state(grid, cons);
+    grid.numerical_diffusivity_per_length = 2.0e3f;
     Vec RI = rhs_implicit_state(grid, cons);
+    EXPECT_TRUE(arma::max(arma::abs(RI-RI_physical)) > 0.0f);
     float net = 0.0f, scale = 0.0f;
     for (arma::uword i = 0; i < grid.ns; ++i) {
         const float cE = RI(arma::sub2ind(sz, i, cons::E_I)) + RI(arma::sub2ind(sz, i, cons::E_N));
@@ -3700,6 +4240,67 @@ static void test_refined_mesh_ic_runs() {
     unsetenv("ISO_REFINE_S_LO_KM"); unsetenv("ISO_REFINE_S_HI_KM"); unsetenv("ISO_REFINE_TRANSITION_KM");
 }
 
+static void test_outer_refined_mesh_ic_runs() {
+    // End-to-end on the OUTER/TR profile over the truncated 1600–2153 km domain:
+    // model_column builds a larger non-uniform grid whose FINEST cells sit at the
+    // outer boundary, the CFL picks up the smallest local cell, and one full step
+    // on the well-balanced hydrostatic IC stays finite with V ≈ 0 (no boundary-scale
+    // blow-up at the new coarse→fine interface).
+    setenv("ISO_H_BASE", "1600", 1);
+    setenv("ISO_DH", "553", 1);
+    auto dt_min_of = [&](Grid& grid) {
+        Vec xn = model_column_ic(grid);
+        Vec dt = cal_dt_i(grid, xn);
+        model_column_update_bc(grid, xn);
+        Vec out = advance_Euler_state(grid, xn, dt);
+        EXPECT_TRUE(!out.has_nan() && out.is_finite());
+        const auto sz = arma::size(grid.ns, num_of_eq);
+        float vmax = 0.0f;
+        for (arma::uword i = 0; i < grid.ns; ++i)
+            vmax = std::max(vmax, std::fabs(out(arma::sub2ind(sz, i, cons::MOM_I)) /
+                                            out(arma::sub2ind(sz, i, cons::RHO_I))));
+        EXPECT_TRUE(vmax < 1.0e-2f);   // exact V=0 fixed point survives refinement
+        return arma::min(dt);
+    };
+
+    Grid gu; gu.init(200, 0.25f);
+    const float dt_uniform = dt_min_of(gu);
+    EXPECT_TRUE(gu.uniform_mesh);
+    EXPECT_TRUE(gu.ns == 200);
+
+    setenv("ISO_REFINE_PROFILE", "outer", 1);
+    setenv("ISO_REFINE_FACTOR", "4", 1);
+    setenv("ISO_REFINE_S_LO_KM", "500", 1);
+    setenv("ISO_REFINE_TRANSITION_KM", "20", 1);
+    Grid gr; gr.init(200, 0.25f);
+    const float dt_refined = dt_min_of(gr);
+
+    EXPECT_TRUE(!gr.uniform_mesh);
+    EXPECT_TRUE(gr.ns > 200);                                   // cells added
+    EXPECT_TRUE(gr.ds_i.min() > 0.0f && gr.ds_i.is_finite());
+    EXPECT_REL(gr.ds_i.min(), gr.ds_i.max() / 4.0f, 0.05);      // fine ≈ coarse/4
+    // The fine band reaches the OUTER boundary: the last cell is a minimum-width cell.
+    EXPECT_REL(gr.ds_i(gr.ns - 1), gr.ds_i.min(), 1.0e-3);
+    // ...and the inner boundary keeps the coarse spacing.
+    EXPECT_REL(gr.ds_i(0), gr.ds_i.max(), 1.0e-3);
+    // Adjacent width ratio bounded by the builder's cap.
+    float max_ratio = 1.0f;
+    for (arma::uword i = 1; i < gr.ns; ++i)
+        max_ratio = std::max(max_ratio, std::max(gr.ds_i(i) / gr.ds_i(i - 1),
+                                                 gr.ds_i(i - 1) / gr.ds_i(i)));
+    EXPECT_TRUE(max_ratio <= 1.1f + 1.0e-4f);
+    // Non-uniform CFL is set by the smallest LOCAL cell, not the mean spacing: the
+    // acoustic limit sits at the top of the TR, which is exactly where the fine cells
+    // are, so dt drops by the local width ratio. The 10 % slack absorbs the O(Δh)
+    // top-cell IC temperature difference (the top cell centre — and hence the sampled
+    // C7 sound speed — moves when the mesh is refined).
+    EXPECT_REL(dt_refined / dt_uniform, gr.ds_i.min() / gu.ds_i(0), 0.10);
+
+    unsetenv("ISO_REFINE_PROFILE"); unsetenv("ISO_REFINE_FACTOR");
+    unsetenv("ISO_REFINE_S_LO_KM"); unsetenv("ISO_REFINE_TRANSITION_KM");
+    unsetenv("ISO_H_BASE"); unsetenv("ISO_DH");
+}
+
 // ----------------------------------------------------------------------------
 
 int main() {
@@ -3710,7 +4311,11 @@ int main() {
     RUN(test_flux_lim_is_minmod);
     RUN(test_flux_lim_mc3);
     RUN(test_saha_ionization_fraction_log_domain);
+    RUN(test_broadcast_static_metric_cache);
+    RUN(test_equilibrium_density_from_pressure_matches_bisection);
     RUN(test_eos_gamma_table_loader_and_interpolation);
+    RUN(test_final_serial_log_aware_eos_and_gamma1_contracts);
+    RUN(test_final_serial_one_update_and_fallback_regression);
     RUN(test_stage3_equilibrium_mixture_closure);
     RUN(test_stage4_conservative_equilibrium_projection);
     RUN(test_stage5_6_equilibrium_face_flux_and_sound_speed);
@@ -3724,6 +4329,7 @@ int main() {
     RUN(test_stage8_gamma_model_column_saha_hse_and_ghosts);
     RUN(test_upper_bc_hydro_conduction_temperature_decoupling);
     RUN(test_face_flux_capture_matches_production_continuity);
+    RUN(test_outer_conduction_capture_matches_solver_face);
     RUN(test_stage6_projection_heating_dt_convergence);
     RUN(test_cons_prim_roundtrip);
 
@@ -3778,8 +4384,12 @@ int main() {
     // manufactured operators, and the refinement-unset regression.
     RUN(test_mesh_disabled_is_uniform);
     RUN(test_mesh_refined_diagnostic_profile);
+    RUN(test_mesh_outer_refined_profile);
+    RUN(test_mesh_outer_profile_edge_cases);
     RUN(test_refine_params_env_aliases);
     RUN(test_metric_caches_center_to_center);
+    RUN(test_numerical_diffusivity_uniform_reduction);
+    RUN(test_numerical_diffusivity_nonuniform_face_scaling);
     RUN(test_irregular_uniform_state_preserved);
     RUN(test_irregular_linear_pressure_gradient);
     RUN(test_irregular_cfl_selection);
@@ -3787,6 +4397,7 @@ int main() {
     RUN(test_irregular_boundary_hse);
     RUN(test_uniform_regression_refinement_unset);
     RUN(test_refined_mesh_ic_runs);
+    RUN(test_outer_refined_mesh_ic_runs);
 
     std::cout << "\n===== Summary =====\n";
     std::cout << "Passed: " << g_pass << "\n";

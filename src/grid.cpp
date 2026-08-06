@@ -7,6 +7,7 @@ namespace chromosphere {
 void GammaConductionScratch::resize(std::size_t n) {
     rho.resize(n); e_old.resize(n); temperature.resize(n); target.resize(n);
     conductivity.resize(n); capacity.resize(n); n_e.resize(n); n_hi.resize(n);
+    e_at_T.resize(n); x.resize(n); pressure.resize(n);
     g_left.resize(n); g_right.resize(n);
     a.resize(n); b.resize(n); c.resize(n); rhs.resize(n); delta.resize(n);
 }
@@ -39,6 +40,7 @@ void Grid::init(arma::uword ns_in, float CFL_in) {
     ds_iph_i.zeros(ns);
     ds_imh_i.zeros(ns);
     uniform_mesh = true;
+    metrics_valid = false;
 
     outer_boundary0_i.zeros(num_of_eq);
     outer_boundary1_i.zeros(num_of_eq);
@@ -70,6 +72,7 @@ void Grid::resize(arma::uword ns_new) {
     s_face.zeros(ns + 1);
     ds_iph_i.zeros(ns);
     ds_imh_i.zeros(ns);
+    metrics_valid = false;
 
     // Ghost buffers stay length num_of_eq — untouched. Physical constants, γ,
     // CFL and every runtime toggle are deliberately preserved (this is a pure
@@ -85,7 +88,34 @@ void Grid::resize(arma::uword ns_new) {
     ds_imh_state.zeros(n_state);
 }
 
+namespace {
+// Exact (bit-for-bit) equality of a cached geometry snapshot against the live
+// array. A mismatch in length counts as changed.
+bool same_vector(const Vec& cached, const Vec& live) {
+    if (cached.n_elem != live.n_elem) return false;
+    for (arma::uword i = 0; i < live.n_elem; ++i)
+        if (!(cached[i] == live[i])) return false;
+    return true;
+}
+} // namespace
+
+bool Grid::static_metrics_current() const {
+    return metrics_valid
+        && B_state.n_elem == n_state
+        && s_face.n_elem == ns + 1
+        && same_vector(metrics_ds_i, ds_i)
+        && same_vector(metrics_B_i, B_i)
+        && same_vector(metrics_B_imh, B_imh)
+        && same_vector(metrics_B_iph, B_iph)
+        && same_vector(metrics_dinvB_ds_i, dinvB_ds_i);
+}
+
 void Grid::broadcast() {
+    if (static_metrics_current()) return;
+    force_rebuild_metrics();
+}
+
+void Grid::force_rebuild_metrics() {
     // --- static-mesh metric caches --------------------------------------------
     // Rebuild the center-to-center distances and canonical coordinates from ds_i,
     // taking cell centers at face midpoints. Mirror the boundary cell width into
@@ -116,22 +146,34 @@ void Grid::broadcast() {
         }
     }
 
-    B_state_imh.zeros(n_state);
-    B_state_iph.zeros(n_state);
-    B_state.zeros(n_state);
-    ds_state.zeros(n_state);
-    dinvB_ds_state.zeros(n_state);
-    ds_iph_state.zeros(n_state);
-    ds_imh_state.zeros(n_state);
-    for (arma::uword k = 0; k < num_of_eq; ++k) {
-        B_state_imh    += scalar_to(*this, B_imh,      k);
-        B_state_iph    += scalar_to(*this, B_iph,      k);
-        B_state        += scalar_to(*this, B_i,        k);
-        ds_state       += scalar_to(*this, ds_i,       k);
-        dinvB_ds_state += scalar_to(*this, dinvB_ds_i, k);
-        ds_iph_state   += scalar_to(*this, ds_iph_i,   k);
-        ds_imh_state   += scalar_to(*this, ds_imh_i,   k);
-    }
+    // Packed (n_state) broadcasts. Previously built as
+    //   dst.zeros(n_state); for k: dst += scalar_to(*this, src, k);
+    // which allocated num_of_eq n_state-sized temporaries per field. The direct
+    // fill below writes the same values; the explicit `0.0f +` reproduces the
+    // accumulation's one signed-zero difference (0.0f + -0.0f == +0.0f) so the
+    // result is bit-for-bit what the old loop produced.
+    auto pack = [&](Vec& dst, const Vec& src) {
+        dst.set_size(n_state);
+        for (arma::uword k = 0; k < num_of_eq; ++k) {
+            float* out = dst.memptr() + k * ns;
+            for (arma::uword i = 0; i < ns; ++i) out[i] = 0.0f + src[i];
+        }
+    };
+    pack(B_state_imh,    B_imh);
+    pack(B_state_iph,    B_iph);
+    pack(B_state,        B_i);
+    pack(ds_state,       ds_i);
+    pack(dinvB_ds_state, dinvB_ds_i);
+    pack(ds_iph_state,   ds_iph_i);
+    pack(ds_imh_state,   ds_imh_i);
+
+    metrics_ds_i = ds_i;
+    metrics_B_i = B_i;
+    metrics_B_imh = B_imh;
+    metrics_B_iph = B_iph;
+    metrics_dinvB_ds_i = dinvB_ds_i;
+    metrics_valid = true;
+    ++metrics_generation_;
 }
 
 } // namespace chromosphere

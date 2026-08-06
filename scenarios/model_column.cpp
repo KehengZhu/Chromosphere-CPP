@@ -72,19 +72,20 @@ bool  kHydroTDecouple = false;
 double gamma_density_from_pressure(const Grid& grid, double pressure, double temperature) {
     if (!(pressure > 0.0) || !(temperature > 0.0))
         throw std::domain_error("gamma ghost/HSE pressure and temperature must be positive");
-    double lo = grid.eos_gamma_table.min_n_h();
-    double hi = grid.eos_gamma_table.max_n_h();
+    const double lo = grid.eos_gamma_table.min_n_h();
+    const double hi = grid.eos_gamma_table.max_n_h();
     auto pressure_at = [&](double n_h) {
         const double x = saha_ionization_fraction_n_h(n_h, temperature);
         return (1.0+x)*n_h*eos_constants::k_b*temperature;
     };
+    // EOS density-domain guard, unchanged: p(n_H) is monotone in n_H at fixed T,
+    // so bracketing the request between the two axis endpoints is exactly the
+    // in-table test the former bisection performed before iterating.
     if (pressure < pressure_at(lo) || pressure > pressure_at(hi))
         throw std::out_of_range("gamma ghost/HSE pressure implies density outside EOS table");
-    for (int it = 0; it < 100; ++it) {
-        const double mid = std::sqrt(lo*hi);
-        if (pressure_at(mid) < pressure) lo = mid; else hi = mid;
-    }
-    return std::sqrt(lo*hi)*eos_constants::m_h;
+    // The 100 geometric bisections this replaced (200 Saha evaluations per call)
+    // solved the same closure the algebraic inverse below solves in closed form.
+    return equilibrium_density_from_pressure(pressure, temperature);
 }
 
 void store_mixture(Vec& ob, const MixtureFaceState& face) {
@@ -191,9 +192,14 @@ Vec model_column_ic(Grid& grid) {
 
     // --- geometry: straight field line, gravity on -----------------------
     // Static local refinement (scenarios/mesh.hpp). peek_ns() sized the grid to the
-    // coarse-equivalent count (ISO_NS); ISO_REFINE_* add lower-domain cells and grade
-    // back to the outer coarse spacing. ds_m stays the coarse-equivalent width so the
-    // numerical diffusivity keeps its magnitude. Uniform mesh reproduced byte-for-byte.
+    // coarse-equivalent count (ISO_NS); ISO_REFINE_* ADD cells inside the refined band
+    // and grade smoothly to the coarse spacing outside it. ISO_REFINE_PROFILE picks
+    // which end the band is anchored to: `lower` (default, historical: fine [s_lo,s_hi]
+    // then grade back up to coarse) or `outer` (fine from s_lo to the domain TOP, with
+    // the grade in [s_lo−τ, s_lo]) — the latter targets the upper TR / outer boundary.
+    // The conduction solver uses these actual mesh metrics to form the face-local
+    // numerical diffusivity; ds_m remains useful only for uniform-grid geometry.
+    // Uniform mesh reproduced byte-for-byte.
     const arma::uword ns_coarse = grid.ns;
     const float ds_m = (DH_km * 1000.0f) / static_cast<float>(ns_coarse);   // coarse Δs [m]
     const RefineParams rp = refine_params_from_env(/*iso_alias=*/true);
@@ -540,8 +546,15 @@ Vec model_column_ic(Grid& grid) {
     // Numerical diffusivity is folded into Stage D, so it acts only when conduction
     // is on. A grid-scaled value damps TR-gradient ringing; corona needs more (the
     // resolved-corona drainage front is near-transonic on a coarse grid).
-    const float diff_mult = kCorona ? 4.0f : 1.0f;
-    grid.numerical_diffusivity    = heat_flux_on ? (diff_mult * 2.0e3f * ds_m) : 0.0f;
+    // ISO_NUMERICAL_DIFFUSIVITY_MULT is a DIAGNOSTIC override on this coefficient
+    // only (=1 unset ⇒ production behaviour; =0 ⇒ numerical conduction off with the
+    // physical conductivity, hydro, boundaries, EOS, limiter, CFL and well-balancing
+    // all untouched). Used to test whether the grid-scaled numerical conduction is
+    // what makes the evaporation rate resolution-dependent.
+    const float diff_mult = (kCorona ? 4.0f : 1.0f)
+                          * env_f("ISO_NUMERICAL_DIFFUSIVITY_MULT", 1.0f);
+    grid.numerical_diffusivity_per_length = heat_flux_on
+        ? (diff_mult * 2.0e3f) : 0.0f;
 
     model_column_update_bc(grid, xn);
     grid.broadcast();

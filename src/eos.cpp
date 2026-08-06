@@ -68,10 +68,72 @@ struct Row {
     double gamma1;
 };
 
-double require_finite_positive(double value, const char* name) {
+bool eos_operation_counting_enabled = false;
+EosOperationCounts eos_operation_counter;
+
+inline double require_finite_positive(double value, const char* name) {
     if (!(value > 0.0) || !std::isfinite(value))
         throw std::domain_error(std::string(name) + " must be positive and finite");
     return value;
+}
+
+inline double temperature_log(double temperature) {
+    if (eos_operation_counting_enabled) ++eos_operation_counter.temperature_logs;
+    return std::log(temperature);
+}
+
+inline double n_h_log(double n_h) {
+    if (eos_operation_counting_enabled) ++eos_operation_counter.n_h_logs;
+    return std::log(n_h);
+}
+
+struct EosCoordinates {
+    double temperature;
+    double n_h;
+    double log_temperature;
+    double log_n_h;
+};
+
+EosCoordinates eos_coordinates(double n_h, double temperature) {
+    require_finite_positive(n_h, "n_H");
+    require_finite_positive(temperature, "temperature");
+    return EosCoordinates{temperature, n_h, temperature_log(temperature),
+                          n_h_log(n_h)};
+}
+
+EosCoordinates eos_coordinates_with_log_n(double n_h, double log_n_h,
+                                           double temperature) {
+    require_finite_positive(n_h, "n_H");
+    require_finite_positive(temperature, "temperature");
+    return EosCoordinates{temperature, n_h, temperature_log(temperature), log_n_h};
+}
+
+EosCoordinates eos_coordinates_with_logs(double n_h, double temperature,
+                                          double log_temperature,
+                                          double log_n_h) {
+    require_finite_positive(n_h, "n_H");
+    require_finite_positive(temperature, "temperature");
+    if (!std::isfinite(log_temperature) || !std::isfinite(log_n_h))
+        throw std::domain_error("EOS logarithmic coordinates must be finite");
+    return EosCoordinates{temperature, n_h, log_temperature, log_n_h};
+}
+
+inline double saha_log_c() {
+    static const double value = 1.5 * std::log(2.0 * PI * eos_constants::m_e
+                                               * eos_constants::k_b /
+                                               (eos_constants::h * eos_constants::h));
+    return value;
+}
+
+double saha_from_coordinates(const EosCoordinates& c) {
+    const double log_a = saha_log_c() + 1.5 * c.log_temperature
+                       - eos_constants::chi_h /
+                         (eos_constants::k_b * c.temperature)
+                       - c.log_n_h;
+    if (log_a >= 0.0)
+        return 2.0 / (1.0 + std::sqrt(1.0 + 4.0 * std::exp(-log_a)));
+    const double u = std::exp(0.5 * log_a);
+    return 2.0 * u / (u + std::sqrt(u * u + 4.0));
 }
 
 double saha_dx_d_temperature(double x, double temperature) {
@@ -81,13 +143,85 @@ double saha_dx_d_temperature(double x, double temperature) {
            ((2.0 - x) * temperature);
 }
 
-double equilibrium_heat_capacity_impl(double rho_total, double temperature) {
+// ---------------------------------------------------------------------------
+// One authoritative caloric evaluation. EosCoordinates carries the validated
+// log-space coordinates, so Saha, density guards and Gamma1 reuse the same two
+// logarithms instead of recomputing them independently.
+// ---------------------------------------------------------------------------
+struct CaloricEval {
+    double n_h;
+    double log_n_h;
+    double log_temperature;
+    double x;
+    double pressure;
+    double internal_energy;
+    double heat_capacity;   // NaN unless produced by caloric_eval_full
+    double n_e() const { return x * n_h; }
+    double n_hi() const { return (1.0 - x) * n_h; }
+};
+
+CaloricEval caloric_eval_from_coordinates(const EosCoordinates& c) {
+    CaloricEval ev;
+    ev.n_h = c.n_h;
+    ev.log_n_h = c.log_n_h;
+    ev.log_temperature = c.log_temperature;
+    ev.x = saha_from_coordinates(c);
+    ev.pressure = (1.0 + ev.x) * ev.n_h * eos_constants::k_b * c.temperature;
+    ev.internal_energy = 1.5 * ev.pressure + ev.x * ev.n_h * eos_constants::chi_h;
+    ev.heat_capacity = std::numeric_limits<double>::quiet_NaN();
+    return ev;
+}
+
+CaloricEval caloric_eval(double rho_total, double temperature) {
     const double n_h = rho_total / eos_constants::m_h;
-    const double x = saha_ionization_fraction_n_h(n_h, temperature);
+    return caloric_eval_from_coordinates(eos_coordinates(n_h, temperature));
+}
+
+CaloricEval caloric_eval_with_log_n(double rho_total, double temperature,
+                                    double n_h, double log_n_h) {
+    (void)rho_total;
+    return caloric_eval_from_coordinates(
+        eos_coordinates_with_log_n(n_h, log_n_h, temperature));
+}
+
+CaloricEval caloric_eval_with_logs(double rho_total, double temperature,
+                                   double log_temperature) {
+    const double n_h = rho_total / eos_constants::m_h;
+    return caloric_eval_from_coordinates(
+        eos_coordinates_with_logs(n_h, temperature, log_temperature, n_h_log(n_h)));
+}
+
+// The heat capacity depends on the Saha fraction only through x, so it can be
+// completed from an energy-only evaluation without a second Saha solve.
+double caloric_capacity(double n_h, double x, double temperature) {
     const double dx_d_t = saha_dx_d_temperature(x, temperature);
     return n_h * (1.5 * eos_constants::k_b * (1.0 + x)
                   + (1.5 * eos_constants::k_b * temperature
                      + eos_constants::chi_h) * dx_d_t);
+}
+
+CaloricEval caloric_eval_full(double rho_total, double temperature) {
+    CaloricEval ev = caloric_eval(rho_total, temperature);
+    ev.heat_capacity = caloric_capacity(ev.n_h, ev.x, temperature);
+    return ev;
+}
+
+CaloricEval caloric_eval_full_with_log_n(double rho_total, double temperature,
+                                         double n_h, double log_n_h) {
+    CaloricEval ev = caloric_eval_with_log_n(rho_total, temperature, n_h, log_n_h);
+    ev.heat_capacity = caloric_capacity(ev.n_h, ev.x, temperature);
+    return ev;
+}
+
+CaloricState caloric_state_of(const CaloricEval& ev, double temperature) {
+    const double capacity = std::isnan(ev.heat_capacity)
+        ? caloric_capacity(ev.n_h, ev.x, temperature) : ev.heat_capacity;
+    return CaloricState{ev.n_h, ev.x, ev.n_e(), ev.n_hi(), ev.pressure,
+                        ev.internal_energy, capacity};
+}
+
+double equilibrium_heat_capacity_impl(double rho_total, double temperature) {
+    return caloric_eval_full(rho_total, temperature).heat_capacity;
 }
 
 std::string trim(const std::string& input) {
@@ -111,23 +245,45 @@ void push_unique(std::vector<double>& values, double value) {
 
 } // namespace
 
+void set_eos_operation_counting(bool enabled) noexcept {
+    eos_operation_counting_enabled = enabled;
+}
+
+void reset_eos_operation_counts() noexcept {
+    eos_operation_counter = EosOperationCounts{};
+}
+
+EosOperationCounts eos_operation_counts() noexcept {
+    return eos_operation_counter;
+}
+
 double saha_ionization_fraction_n_h(double n_h, double temperature) {
-    require_finite_positive(n_h, "n_H");
+    return saha_from_coordinates(eos_coordinates(n_h, temperature));
+}
+
+double equilibrium_density_from_pressure(double pressure, double temperature) {
+    require_finite_positive(pressure, "pressure");
     require_finite_positive(temperature, "temperature");
 
-    // x^2/(1-x)=a. Work entirely through log(a), selecting algebraically
-    // equivalent roots that do not overflow for either a >> 1 or a << 1.
-    const double log_c = 1.5 * std::log(2.0 * PI * eos_constants::m_e
-                                        * eos_constants::k_b /
-                                        (eos_constants::h * eos_constants::h));
-    const double log_a = log_c + 1.5 * std::log(temperature)
-                       - eos_constants::chi_h / (eos_constants::k_b * temperature)
-                       - std::log(n_h);
-    if (log_a >= 0.0) {
-        return 2.0 / (1.0 + std::sqrt(1.0 + 4.0 * std::exp(-log_a)));
+    // log S(T), written with exactly the same constant and term order as the
+    // log_a expression in saha_ionization_fraction_n_h above (log_a = log S - log n_H).
+    const double log_s = saha_log_c() + 1.5 * temperature_log(temperature)
+                       - eos_constants::chi_h / (eos_constants::k_b * temperature);
+    const double y = pressure / (eos_constants::k_b * temperature);
+    const double d = std::log(y) - log_s;
+
+    // x = sqrt(S/(S+y)) = sqrt(1/(1+e^d)). Two algebraically identical branches,
+    // each chosen so its exponential argument is non-positive: no overflow for
+    // either y >> S (deep neutral) or y << S (fully ionized).
+    double x;
+    if (d <= 0.0) {
+        x = 1.0 / std::sqrt(1.0 + std::exp(d));
+    } else {
+        const double e = std::exp(-d);                  // = S/y
+        x = std::sqrt(e / (1.0 + e));
     }
-    const double u = std::exp(0.5 * log_a);
-    return 2.0 * u / (u + std::sqrt(u * u + 4.0));
+    const double n_h = y / (1.0 + x);
+    return n_h * eos_constants::m_h;
 }
 
 double saha_ionization_fraction(double rho_total, double temperature) {
@@ -138,10 +294,7 @@ double saha_ionization_fraction(double rho_total, double temperature) {
 double equilibrium_internal_energy(double rho_total, double temperature) {
     require_finite_positive(rho_total, "rho_total");
     require_finite_positive(temperature, "temperature");
-    const double n_h = rho_total / eos_constants::m_h;
-    const double x = saha_ionization_fraction_n_h(n_h, temperature);
-    const double pressure = (1.0 + x) * n_h * eos_constants::k_b * temperature;
-    return 1.5 * pressure + x * n_h * eos_constants::chi_h;
+    return caloric_eval(rho_total, temperature).internal_energy;
 }
 
 double equilibrium_heat_capacity(double rho_total, double temperature) {
@@ -150,27 +303,82 @@ double equilibrium_heat_capacity(double rho_total, double temperature) {
     return equilibrium_heat_capacity_impl(rho_total, temperature);
 }
 
+CaloricState equilibrium_caloric_state(double rho_total, double temperature) {
+    require_finite_positive(rho_total, "rho_total");
+    require_finite_positive(temperature, "temperature");
+    return caloric_state_of(caloric_eval_full(rho_total, temperature),
+                            temperature);
+}
+
+CaloricState equilibrium_caloric_state_from_logs(
+    double rho_total, double temperature,
+    double log_temperature, double log_n_h) {
+    require_finite_positive(rho_total, "rho_total");
+    const double n_h = rho_total/eos_constants::m_h;
+    const EosCoordinates coordinates = eos_coordinates_with_logs(
+        n_h, temperature, log_temperature, log_n_h);
+    CaloricEval ev = caloric_eval_from_coordinates(coordinates);
+    ev.heat_capacity = caloric_capacity(ev.n_h, ev.x, temperature);
+    return caloric_state_of(ev, temperature);
+}
+
+namespace {
+
+GammaState gamma_state_from_eval(const EosGammaTable& table,
+                                 const CaloricEval& ev, double temperature,
+                                 bool debug_clamp) {
+    return GammaState{
+        ev.x, 1.0 + ev.pressure / ev.internal_energy,
+        table.gamma1_from_logs(temperature, ev.n_h, ev.log_temperature,
+                               ev.log_n_h, debug_clamp)};
+}
+
+/// Outcome of one caloric inversion. When `has_state` is set, `eval` is a valid
+/// caloric evaluation AT `temperature`, so the caller can build the GammaState
+/// (and the partial pressures) without paying for another Saha solve.
+struct InversionResult {
+    double temperature;
+    bool has_state;
+    CaloricEval eval;
+};
+
+InversionResult invert_caloric(const EosGammaTable& table, double rho_total,
+                               double internal_energy,
+                               double temperature_guess, bool debug_clamp);
+
+} // namespace
+
 GammaState gamma_state(const EosGammaTable& table, double rho_total,
                        double temperature, bool debug_clamp) {
     if (table.empty()) throw std::logic_error("Gamma1 table is empty");
     require_finite_positive(rho_total, "rho_total");
     require_finite_positive(temperature, "temperature");
     const double n_h = rho_total / eos_constants::m_h;
-    table.require_n_h_in_bounds(n_h, debug_clamp);
-    const double x = saha_ionization_fraction_n_h(n_h, temperature);
-    const double pressure = (1.0 + x) * n_h * eos_constants::k_b * temperature;
-    const double internal_energy = 1.5 * pressure + x * n_h * eos_constants::chi_h;
-    return GammaState{x, 1.0 + pressure / internal_energy,
-                      table.gamma1(temperature, n_h, debug_clamp)};
+    const EosCoordinates coordinates = eos_coordinates(n_h, temperature);
+    table.require_n_h_in_bounds_from_log(n_h, coordinates.log_n_h, debug_clamp);
+    return gamma_state_from_eval(
+        table, caloric_eval_from_coordinates(coordinates), temperature, debug_clamp);
 }
 
 double temperature_from_rho_eint(const EosGammaTable& table, double rho_total,
                                  double internal_energy,
                                  double temperature_guess, bool debug_clamp) {
+    return invert_caloric(table, rho_total, internal_energy, temperature_guess,
+                          debug_clamp).temperature;
+}
+
+namespace {
+
+InversionResult invert_caloric(const EosGammaTable& table, double rho_total,
+                               double internal_energy,
+                               double temperature_guess, bool debug_clamp) {
     if (table.empty()) throw std::logic_error("Gamma1 table is empty");
     require_finite_positive(rho_total, "rho_total");
     require_finite_positive(internal_energy, "internal_energy");
-    table.require_n_h_in_bounds(rho_total / eos_constants::m_h, debug_clamp);
+    const double n_h = rho_total / eos_constants::m_h;
+    require_finite_positive(n_h, "n_H");
+    const double log_n_h = n_h_log(n_h);
+    table.require_n_h_in_bounds_from_log(n_h, log_n_h, debug_clamp);
 
     profile_note_inversion_call();
     const double scale = std::max(std::numeric_limits<double>::min(), internal_energy);
@@ -178,6 +386,61 @@ double temperature_from_rho_eint(const EosGammaTable& table, double rho_total,
     double lower = table.min_temperature();
     double upper = table.max_temperature();
 
+    // ---- zero/one-update fast path -------------------------------------------
+    // Measured on the production column, ~97% of all inversions converge with at
+    // most ONE Newton update from the supplied guess, yet each still paid for the
+    // two table-wide bracket-endpoint energies (a further ~470M Saha solves per
+    // 20 s run) and evaluated energy and heat capacity as two separate Saha
+    // solves. Here the guess is evaluated ONCE (energy + capacity fused), the
+    // step is taken with exactly the safeguards the full solver applies, and the
+    // candidate is evaluated once. Anything else falls through to the untouched
+    // safeguarded Newton/bisection solver below.
+    //
+    // The fast path is gated on the guess AND the accepted candidate lying inside
+    // a 1e-9-relative inset of the table temperature range. That margin is many
+    // orders above the 64-eps window in which the bracket block below returns the
+    // endpoint temperature itself or throws out_of_range, so no call that the full
+    // path would have terminated at an endpoint (or rejected) can be answered here
+    // instead — the fast path only short-circuits interior roots.
+    const double inset_lower = lower * (1.0 + 1.0e-9);
+    const double inset_upper = upper * (1.0 - 1.0e-9);
+    if (std::isfinite(temperature_guess)
+        && temperature_guess > inset_lower && temperature_guess < inset_upper) {
+        const CaloricEval ev = caloric_eval_full_with_log_n(
+            rho_total, temperature_guess, n_h, log_n_h);
+        const double residual = ev.internal_energy - internal_energy;
+        if (std::abs(residual) <= 2.0e-13*scale) {
+            profile_note_inversion_initial_guess();
+            profile_note_inversion_iterations(0);
+            return InversionResult{temperature_guess, true, ev};
+        }
+        // The full solver's first iteration reproduces exactly this state: it
+        // narrows one bracket end to the guess, then takes T - residual/C_V.
+        double fast_lower = lower, fast_upper = upper;
+        if (residual > 0.0) fast_upper = temperature_guess;
+        else                fast_lower = temperature_guess;
+        const double candidate = temperature_guess - residual/ev.heat_capacity;
+        const double edge = 4.0*std::numeric_limits<double>::epsilon()
+                          * std::max(1.0, std::abs(temperature_guess));
+        const bool accepted =
+               std::isfinite(candidate)
+            && candidate > fast_lower + edge
+            && candidate < fast_upper - edge
+            && (fast_upper - fast_lower
+                > 2.0e-13*std::max(1.0, std::abs(temperature_guess)))
+            && std::abs(2.0*residual) < std::abs((upper - lower)*ev.heat_capacity)
+            && candidate > inset_lower && candidate < inset_upper;
+        if (accepted) {
+            const CaloricEval next = caloric_eval_with_log_n(
+                rho_total, candidate, n_h, log_n_h);
+            if (std::abs(next.internal_energy - internal_energy) <= 2.0e-13*scale) {
+                profile_note_inversion_iterations(1);
+                return InversionResult{candidate, true, next};
+            }
+        }
+    }
+
+    // ---- safeguarded Newton / bisection (unchanged) ---------------------------
     // A supplied temperature is used two ways: as an exact-hit fast path here, and
     // (below) as the Newton seed over the table-wide bracket. Seeding the BRACKET
     // from the guess as well was tried and is a pessimisation — a ~6%-wide bracket
@@ -191,19 +454,23 @@ double temperature_from_rho_eint(const EosGammaTable& table, double rho_total,
         // NB: the guess evaluation is not a bracket-endpoint evaluation and is
         // deliberately not counted as one — the accepted fast path must still
         // report bracket_evaluations == 0.
-        const double guessed_energy = equilibrium_internal_energy(
-            rho_total, temperature_guess);
-        if (std::abs(guessed_energy-internal_energy) <= 2.0e-13*scale) {
+        const CaloricEval guessed = caloric_eval_with_log_n(
+            rho_total, temperature_guess, n_h, log_n_h);
+        if (std::abs(guessed.internal_energy-internal_energy) <= 2.0e-13*scale) {
             profile_note_inversion_initial_guess();
             profile_note_inversion_iterations(0);
-            return temperature_guess;
+            return InversionResult{temperature_guess, true, guessed};
         }
     }
 
     {
         profile_note_inversion_bracket_evaluations(2);
-        const double e_lower = equilibrium_internal_energy(rho_total, lower);
-        const double e_upper = equilibrium_internal_energy(rho_total, upper);
+        const CaloricEval ev_lower = caloric_eval_with_log_n(
+            rho_total, lower, n_h, log_n_h);
+        const CaloricEval ev_upper = caloric_eval_with_log_n(
+            rho_total, upper, n_h, log_n_h);
+        const double e_lower = ev_lower.internal_energy;
+        const double e_upper = ev_upper.internal_energy;
         const double lower_tolerance = 64.0 * std::numeric_limits<double>::epsilon()
                                      * std::max(internal_energy, e_lower);
         const double upper_tolerance = 64.0 * std::numeric_limits<double>::epsilon()
@@ -219,17 +486,16 @@ double temperature_from_rho_eint(const EosGammaTable& table, double rho_total,
         }
         if (std::abs(internal_energy - e_lower) <= lower_tolerance) {
             profile_note_inversion_iterations(0);
-            return lower;
+            return InversionResult{lower, true, ev_lower};
         }
         if (std::abs(internal_energy - e_upper) <= upper_tolerance) {
             profile_note_inversion_iterations(0);
-            return upper;
+            return InversionResult{upper, true, ev_upper};
         }
     }
 
     double temperature = temperature_guess;
     if (!std::isfinite(temperature) || temperature <= lower || temperature >= upper) {
-        const double n_h = rho_total / eos_constants::m_h;
         temperature = internal_energy / (1.5 * n_h * eos_constants::k_b);
         temperature = std::max(lower, std::min(upper, temperature));
         if (temperature <= lower || temperature >= upper)
@@ -244,21 +510,26 @@ double temperature_from_rho_eint(const EosGammaTable& table, double rho_total,
     // without also rejecting good steps.
     double previous_bracket_width = upper - lower;
     for (int iteration = 0; iteration < 128; ++iteration) {
-        const double value = equilibrium_internal_energy(rho_total, temperature);
+        // Energy and heat capacity from ONE Saha evaluation. The residual test
+        // below can still short-circuit before the capacity is needed, but the
+        // extra work in that case is a handful of flops — no second Saha solve.
+        const CaloricEval ev = caloric_eval_full_with_log_n(
+            rho_total, temperature, n_h, log_n_h);
+        const double value = ev.internal_energy;
         const double residual = value - internal_energy;
         if (std::abs(residual) <= 2.0e-13 * scale) {
             profile_note_inversion_iterations(static_cast<std::uint64_t>(iteration));
-            return temperature;
+            return InversionResult{temperature, true, ev};
         }
         if (residual > 0.0) upper = temperature;
         else lower = temperature;
 
         if (upper - lower <= 2.0e-13 * std::max(1.0, std::abs(temperature))) {
             profile_note_inversion_iterations(static_cast<std::uint64_t>(iteration));
-            return 0.5 * (lower + upper);
+            return InversionResult{0.5 * (lower + upper), false, CaloricEval()};
         }
 
-        const double heat_capacity = equilibrium_heat_capacity_impl(rho_total, temperature);
+        const double heat_capacity = ev.heat_capacity;
         double candidate = temperature - residual / heat_capacity;
         const double bracket_width = upper - lower;
         // Reject a Newton step only if it leaves the bracket (up to a few ulp of the
@@ -302,10 +573,20 @@ double temperature_from_rho_eint(const EosGammaTable& table, double rho_total,
     throw std::runtime_error(message.str());
 }
 
-MixtureThermo decode_equilibrium_mixture(
+} // namespace
+
+namespace {
+
+struct DecodedCaloricResult {
+    CaloricMixtureThermo thermo;
+    CaloricEval eval;
+};
+
+DecodedCaloricResult decode_caloric_impl(
     const EosGammaTable& table, double rho_i, double rho_n,
     double momentum_i, double momentum_n, double energy_i, double energy_n,
-    double phi_of_this_state, double temperature_guess, bool debug_clamp) {
+    double phi_of_this_state, double temperature_guess, bool debug_clamp,
+    CaloricState* caloric_at_temperature) {
     require_finite_positive(rho_i, "rho_i");
     require_finite_positive(rho_n, "rho_n");
     if (!std::isfinite(momentum_i) || !std::isfinite(momentum_n)
@@ -319,20 +600,63 @@ MixtureThermo decode_equilibrium_mixture(
     const double internal_energy = energy_i + energy_n - kinetic_i - kinetic_n
                                  - rho * phi_of_this_state;
     require_finite_positive(internal_energy, "decoded internal_energy");
-    const double temperature = temperature_from_rho_eint(
+    const InversionResult inverted = invert_caloric(
         table, rho, internal_energy, temperature_guess, debug_clamp);
-    const GammaState gamma = gamma_state(table, rho, temperature, debug_clamp);
-    const double n_h = rho / eos_constants::m_h;
-    const double p_e = gamma.x_eq * n_h * eos_constants::k_b * temperature;
+    const double temperature = inverted.temperature;
+    const CaloricEval ev = inverted.has_state ? inverted.eval
+                                              : caloric_eval(rho, temperature);
+    if (caloric_at_temperature)
+        *caloric_at_temperature = caloric_state_of(ev, temperature);
+    const double n_h = ev.n_h;
+    const double p_e = ev.x * n_h * eos_constants::k_b * temperature;
     const double p_i = 2.0 * p_e;
-    const double p_n = (1.0 - gamma.x_eq) * n_h
+    const double p_n = (1.0 - ev.x) * n_h
                      * eos_constants::k_b * temperature;
-    return MixtureThermo{rho, temperature, gamma.x_eq, rho_i / rho, n_h,
-                         gamma.x_eq * n_h, (1.0 - gamma.x_eq) * n_h,
-                         p_i, p_n, p_e, gamma.gamma_sound, internal_energy};
+    const CaloricMixtureThermo thermo{
+        rho, temperature, ev.x, rho_i / rho, n_h, ev.x * n_h,
+        (1.0 - ev.x) * n_h, p_i, p_n, p_e, internal_energy};
+    return DecodedCaloricResult{thermo, ev};
 }
 
-ProjectedMixture project_equilibrium_single_fluid(
+} // namespace
+
+CaloricMixtureThermo decode_equilibrium_caloric_mixture(
+    const EosGammaTable& table, double rho_i, double rho_n,
+    double momentum_i, double momentum_n, double energy_i, double energy_n,
+    double phi_of_this_state, double temperature_guess, bool debug_clamp,
+    CaloricState* caloric_at_temperature) {
+    return decode_caloric_impl(
+        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n,
+        phi_of_this_state, temperature_guess, debug_clamp,
+        caloric_at_temperature).thermo;
+}
+
+MixtureThermo decode_equilibrium_mixture(
+    const EosGammaTable& table, double rho_i, double rho_n,
+    double momentum_i, double momentum_n, double energy_i, double energy_n,
+    double phi_of_this_state, double temperature_guess, bool debug_clamp,
+    CaloricState* caloric_at_temperature) {
+    const DecodedCaloricResult decoded = decode_caloric_impl(
+        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n,
+        phi_of_this_state, temperature_guess, debug_clamp,
+        caloric_at_temperature);
+    const CaloricMixtureThermo& th = decoded.thermo;
+    const GammaState gamma = gamma_state_from_eval(
+        table, decoded.eval, th.T, debug_clamp);
+    return MixtureThermo{
+        th.rho, th.T, th.x_eq, th.x_row, th.n_H, th.n_e, th.n_HI,
+        th.p_i, th.p_n, th.p_e, gamma.gamma_sound, th.internal_energy};
+}
+
+namespace {
+
+struct ProjectedRowsResult {
+    ProjectedMixtureRows rows;
+    CaloricMixtureThermo thermo;
+    CaloricEval eval;
+};
+
+ProjectedRowsResult project_rows_impl(
     const EosGammaTable& table, double rho_i, double rho_n,
     double momentum_i, double momentum_n, double energy_i, double energy_n,
     double phi_of_this_state, double trace_fraction_floor,
@@ -359,38 +683,72 @@ ProjectedMixture project_equilibrium_single_fluid(
                                  - rho * phi_of_this_state;
     require_finite_positive(internal_energy, "projected internal_energy");
 
-    const double temperature = temperature_from_rho_eint(
+    const InversionResult inverted = invert_caloric(
         table, rho, internal_energy, temperature_guess, debug_clamp);
-    const GammaState gamma = gamma_state(table, rho, temperature, debug_clamp);
-    const double n_h = rho / eos_constants::m_h;
+    const double temperature = inverted.temperature;
+    const CaloricEval ev = inverted.has_state ? inverted.eval
+                                              : caloric_eval(rho, temperature);
+    const double n_h = ev.n_h;
     const double x_row = std::max(trace_fraction_floor,
-                                 std::min(1.0 - trace_fraction_floor, gamma.x_eq));
+                                 std::min(1.0 - trace_fraction_floor, ev.x));
     const double projected_rho_i = x_row * rho;
     const double projected_rho_n = (1.0 - x_row) * rho;
-    const double p_e = gamma.x_eq * n_h * eos_constants::k_b * temperature;
+    const double p_e = ev.x * n_h * eos_constants::k_b * temperature;
     const double p_i = 2.0 * p_e;
-    const double p_n = (1.0 - gamma.x_eq) * n_h
+    const double p_n = (1.0 - ev.x) * n_h
                      * eos_constants::k_b * temperature;
     const double common_specific = 0.5 * velocity * velocity + phi_of_this_state;
     const double projected_energy_i = 1.5 * p_i
-                                    + gamma.x_eq * n_h * eos_constants::chi_h
+                                    + ev.x * n_h * eos_constants::chi_h
                                     + projected_rho_i * common_specific;
-    // Use the conserved total as the final row remainder. The temperature solve
-    // makes this equal to the analytic neutral mapping to root tolerance, while
-    // the remainder form preserves E_I+E_N in finite precision.
     const double projected_energy_n = total_energy - projected_energy_i;
     const double projected_energy_e = 1.5 * p_e;
-    const MixtureThermo thermo{
-        rho, temperature, gamma.x_eq, x_row, n_h, gamma.x_eq*n_h,
-        (1.0-gamma.x_eq)*n_h, p_i, p_n, p_e, gamma.gamma_sound,
-        internal_energy};
-    return ProjectedMixture{
+    const CaloricMixtureThermo thermo{
+        rho, temperature, ev.x, x_row, n_h, ev.x*n_h,
+        (1.0-ev.x)*n_h, p_i, p_n, p_e, internal_energy};
+    const ProjectedMixtureRows rows{
         projected_rho_i, projected_rho_n, projected_rho_i*velocity,
         projected_rho_n*velocity, projected_energy_i, projected_energy_n,
-        projected_energy_e, thermo};
+        projected_energy_e, temperature};
+    return ProjectedRowsResult{rows, thermo, ev};
 }
 
-ProjectedMixture pack_equilibrium_from_known_temperature(
+} // namespace
+
+ProjectedMixtureRows project_equilibrium_rows(
+    const EosGammaTable& table, double rho_i, double rho_n,
+    double momentum_i, double momentum_n, double energy_i, double energy_n,
+    double phi_of_this_state, double trace_fraction_floor,
+    double temperature_guess, bool debug_clamp) {
+    return project_rows_impl(
+        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n,
+        phi_of_this_state, trace_fraction_floor, temperature_guess,
+        debug_clamp).rows;
+}
+
+ProjectedMixture project_equilibrium_single_fluid(
+    const EosGammaTable& table, double rho_i, double rho_n,
+    double momentum_i, double momentum_n, double energy_i, double energy_n,
+    double phi_of_this_state, double trace_fraction_floor,
+    double temperature_guess, bool debug_clamp) {
+    const ProjectedRowsResult projected = project_rows_impl(
+        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n,
+        phi_of_this_state, trace_fraction_floor, temperature_guess, debug_clamp);
+    const CaloricMixtureThermo& th = projected.thermo;
+    const GammaState gamma = gamma_state_from_eval(
+        table, projected.eval, th.T, debug_clamp);
+    const MixtureThermo thermo{
+        th.rho, th.T, th.x_eq, th.x_row, th.n_H, th.n_e, th.n_HI,
+        th.p_i, th.p_n, th.p_e, gamma.gamma_sound, th.internal_energy};
+    const ProjectedMixtureRows& rows = projected.rows;
+    return ProjectedMixture{
+        rows.rho_i, rows.rho_n, rows.momentum_i, rows.momentum_n,
+        rows.energy_i, rows.energy_n, rows.energy_e, thermo};
+}
+
+namespace {
+
+ProjectedRowsResult pack_rows_impl(
     const EosGammaTable& table, double rho, double momentum,
     double total_energy, double temperature, double phi,
     double trace_fraction_floor, double residual_relative_tolerance,
@@ -413,8 +771,9 @@ ProjectedMixture pack_equilibrium_from_known_temperature(
         - 0.5*rho*velocity*velocity-rho*phi;
     require_finite_positive(internal_authoritative,
                             "known-temperature internal_energy");
-    const double internal_eos = equilibrium_internal_energy(rho, temperature);
-    const double relative_residual = std::abs(internal_eos-internal_authoritative)
+    const CaloricEval ev = caloric_eval(rho, temperature);
+    const double relative_residual = std::abs(
+        ev.internal_energy-internal_authoritative)
         / std::max(internal_authoritative, std::numeric_limits<double>::min());
     if (relative_residual > residual_relative_tolerance) {
         std::ostringstream message;
@@ -425,58 +784,85 @@ ProjectedMixture pack_equilibrium_from_known_temperature(
         throw std::runtime_error(message.str());
     }
 
-    const GammaState gamma = gamma_state(table, rho, temperature, debug_clamp);
-    const double n_h = rho/eos_constants::m_h;
+    const double n_h = ev.n_h;
+    table.require_n_h_in_bounds_from_log(n_h, ev.log_n_h, debug_clamp);
     const double x_row = std::max(trace_fraction_floor,
-        std::min(1.0-trace_fraction_floor, gamma.x_eq));
+        std::min(1.0-trace_fraction_floor, ev.x));
     const double rho_i = x_row*rho;
     const double rho_n = rho-rho_i;
-    const double p_e = gamma.x_eq*n_h*eos_constants::k_b*temperature;
+    const double p_e = ev.x*n_h*eos_constants::k_b*temperature;
     const double p_i = 2.0*p_e;
-    const double p_n = (1.0-gamma.x_eq)*n_h*eos_constants::k_b*temperature;
+    const double p_n = (1.0-ev.x)*n_h*eos_constants::k_b*temperature;
     const double specific_carried = 0.5*velocity*velocity+phi;
-    const double energy_i = 1.5*p_i+gamma.x_eq*n_h*eos_constants::chi_h
+    const double energy_i = 1.5*p_i+ev.x*n_h*eos_constants::chi_h
                           + rho_i*specific_carried;
     const double energy_n = total_energy-energy_i;
-    const MixtureThermo thermo{
-        rho, temperature, gamma.x_eq, x_row, n_h, gamma.x_eq*n_h,
-        (1.0-gamma.x_eq)*n_h, p_i, p_n, p_e, gamma.gamma_sound,
-        internal_authoritative};
-    return ProjectedMixture{
+    const CaloricMixtureThermo thermo{
+        rho, temperature, ev.x, x_row, n_h, ev.x*n_h,
+        (1.0-ev.x)*n_h, p_i, p_n, p_e, internal_authoritative};
+    const ProjectedMixtureRows rows{
         rho_i, rho_n, rho_i*velocity, rho_n*velocity,
-        energy_i, energy_n, 1.5*p_e, thermo};
+        energy_i, energy_n, 1.5*p_e, temperature};
+    return ProjectedRowsResult{rows, thermo, ev};
 }
 
-MixtureFaceState equilibrium_mixture_face_state(
+} // namespace
+
+ProjectedMixtureRows pack_equilibrium_rows_from_known_temperature(
+    const EosGammaTable& table, double rho, double momentum,
+    double total_energy, double temperature, double phi,
+    double trace_fraction_floor, double residual_relative_tolerance,
+    bool debug_clamp) {
+    return pack_rows_impl(
+        table, rho, momentum, total_energy, temperature, phi,
+        trace_fraction_floor, residual_relative_tolerance, debug_clamp).rows;
+}
+
+ProjectedMixture pack_equilibrium_from_known_temperature(
+    const EosGammaTable& table, double rho, double momentum,
+    double total_energy, double temperature, double phi,
+    double trace_fraction_floor, double residual_relative_tolerance,
+    bool debug_clamp) {
+    const ProjectedRowsResult packed = pack_rows_impl(
+        table, rho, momentum, total_energy, temperature, phi,
+        trace_fraction_floor, residual_relative_tolerance, debug_clamp);
+    const CaloricMixtureThermo& th = packed.thermo;
+    const GammaState gamma = gamma_state_from_eval(
+        table, packed.eval, temperature, debug_clamp);
+    const MixtureThermo thermo{
+        th.rho, th.T, th.x_eq, th.x_row, th.n_H, th.n_e, th.n_HI,
+        th.p_i, th.p_n, th.p_e, gamma.gamma_sound, th.internal_energy};
+    const ProjectedMixtureRows& rows = packed.rows;
+    return ProjectedMixture{
+        rows.rho_i, rows.rho_n, rows.momentum_i, rows.momentum_n,
+        rows.energy_i, rows.energy_n, rows.energy_e, thermo};
+}
+
+namespace {
+
+MixtureFaceState face_state_from_eval(
     const EosGammaTable& table, double rho_total, double velocity,
     double temperature, double phi_of_face, double trace_fraction_floor,
-    bool debug_clamp) {
-    require_finite_positive(rho_total, "rho_total");
-    require_finite_positive(temperature, "temperature");
-    if (!std::isfinite(velocity) || !std::isfinite(phi_of_face))
-        throw std::domain_error("mixture face velocity and potential must be finite");
-    if (!(trace_fraction_floor > 0.0) || !(trace_fraction_floor < 0.5)
-        || !std::isfinite(trace_fraction_floor))
-        throw std::domain_error("trace_fraction_floor must be finite and in (0,0.5)");
-
-    const GammaState gamma = gamma_state(table, rho_total, temperature, debug_clamp);
-    const double n_h = rho_total / eos_constants::m_h;
+    bool debug_clamp, const CaloricEval& ev) {
+    const GammaState gamma = gamma_state_from_eval(
+        table, ev, temperature, debug_clamp);
+    const double n_h = ev.n_h;
     const double x_row = std::max(trace_fraction_floor,
-                                 std::min(1.0 - trace_fraction_floor, gamma.x_eq));
+                                 std::min(1.0 - trace_fraction_floor, ev.x));
     const double rho_i = x_row * rho_total;
     const double rho_n = (1.0 - x_row) * rho_total;
-    const double p_e = gamma.x_eq * n_h * eos_constants::k_b * temperature;
+    const double p_e = ev.x * n_h * eos_constants::k_b * temperature;
     const double p_i = 2.0 * p_e;
-    const double p_n = (1.0 - gamma.x_eq) * n_h
+    const double p_n = (1.0 - ev.x) * n_h
                      * eos_constants::k_b * temperature;
-    const double e_int = equilibrium_internal_energy(rho_total, temperature);
+    const double e_int = ev.internal_energy;
     const double specific = 0.5 * velocity * velocity + phi_of_face;
-    const double energy_i = 1.5 * p_i + gamma.x_eq * n_h * eos_constants::chi_h
+    const double energy_i = 1.5 * p_i + ev.x * n_h * eos_constants::chi_h
                           + rho_i * specific;
     const double energy_n = e_int + rho_total * specific - energy_i;
     const MixtureThermo thermo{
-        rho_total, temperature, gamma.x_eq, x_row, n_h, gamma.x_eq*n_h,
-        (1.0-gamma.x_eq)*n_h, p_i, p_n, p_e, gamma.gamma_sound, e_int};
+        rho_total, temperature, ev.x, x_row, n_h, ev.x*n_h,
+        (1.0-ev.x)*n_h, p_i, p_n, p_e, gamma.gamma_sound, e_int};
     const ProjectedMixture conserved{
         rho_i, rho_n, rho_i*velocity, rho_n*velocity, energy_i, energy_n,
         1.5*p_e, thermo};
@@ -484,6 +870,57 @@ MixtureFaceState equilibrium_mixture_face_state(
     const double sound_speed = std::sqrt(gamma.gamma_sound * p_total / rho_total);
     return MixtureFaceState{{rho_total, velocity, temperature}, conserved,
                             p_total, sound_speed};
+}
+
+void validate_face_inputs(const EosGammaTable& table, double rho_total,
+                          double velocity, double temperature,
+                          double phi_of_face, double trace_fraction_floor) {
+    require_finite_positive(rho_total, "rho_total");
+    require_finite_positive(temperature, "temperature");
+    if (!std::isfinite(velocity) || !std::isfinite(phi_of_face))
+        throw std::domain_error("mixture face velocity and potential must be finite");
+    if (!(trace_fraction_floor > 0.0) || !(trace_fraction_floor < 0.5)
+        || !std::isfinite(trace_fraction_floor))
+        throw std::domain_error("trace_fraction_floor must be finite and in (0,0.5)");
+    if (table.empty()) throw std::logic_error("Gamma1 table is empty");
+}
+
+} // namespace
+
+MixtureFaceState equilibrium_mixture_face_state(
+    const EosGammaTable& table, double rho_total, double velocity,
+    double temperature, double phi_of_face, double trace_fraction_floor,
+    bool debug_clamp) {
+    validate_face_inputs(table, rho_total, velocity, temperature,
+                         phi_of_face, trace_fraction_floor);
+    const double n_h = rho_total / eos_constants::m_h;
+    const EosCoordinates coordinates = eos_coordinates(n_h, temperature);
+    table.require_n_h_in_bounds_from_log(n_h, coordinates.log_n_h, debug_clamp);
+    return face_state_from_eval(
+        table, rho_total, velocity, temperature, phi_of_face,
+        trace_fraction_floor, debug_clamp,
+        caloric_eval_from_coordinates(coordinates));
+}
+
+MixtureFaceState equilibrium_mixture_face_state_from_logs(
+    const EosGammaTable& table, double log_rho_total, double velocity,
+    double log_temperature, double phi_of_face, double trace_fraction_floor,
+    bool debug_clamp) {
+    if (!std::isfinite(log_rho_total) || !std::isfinite(log_temperature))
+        throw std::domain_error("mixture face logarithms must be finite");
+    const double rho_total = std::exp(log_rho_total);
+    const double temperature = std::exp(log_temperature);
+    validate_face_inputs(table, rho_total, velocity, temperature,
+                         phi_of_face, trace_fraction_floor);
+    const double n_h = rho_total / eos_constants::m_h;
+    const double log_n_h = n_h_log(n_h);
+    const EosCoordinates coordinates = eos_coordinates_with_logs(
+        n_h, temperature, log_temperature, log_n_h);
+    table.require_n_h_in_bounds_from_log(n_h, log_n_h, debug_clamp);
+    return face_state_from_eval(
+        table, rho_total, velocity, temperature, phi_of_face,
+        trace_fraction_floor, debug_clamp,
+        caloric_eval_from_coordinates(coordinates));
 }
 
 std::array<double, 7> equilibrium_mixture_flux(const MixtureFaceState& face) {
@@ -640,11 +1077,19 @@ bool EosGammaTable::contains(double temperature, double n_h) const noexcept {
 void EosGammaTable::require_n_h_in_bounds(double n_h, bool debug_clamp) const {
     if (empty()) throw std::logic_error("Gamma1 table is empty");
     require_finite_positive(n_h, "n_H");
-    const double log_n = std::log(n_h);
+    require_n_h_in_bounds_from_log(n_h, n_h_log(n_h), debug_clamp);
+}
+
+void EosGammaTable::require_n_h_in_bounds_from_log(
+    double n_h, double log_n_h, bool debug_clamp) const {
+    if (empty()) throw std::logic_error("Gamma1 table is empty");
+    require_finite_positive(n_h, "n_H");
+    if (!std::isfinite(log_n_h))
+        throw std::domain_error("log(n_H) must be finite");
     const double tolerance = 64.0 * std::numeric_limits<double>::epsilon()
-                           * std::max(1.0, std::abs(log_n));
-    const bool outside = log_n < log_n_h_.front() - tolerance
-                      || log_n > log_n_h_.back() + tolerance;
+                           * std::max(1.0, std::abs(log_n_h));
+    const bool outside = log_n_h < log_n_h_.front() - tolerance
+                      || log_n_h > log_n_h_.back() + tolerance;
     if (outside && !debug_clamp) {
         std::ostringstream message;
         message << "EOS density out of bounds: rho=" << n_h * eos_constants::m_h
@@ -658,8 +1103,21 @@ double EosGammaTable::gamma1(double temperature, double n_h, bool debug_clamp) c
     if (empty()) throw std::logic_error("Gamma1 table is empty");
     require_finite_positive(temperature, "temperature");
     require_finite_positive(n_h, "n_H");
-    double log_t = std::log(temperature);
-    double log_n = std::log(n_h);
+    return gamma1_from_logs(temperature, n_h, temperature_log(temperature),
+                            n_h_log(n_h), debug_clamp);
+}
+
+double EosGammaTable::gamma1_from_logs(
+    double temperature, double n_h, double log_temperature, double log_n_h,
+    bool debug_clamp) const {
+    if (empty()) throw std::logic_error("Gamma1 table is empty");
+    require_finite_positive(temperature, "temperature");
+    require_finite_positive(n_h, "n_H");
+    if (!std::isfinite(log_temperature) || !std::isfinite(log_n_h))
+        throw std::domain_error("Gamma1 logarithmic coordinates must be finite");
+    if (eos_operation_counting_enabled) ++eos_operation_counter.gamma1_queries;
+    double log_t = log_temperature;
+    double log_n = log_n_h;
     const double tolerance = 64.0 * std::numeric_limits<double>::epsilon()
                            * std::max({1.0, std::abs(log_t), std::abs(log_n)});
     const bool outside = log_t < log_temperature_.front() - tolerance

@@ -55,7 +55,7 @@ Vec model_flare_ic(Grid& grid) {
 
     // Optional extra numerical diffusivity to stabilize the evaporation shock on
     // the coarse grid (multiplier on the C7 grid-scaled value set by model_c7_ic).
-    grid.numerical_diffusivity *= env_f("FLARE_DIFF_MULT", 1.0f);
+    grid.numerical_diffusivity_per_length *= env_f("FLARE_DIFF_MULT", 1.0f);
 
     return xn;
 }

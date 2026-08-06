@@ -522,8 +522,8 @@ static double outer_conduction_wall_T(const Grid& grid, double ghost_T) {
 // self-consistent with the Dirichlet datum it multiplies. Without the override
 // this is exactly the decoded hydro ghost, unchanged.
 struct OuterConductionGhost { double T, n_e, n_HI; };
-static OuterConductionGhost outer_conduction_ghost(const Grid& grid,
-                                                   const MixtureThermo& ghost) {
+static OuterConductionGhost outer_conduction_ghost(
+    const Grid& grid, const CaloricMixtureThermo& ghost) {
     if (!grid.outer_conduction_temperature_override)
         return {ghost.T, ghost.n_e, ghost.n_HI};
     const double T = static_cast<double>(grid.outer_conduction_temperature);
@@ -531,12 +531,13 @@ static OuterConductionGhost outer_conduction_ghost(const Grid& grid,
     return {T, x*ghost.n_H, (1.0-x)*ghost.n_H};
 }
 
-static MixtureThermo decode_gamma_ghost(const Grid& grid, const Vec& ghost,
-                                        double phi_face) {
-    return decode_equilibrium_mixture(
+static CaloricMixtureThermo decode_gamma_ghost(
+    const Grid& grid, const Vec& ghost, double phi_face) {
+    return decode_equilibrium_caloric_mixture(
         grid.eos_gamma_table, ghost(cons::RHO_I), ghost(cons::RHO_N),
         ghost(cons::MOM_I), ghost(cons::MOM_N), ghost(cons::E_I), ghost(cons::E_N),
-        phi_face, std::numeric_limits<double>::quiet_NaN(), grid.eos_gamma_debug_clamp);
+        phi_face, std::numeric_limits<double>::quiet_NaN(),
+        grid.eos_gamma_debug_clamp);
 }
 
 static Vec set_gamma_internal_energy_and_project(
@@ -564,10 +565,11 @@ static Vec pack_gamma_known_temperature(
         // Those denominators differ slightly whenever a cell cools.  Keep this
         // second, assertion-only gate at twice the 2e-11 solve tolerance so a
         // converged state is not rejected solely by that normalization change.
-        const ProjectedMixture cell = pack_equilibrium_from_known_temperature(
-            grid.eos_gamma_table, rho, momentum, authoritative_total,
-            temperature[i], phi, grid.eos_trace_fraction_floor, 4.0e-11,
-            grid.eos_gamma_debug_clamp);
+        const ProjectedMixtureRows cell =
+            pack_equilibrium_rows_from_known_temperature(
+                grid.eos_gamma_table, rho, momentum, authoritative_total,
+                temperature[i], phi, grid.eos_trace_fraction_floor, 4.0e-11,
+                grid.eos_gamma_debug_clamp);
         packed(arma::sub2ind(sz,i,cons::RHO_I)) = static_cast<float>(cell.rho_i);
         packed(arma::sub2ind(sz,i,cons::RHO_N)) = static_cast<float>(cell.rho_n);
         packed(arma::sub2ind(sz,i,cons::MOM_I)) = static_cast<float>(cell.momentum_i);
@@ -600,19 +602,33 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
         };
         const double phi = 0.5*static_cast<double>(
             grid.phi_g_imh(i)+grid.phi_g_iph(i));
-        const MixtureThermo th = decode_equilibrium_mixture(
+        // The decode's own inversion already evaluated the caloric EOS at exactly
+        // (th.rho, th.T) — which is where the first Newton residual pass below
+        // starts. Carry that evaluation over instead of repeating it. This is the
+        // provably-equivalent form of the projection→conduction cache: the state
+        // it describes is the packed Vec<float> conserved state this decode just
+        // read, not projection's pre-rounding double state.
+        CaloricState seeded;
+        const CaloricMixtureThermo th = decode_equilibrium_caloric_mixture(
             grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
             at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
             phi, grid.eos_temperature_hint(i),
-            grid.eos_gamma_debug_clamp);
+            grid.eos_gamma_debug_clamp, &seeded);
         grid.store_eos_temperature_hint(i, th.T);
         s.rho[i] = th.rho;
         s.e_old[i] = th.internal_energy;
         s.temperature[i] = th.T;
+        s.n_e[i] = seeded.n_e;
+        s.n_hi[i] = seeded.n_hi;
+        s.e_at_T[i] = seeded.internal_energy;
+        s.capacity[i] = seeded.heat_capacity;
+        s.x[i] = seeded.x;
+        s.pressure[i] = seeded.pressure;
     }
-    const MixtureThermo inner = decode_gamma_ghost(
+    bool caloric_seeded = true;
+    const CaloricMixtureThermo inner = decode_gamma_ghost(
         grid, grid.inner_boundary0_i, grid.phi_g_imh(0));
-    const MixtureThermo outer = decode_gamma_ghost(
+    const CaloricMixtureThermo outer = decode_gamma_ghost(
         grid, grid.outer_boundary0_i, grid.phi_g_iph(ns-1));
     // Thermal wall seen by conduction — identical to outer.T unless the scenario
     // decoupled the hydro ghost temperature from the conductive driving.
@@ -621,17 +637,32 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
     bool converged = false;
     bool previous_step_was_small = false;
     int converged_after_updates = 0;
+    // Diagnostic-only mirrors of the OUTER face's coefficients. Rewritten every
+    // iteration, so after the loop they hold the converged solve's values.
+    double diag_kr_top = 0.0, diag_cv_r_top = 0.0;
     for (int iteration = 0; iteration <= 40; ++iteration) {
         for (arma::uword i = 0; i < ns; ++i) {
-            const double n_h = s.rho[i]/eos_constants::m_h;
-            const double x = saha_ionization_fraction_n_h(n_h, s.temperature[i]);
-            s.n_e[i] = x*n_h;
-            s.n_hi[i] = (1.0-x)*n_h;
+            // ONE Saha evaluation per cell per Newton residual pass. This block
+            // previously called saha_ionization_fraction_n_h (ionization),
+            // equilibrium_heat_capacity (a second Saha) and — further down, at
+            // the same temperature — equilibrium_internal_energy (a third).
+            // Iteration 0 needs none of them: the decode above already evaluated
+            // the caloric EOS at this (rho, T).
+            if (!caloric_seeded) {
+                const CaloricState cs = equilibrium_caloric_state(
+                    s.rho[i], s.temperature[i]);
+                s.n_e[i] = cs.n_e;
+                s.n_hi[i] = cs.n_hi;
+                s.e_at_T[i] = cs.internal_energy;
+                s.capacity[i] = cs.heat_capacity;
+                s.x[i] = cs.x;
+                s.pressure[i] = cs.pressure;
+            }
             s.conductivity[i] = gamma_kappa_e(s.n_e[i],s.n_hi[i],s.temperature[i])
                 *gamma_trac_factor(grid,s.temperature[i])
                 +gamma_kappa_n(s.n_e[i],s.n_hi[i],s.temperature[i]);
-            s.capacity[i] = equilibrium_heat_capacity(s.rho[i],s.temperature[i]);
         }
+        caloric_seeded = false;
         const double k_inner = gamma_kappa_e(inner.n_e, inner.n_HI, inner.T)
                              * gamma_trac_factor(grid, inner.T)
                              + gamma_kappa_n(inner.n_e, inner.n_HI, inner.T);
@@ -653,8 +684,11 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
             double cv_l=s.capacity[i], cv_r=s.capacity[i];
             if (i>0) cv_l=0.5*(s.capacity[i]+s.capacity[i-1]);
             if (i+1<ns) cv_r=0.5*(s.capacity[i]+s.capacity[i+1]);
-            const double k_num_l = grid.numerical_diffusivity*cv_l;
-            const double k_num_r = grid.numerical_diffusivity*cv_r;
+            const double k_num_l = numerical_diffusivity_at_face(
+                grid, grid.ds_imh_i(i))*cv_l;
+            const double k_num_r = numerical_diffusivity_at_face(
+                grid, grid.ds_iph_i(i))*cv_r;
+            if (i+1 == ns) { diag_kr_top = kr; diag_cv_r_top = cv_r; }
             s.g_left[i] = grid.B_i(i)/grid.ds_i(i)
                       * (kl+k_num_l)/grid.B_imh(i)/grid.ds_imh_i(i);
             s.g_right[i] = grid.B_i(i)/grid.ds_i(i)
@@ -677,8 +711,9 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
                 s.g_right[i] = 0.0;
             }
             s.target[i] = s.e_old[i]+dt*divergence;
-            const double residual = equilibrium_internal_energy(s.rho[i],s.temperature[i])
-                                  -s.target[i];
+            // s.temperature has not changed since the fused evaluation above, so
+            // s.e_at_T[i] IS equilibrium_internal_energy(s.rho[i], s.temperature[i]).
+            const double residual = s.e_at_T[i]-s.target[i];
             s.a[i] = -dt*s.g_left[i];
             s.b[i] = s.capacity[i]+dt*(s.g_left[i]+s.g_right[i]);
             s.c[i] = -dt*s.g_right[i];
@@ -722,6 +757,27 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
     profile_note_conduction_iterations(
         static_cast<std::uint64_t>(converged_after_updates));
 
+    if (grid.capture_outer_conduction) {
+        OuterConductionCapture& oc = grid.outer_conduction_capture;
+        oc.T_top  = s.temperature[ns-1];
+        oc.T_wall = wall.T;
+        oc.kappa_phys_face = diag_kr_top;
+        oc.ds_face    = grid.ds_iph_i(ns-1);
+        oc.chi_num_face = numerical_diffusivity_at_face(grid, oc.ds_face);
+        oc.kappa_num_face  = oc.chi_num_face*diag_cv_r_top;
+        oc.area_ratio = grid.B_i(ns-1)/grid.B_iph(ns-1);
+        const double dT_over_ds = (oc.T_wall-oc.T_top)/oc.ds_face;
+        oc.q_phys = oc.kappa_phys_face*dT_over_ds;
+        oc.q_num  = oc.kappa_num_face *dT_over_ds;
+        oc.q_total = oc.q_phys+oc.q_num;
+        oc.imposed_neumann = grid.impose_outer_heat_flux;
+        oc.valid = true;
+    }
+
+    // Keep the simpler, provenance-safe final pack. The retained caloric cache
+    // previously allocated and copied an ns-sized vector every timestep without
+    // a repeatable wall-time benefit, while relying on an unchecked (rho,T)
+    // correspondence. The pack now performs one fused caloric evaluation itself.
     return pack_gamma_known_temperature(grid,state,s.target,s.temperature);
 }
 
@@ -739,9 +795,9 @@ double gamma_conduction_residual_max(const Grid& grid, const Vec& before,
                         + gamma_kappa_n(now.n_e(i), now.n_hi(i), now.temperature(i));
         capacity[i] = equilibrium_heat_capacity(now.rho_exact[i], now.temperature_exact[i]);
     }
-    const MixtureThermo inner = decode_gamma_ghost(
+    const CaloricMixtureThermo inner = decode_gamma_ghost(
         grid, grid.inner_boundary0_i, grid.phi_g_imh(0));
-    const MixtureThermo outer = decode_gamma_ghost(
+    const CaloricMixtureThermo outer = decode_gamma_ghost(
         grid, grid.outer_boundary0_i, grid.phi_g_iph(ns-1));
     const double k_inner = gamma_kappa_e(inner.n_e, inner.n_HI, inner.T)
                          * gamma_trac_factor(grid, inner.T)
@@ -766,9 +822,11 @@ double gamma_conduction_residual_max(const Grid& grid, const Vec& before,
         const double cv_l = i ? 0.5*(capacity[i]+capacity[i-1]) : capacity[i];
         const double cv_r = i+1 < ns ? 0.5*(capacity[i]+capacity[i+1]) : capacity[i];
         double gl = grid.B_i(i)/grid.ds_i(i)
-                  *(kl+grid.numerical_diffusivity*cv_l)/grid.B_imh(i)/grid.ds_imh_i(i);
+                  *(kl+numerical_diffusivity_at_face(grid,grid.ds_imh_i(i))*cv_l)
+                  /grid.B_imh(i)/grid.ds_imh_i(i);
         double gr = grid.B_i(i)/grid.ds_i(i)
-                  *(kr+grid.numerical_diffusivity*cv_r)/grid.B_iph(i)/grid.ds_iph_i(i);
+                  *(kr+numerical_diffusivity_at_face(grid,grid.ds_iph_i(i))*cv_r)
+                  /grid.B_iph(i)/grid.ds_iph_i(i);
         const double tl = i ? now.temperature(i-1) : inner.T;
         const double tr = i+1 < ns ? now.temperature(i+1) : wall.T;
         double divergence = gr*(tr-now.temperature(i))-gl*(now.temperature(i)-tl);
@@ -1106,13 +1164,17 @@ static void apply_conduction_stage(const Grid& grid, Vec& prim_state, float dt) 
     // (ion C = 3 n_i k_B, neutral C = 1.5 n_n k_B). Folding it into K turns the
     // existing backward-Euler tridiagonal into an unconditionally-stable solve
     // for the combined Spitzer + isotropic-diffusion operator at no extra cost.
-    const float chi = grid.numerical_diffusivity;
+    Vec chi_iph(grid.ns), chi_imh(grid.ns);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        chi_iph(i) = numerical_diffusivity_at_face(grid, grid.ds_iph_i(i));
+        chi_imh(i) = numerical_diffusivity_at_face(grid, grid.ds_imh_i(i));
+    }
     // K_num = χ · C_face. Charged-row capacity is cfac·n_i k_B (cfac = 3 single-T,
     // 1.5 three-T), so the face value is 0.5·cfac·k_B·(n_i + n_i_shift).
-    const Vec Knum_iph_i = (0.5f * cfac * grid.k_b * chi) * (n_i + n_i_ip1);
-    const Vec Knum_imh_i = (0.5f * cfac * grid.k_b * chi) * (n_i + n_i_im1);
-    const Vec Knum_iph_n = (0.5f * grid.inv_gm1() * grid.k_b * chi) * (n_n + n_n_ip1);
-    const Vec Knum_imh_n = (0.5f * grid.inv_gm1() * grid.k_b * chi) * (n_n + n_n_im1);
+    const Vec Knum_iph_i = (0.5f * cfac * grid.k_b) * (n_i + n_i_ip1) % chi_iph;
+    const Vec Knum_imh_i = (0.5f * cfac * grid.k_b) * (n_i + n_i_im1) % chi_imh;
+    const Vec Knum_iph_n = (0.5f * grid.inv_gm1() * grid.k_b) * (n_n + n_n_ip1) % chi_iph;
+    const Vec Knum_imh_n = (0.5f * grid.inv_gm1() * grid.k_b) * (n_n + n_n_im1) % chi_imh;
 
     // TRAC broadening (Johnston 2020): below the adaptive cutoff T_c the charged-
     // fluid conductivity is enhanced by ε=(T_c/T)^{5/2} (→ κ' = κ(T_c), constant),

@@ -168,12 +168,12 @@ Vec project_equilibrium_single_fluid(const Grid& grid, const Vec& cons_state) {
         };
         const double phi = 0.5 * (static_cast<double>(grid.phi_g_imh(i))
                                 + static_cast<double>(grid.phi_g_iph(i)));
-        const ProjectedMixture cell = project_equilibrium_single_fluid(
+        const ProjectedMixtureRows cell = project_equilibrium_rows(
             grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
             at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
             phi, static_cast<double>(grid.eos_trace_fraction_floor),
             grid.eos_temperature_hint(i), grid.eos_gamma_debug_clamp);
-        grid.store_eos_temperature_hint(i, cell.thermo.T);
+        grid.store_eos_temperature_hint(i, cell.temperature);
         projected(arma::sub2ind(size, i, cons::RHO_I)) = static_cast<float>(cell.rho_i);
         projected(arma::sub2ind(size, i, cons::RHO_N)) = static_cast<float>(cell.rho_n);
         projected(arma::sub2ind(size, i, cons::MOM_I)) = static_cast<float>(cell.momentum_i);

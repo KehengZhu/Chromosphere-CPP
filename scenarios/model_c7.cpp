@@ -598,8 +598,7 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
     // q(T), not by χ), so a modest value suffices. Scale ∝ Δs so coarser grids
     // diffuse over a comparable number of cells.
     {
-        const float ds_mean = arma::mean(grid.ds_i);   // ≈ 1.1×10⁴ m
-        grid.numerical_diffusivity = 2.0e3f * ds_mean;  // ≈ 2.2×10⁷ m² s⁻¹
+        grid.numerical_diffusivity_per_length = 2.0e3f; // C_num [m/s]
     }
 
     // TRAC (Johnston et al. 2020): broaden the under-resolved TR so the coarse

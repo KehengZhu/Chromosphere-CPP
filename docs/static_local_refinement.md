@@ -16,7 +16,10 @@ coarse spacing above 800 km, and transitions smoothly over **700–800 km** with
 adjacent cell-width ratio capped at **1.1**.
 
 The face grid is built by `scenarios/mesh.{hpp,cpp}` from a coarse-equivalent cell
-count `ns_coarse` (= `ISO_NS` for `model_isentropic`) and the refine parameters:
+count `ns_coarse` (= `ISO_NS`) and the refine parameters. There are two profiles,
+selected by `ISO_REFINE_PROFILE` / `GRID_REFINE_PROFILE`.
+
+### `lower` (default) — a refined band anchored near the inner boundary
 
 | segment | span | spacing |
 |---|---|---|
@@ -25,23 +28,80 @@ count `ns_coarse` (= `ISO_NS` for `model_isentropic`) and the refine parameters:
 | transition | `[s_hi, s_hi + τ]` | exponential (geometric) grade `fine → coarse`, ratio ≤ 1.1 |
 | outer coarse | `[s_hi + τ, L]` | `≈ coarse_ds` (the retained outer spacing) |
 
-The segment boundaries `0`, `s_lo`, `s_hi`, `s_hi + τ` and the domain top `L` are
-exact faces. Refinement only **adds lower-domain cells**; `ISO_NS` stays the
-coarse-grid-equivalent count and the rest of the column is never coarsened.
+### `outer` — a compact refined band that reaches the OUTER boundary (the upper TR)
+
+| segment | span | spacing |
+|---|---|---|
+| coarse | `[0, s_lo − τ]` | `coarse_ds = L/ns_coarse` |
+| transition | `[s_lo − τ, s_lo]` | exponential grade `coarse → fine`, ratio ≤ 1.1 |
+| fine | `[s_lo, L]` | `≈ coarse_ds / factor`, up to and including the outer face |
+
+Here `s_lo` is the foot of the fully refined region and the transition sits
+immediately **below** it; `s_hi` is unused (the fine band always ends at the domain
+top). This is the profile for the truncated 1600–2153 km column, where the steep TR
+and the observed grid-scale `ρV` structure sit within ~50 km of the outer boundary.
+
+`0`, `s_lo`, the transition foot and the domain top `L` are exact faces, and every
+segment's cell count is a `ceil` so no segment is ever coarser than its target
+spacing. Refinement only **adds cells**; `ISO_NS` stays the coarse-grid-equivalent
+count and the rest of the column is never coarsened.
+
+**The transition width is an output, not an input.** The grade's cell widths are
+`fine_ds·r^m` with `r = factor^{1/n}`, so the narrow end matches the fine spacing
+*exactly* and every adjacent ratio — inside the grade **and at both junctions** — is
+`r ≤ MESH_MAX_RATIO = 1.1`. That fixes the width to `fine_ds·(factor−1)/(r−1)`, so
+`*_TRANSITION_KM` acts as a **minimum**: `n` is the smallest count whose grade is at
+least that wide. A requested width the ratio cap cannot support is widened to the
+nearest one it can, instead of silently exceeding the cap. (The previous builder
+chose `n` by `ceil` of two competing estimates and *did* break the cap — up to 1.17
+adjacent ratio — for a tight transition; the generous `lower` profile was unaffected
+in practice, and its transition is now 100.2 km rather than exactly 100 km.)
 
 ## Mesh controls (environment)
 
 Generic (all static scenarios):
 
 - `GRID_REFINE_FACTOR` — fine/coarse resolution ratio; **`1` disables** (default).
+- `GRID_REFINE_PROFILE` — `lower` (default) or `outer`.
 - `GRID_REFINE_S_LO_KM` — inner edge of the refined region (default `0`).
-- `GRID_REFINE_S_HI_KM` — outer edge of the refined region (default `700`).
-- `GRID_REFINE_TRANSITION_KM` — transition width (default `100`).
+- `GRID_REFINE_S_HI_KM` — outer edge of the refined region, `lower` only (default `700`).
+- `GRID_REFINE_TRANSITION_KM` — **minimum** transition width (default `100`).
 
-`model_isentropic` additionally accepts `ISO_REFINE_FACTOR`, `ISO_REFINE_S_LO_KM`,
-`ISO_REFINE_S_HI_KM`, `ISO_REFINE_TRANSITION_KM`, which **override** the generic
-`GRID_REFINE_*`. The documented diagnostic profile is `factor 4`, `s_lo 0`,
-`s_hi 700`, `transition 100`.
+`model_column` additionally accepts `ISO_REFINE_FACTOR`, `ISO_REFINE_PROFILE`,
+`ISO_REFINE_S_LO_KM`, `ISO_REFINE_S_HI_KM`, `ISO_REFINE_TRANSITION_KM`, which
+**override** the generic `GRID_REFINE_*`. The documented lower-domain diagnostic
+profile is `factor 4`, `s_lo 0`, `s_hi 700`, `transition 100`; the documented
+upper-TR profile on the 1600–2153 km domain is
+
+```text
+ISO_REFINE_PROFILE=outer ISO_REFINE_FACTOR=4 ISO_REFINE_S_LO_KM=500 ISO_REFINE_TRANSITION_KM=20
+```
+
+i.e. coarse 1600–2080 km, grade 2080–2100 km, fine 2100–2153 km.
+
+### Numerical diffusivity follows the local face spacing
+
+Scenarios store the mesh-independent coefficient
+`numerical_diffusivity_per_length = C_num` in m/s. `model_column` uses
+
+```text
+C_num = (ISO_CORONA ? 4 : 1) * 2000 * ISO_NUMERICAL_DIFFUSIVITY_MULT  [m/s].
+```
+
+The shared conduction helper constructs the actual diffusivity independently on
+every face,
+
+```text
+chi_num,f = C_num * ds_face,
+K_num,f   = chi_num,f * C_V,f,
+```
+
+using `ds_imh_i(i)` / `ds_iph_i(i)`, including their existing mirrored boundary
+geometry. Thus a factor-four refined band automatically receives about one quarter
+of the coarse-region diffusivity, with a smooth change through the graded band. A
+uniform mesh is unchanged because every `ds_face` equals the old uniform `ds_m`.
+`ISO_NUMERICAL_DIFFUSIVITY_MULT` still multiplies only `C_num`; it is not a local
+sensor.
 
 **Scenario coverage.** The mesh builder, the Grid metric caches, and every
 non-uniform-correct operator below are scenario-agnostic — any static scenario runs

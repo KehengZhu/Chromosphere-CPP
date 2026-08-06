@@ -62,6 +62,15 @@ inline Vec face_conductivity_series(const Vec& K_here, const Vec& K_there,
     return (ds_here + ds_there) / (ds_here / kh + ds_there / kt);
 }
 
+/// Face-local artificial thermal diffusivity [m^2/s]. C_num is stored on Grid in
+/// [m/s]; ds_face is the actual centre-to-centre distance, including the mirrored
+/// ghost geometry at domain boundaries.
+template <typename FaceSpacing>
+inline auto numerical_diffusivity_at_face(const Grid& grid,
+                                          const FaceSpacing& ds_face) {
+    return grid.numerical_diffusivity_per_length * ds_face;
+}
+
 /// Neutral heat conductivity in SI units (writeup eq 59).
 inline Vec kappa_n(const Vec& n_i, const Vec& n_n, const Vec& T_i, const Vec& T_n) {
     return (0.0342006f * n_n % T_n)
@@ -92,14 +101,15 @@ inline double physical_conductivity(double n_e, double n_n, double temperature) 
 /// cell-centred coefficient before face averaging.
 inline double solver_effective_conductivity(const Grid& grid, double n_e,
                                             double n_n, double temperature,
-                                            double heat_capacity) {
+                                            double heat_capacity,
+                                            double local_spacing) {
     double trac = 1.0;
     if (grid.enable_trac && grid.trac_cutoff_T > grid.trac_T_chrom
         && temperature >= grid.trac_T_chrom && temperature < grid.trac_cutoff_T)
         trac = std::pow(static_cast<double>(grid.trac_cutoff_T)/temperature, 2.5);
     return trac*physical_kappa_e(n_e, n_n, temperature)
          + physical_kappa_n(n_e, n_n, temperature)
-         + grid.numerical_diffusivity*heat_capacity;
+         + numerical_diffusivity_at_face(grid, local_spacing)*heat_capacity;
 }
 
 /// Ion-neutral collision frequency, target-density form (writeup eq 57):

@@ -76,7 +76,14 @@ const bool USE_NEUMANN_BC = false;
 /// preserves reentrancy and avoids function-static state.
 struct GammaConductionScratch {
     std::vector<double> rho, e_old, temperature, target;
-    std::vector<double> conductivity, capacity, n_e, n_hi;
+    // `e_at_T` is e_int(rho, temperature) of the CURRENT Newton iterate. The
+    // ionization fraction, the heat capacity, the conductivity inputs and this
+    // residual energy all come from one fused Saha evaluation per cell per pass
+    // (they used to be three independent Saha solves).
+    // On convergence these still describe the FINAL accepted temperature, so the
+    // known-temperature packing that closes the stage reuses them instead of
+    // re-solving Saha at the same (rho, T).
+    std::vector<double> conductivity, capacity, n_e, n_hi, e_at_T, x, pressure;
     std::vector<double> g_left, g_right;
     std::vector<double> a, b, c, rhs, delta;
 
@@ -108,6 +115,15 @@ struct GammaRhsScratch {
     DecodedMixtureField predicted;
     std::array<arma::Col<double>, 24> mixture;
     std::array<Vec, 20> packed;
+
+    // Non-uniform MUSCL reconstruction weights and slope-ratio metrics. They are
+    // functions of the STATIC mesh alone (ds_i via ds_iph_i/ds_imh_i), so they are
+    // built once per mesh generation instead of once per timestep.
+    //   W1/W3/W4       half-width weights of the owning cell
+    //   metric_r/_ip1/_im1  center-to-center gradient-ratio corrections
+    arma::Col<double> W1, W3, W4, metric_r, metric_r_ip1, metric_r_im1;
+    std::uint64_t weights_generation = 0;
+    bool weights_valid = false;
 };
 
 /// READ-ONLY capture of the production gamma-table reconstruction and Rusanov
@@ -145,6 +161,32 @@ struct GammaFaceFluxCapture {
         for (std::vector<double>* v : all) v->assign(ns, 0.0);
         valid = false;
     }
+};
+
+/// READ-ONLY capture of the OUTER-face (i = ns-1, upper face) quantities of the
+/// FINAL CONVERGED Newton iteration of apply_gamma_conduction_stage — the ones
+/// that actually built g_right[ns-1] for the accepted solve. Filled only when
+/// Grid::capture_outer_conduction is true and never read back by any solver
+/// stage, so enabling it cannot change a numerical result.
+///
+/// The production outer-face conductive flux INTO the top cell is
+///     q_total = (kappa_phys_face + kappa_num_face) * (T_wall - T_top)/ds_face,
+/// with kappa_phys_face the face average of the top-cell and wall-ghost
+/// (kappa_e*TRAC + kappa_n), chi_num_face = C_num*ds_face, and
+/// kappa_num_face = chi_num_face*C_V(face),
+/// ds_face = ds_iph_i(ns-1) (top-cell CENTRE to ghost CENTRE, = ds on a uniform
+/// mesh), and area_ratio = B_i/B_iph the flux-tube factor that converts this face
+/// flux into the cell's volumetric divergence. Positive = heating the top cell.
+struct OuterConductionCapture {
+    double T_top = 0.0, T_wall = 0.0;   // [K] top-cell centre / Dirichlet ghost datum
+    double kappa_phys_face = 0.0;       // [W m^-1 K^-1]
+    double chi_num_face    = 0.0;       // [m^2 s^-1] C_num * ds_face
+    double kappa_num_face  = 0.0;       // [W m^-1 K^-1] chi_num_face * C_V(face)
+    double ds_face = 0.0;               // [m]
+    double area_ratio = 0.0;            // B_i(ns-1)/B_iph(ns-1)
+    double q_phys = 0.0, q_num = 0.0, q_total = 0.0;  // [W m^-2], into the top cell
+    bool   imposed_neumann = false;     // impose_outer_heat_flux replaced the above
+    bool   valid = false;
 };
 
 // ============================================================================
@@ -372,15 +414,12 @@ struct Grid {
     // so it is also disabled when conduction is off.
     bool enable_conduction = true;
 
-    // Isotropic numerical thermal diffusivity χ_num [m²/s] added to the Stage D
-    // conduction operator (Pandey et al. 2024 §3.3): an explicit ∂T/∂t = χ ∂²T/∂s²
-    // term, realized as an additive face conductivity K_num = χ·C (C = heat
-    // capacity per volume), that damps under-resolved TR / base gradients and
-    // reflected boundary waves which Spitzer conduction alone leaves unstable.
-    // Pandey's benchmark is χ ≳ 30×10⁸ m² s⁻¹ at Δz = 40 km; finer grids need
-    // larger χ. Default 0 so the existing test suite stays a clean baseline;
-    // scenarios scale it to Δs (model_c7 sets it in model_c7_ic).
-    float numerical_diffusivity = 0.0f;
+    // Mesh-independent isotropic numerical-diffusion coefficient C_num [m/s].
+    // Stage D constructs the actual diffusivity independently at each face as
+    // chi_num,f = C_num*Delta_s_f, using the real centre-to-centre face distance,
+    // then adds K_num,f = chi_num,f*C_V,f to the physical face conductivity.
+    // Default 0 keeps numerical conduction disabled unless a scenario requests it.
+    float numerical_diffusivity_per_length = 0.0f;
 
     // Upper-boundary coronal conductive heat flux q(T) [W/m²], imposed as a
     // Neumann (fixed-flux) outer BC on the charged-fluid conduction row (Stage D)
@@ -615,6 +654,13 @@ struct Grid {
     bool capture_face_flux = false;
     mutable GammaFaceFluxCapture face_flux_capture;
 
+    // Diagnostic-only: when true, every apply_gamma_conduction_stage solve copies
+    // its FINAL CONVERGED outer-face conduction quantities into
+    // outer_conduction_capture. Pure output; no stage reads it back. Default false.
+    // The driver (chromo_main, CHROMO_OUTER_COND_DIAG) sets it once per run.
+    bool capture_outer_conduction = false;
+    mutable OuterConductionCapture outer_conduction_capture;
+
     // --- cell-centered & face arrays (length ns) --------------------------
     Vec ds_i;
     Vec B_i, B_imh, B_iph;
@@ -672,7 +718,34 @@ struct Grid {
     /// Recompute the packed `_state` broadcasts and the static-mesh metric caches
     /// from ds_i, B_i, B_imh, B_iph, dinvB_ds_i. Call after editing any of those
     /// fields. Throws std::runtime_error on a non-positive / non-finite ds_i.
+    ///
+    /// Everything broadcast() derives depends ONLY on the static mesh (ds_i) and
+    /// the magnetic geometry (B_i, B_imh, B_iph, dinvB_ds_i) — never on the ghost
+    /// buffers or the conserved state. Several scenarios nevertheless call it from
+    /// their per-step boundary refresh, where it re-derived ~50 n_state-sized
+    /// temporaries per timestep for an unchanged mesh. broadcast() therefore
+    /// fingerprints those five source arrays and rebuilds only when one of them
+    /// actually changed (grid initialization, resize, mesh construction, magnetic
+    /// geometry edits); an ordinary boundary update becomes an O(ns) compare.
+    /// force_rebuild_metrics() bypasses the fingerprint.
     void broadcast();
+
+    /// Unconditional rebuild of the static-mesh / packed-geometry caches.
+    void force_rebuild_metrics();
+
+    /// Bumped by every force_rebuild_metrics(). Downstream caches derived from
+    /// the static mesh (e.g. GammaRhsScratch's reconstruction weights) compare
+    /// against it to know when they must be rebuilt.
+    std::uint64_t metrics_generation() const { return metrics_generation_; }
+
+private:
+    /// Snapshot of the geometry the caches above were derived from.
+    Vec metrics_ds_i, metrics_B_i, metrics_B_imh, metrics_B_iph,
+        metrics_dinvB_ds_i;
+    bool metrics_valid = false;
+    std::uint64_t metrics_generation_ = 0;
+
+    bool static_metrics_current() const;
 };
 
 

@@ -18,36 +18,57 @@
 
 namespace chromosphere {
 
+// Which end of the domain the refined band is anchored to.
+enum class RefineProfile {
+    // coarse → fine [s_lo,s_hi] → graded fine→coarse transition → coarse.
+    // The historical (lower-domain) profile; `s_hi` and the transition ABOVE it
+    // are both meaningful.
+    Lower,
+    // coarse → graded coarse→fine transition [s_lo−τ,s_lo] → fine [s_lo,L].
+    // A compact refined band that reaches the OUTER boundary (the upper TR).
+    // `s_hi_km` is unused: the fine region always ends at the domain top, and
+    // the transition sits immediately BELOW `s_lo`.
+    Outer,
+};
+
 // Static local-refinement controls. Read from the environment; the documented
-// diagnostic profile refines the lower domain 0–700 km by 4× and transitions
-// back to the outer coarse spacing smoothly over 700–800 km. Coordinates are
-// field-line distance [km] from the domain INNER face (s = 0 at the inner
-// boundary), so the 0–700 km region matches the photosphere-anchored scenarios.
+// lower-domain diagnostic profile refines 0–700 km by 4× and transitions back to
+// the outer coarse spacing smoothly over 700–800 km, while the documented
+// outer/TR profile refines from s_lo up to the domain top with the transition in
+// [s_lo−τ, s_lo]. Coordinates are field-line distance [km] from the domain INNER
+// face (s = 0 at the inner boundary).
 struct RefineParams {
     double factor        = 1.0;    // fine/coarse resolution ratio; 1 ⇒ disabled
     double s_lo_km       = 0.0;    // inner edge of the refined region [km]
-    double s_hi_km       = 700.0;  // outer edge of the refined region [km]
-    double transition_km = 100.0;  // width of the fine→coarse transition [km]
+    double s_hi_km       = 700.0;  // outer edge of the refined region [km] (Lower only)
+    double transition_km = 100.0;  // width of the graded coarse↔fine transition [km]
+    RefineProfile profile = RefineProfile::Lower;
 
     bool enabled() const { return factor > 1.0 + 1.0e-9; }
 };
 
-// Read GRID_REFINE_FACTOR / _S_LO_KM / _S_HI_KM / _TRANSITION_KM. When
-// `iso_alias` is true the ISO_REFINE_* variables OVERRIDE their GRID_REFINE_*
-// counterparts (model_column). Missing variables keep the struct defaults.
+// Read GRID_REFINE_FACTOR / _S_LO_KM / _S_HI_KM / _TRANSITION_KM / _PROFILE
+// (`lower` | `outer`, case-insensitive). When `iso_alias` is true the
+// ISO_REFINE_* variables OVERRIDE their GRID_REFINE_* counterparts
+// (model_column). Missing variables keep the struct defaults.
 RefineParams refine_params_from_env(bool iso_alias);
 
 // Build canonical cell FACES [m], measured from the inner face: the returned
 // vector has (ncells+1) entries, faces.front() == 0 and faces.back() == length_m
 // exactly. `ns_coarse` is the coarse-grid-equivalent cell count; the coarse
-// spacing is length_m/ns_coarse and refinement only ADDS lower-domain cells (it
-// never coarsens the rest of the column). When rp is disabled — or the refined
-// window does not fit inside the domain — a uniform ns_coarse grid is returned.
+// spacing is length_m/ns_coarse and refinement only ADDS cells (it never coarsens
+// the rest of the column). When rp is disabled — or the refined window does not
+// fit inside the domain — a uniform ns_coarse grid is returned.
 //
-// The refined column is [0,s_lo] coarse, [s_lo,s_hi] fine (≈coarse/factor),
-// [s_hi,s_hi+transition] an exponential (geometric) grade with adjacent
-// cell-width ratio ≤ MESH_MAX_RATIO, then [s_hi+transition,length] coarse. The
-// segment boundaries 0, s_lo, s_hi and s_hi+transition are exact faces.
+// RefineProfile::Lower: [0,s_lo] coarse, [s_lo,s_hi] fine (≈coarse/factor),
+// [s_hi,s_hi+transition] an exponential (geometric) grade fine→coarse, then
+// [s_hi+transition,length] coarse. Exact faces at 0, s_lo, s_hi, s_hi+transition.
+//
+// RefineProfile::Outer: [0,s_lo−transition] coarse, [s_lo−transition,s_lo] an
+// exponential grade coarse→fine, then [s_lo,length] fine (≈coarse/factor) all the
+// way to the outer boundary. Exact faces at 0, s_lo−transition, s_lo, length.
+//
+// Both grades keep the adjacent cell-width ratio ≤ MESH_MAX_RATIO.
 std::vector<double> build_static_mesh_faces(double length_m,
                                             arma::uword ns_coarse,
                                             const RefineParams& rp);

@@ -79,10 +79,11 @@ std::string sha256_file(const std::string& path) {
 }
 
 double gamma_solver_conductivity(const chromosphere::Grid& grid,
-                                 const chromosphere::MixtureThermo& th) {
+                                 const chromosphere::MixtureThermo& th,
+                                 double local_spacing) {
     return chromosphere::solver_effective_conductivity(
         grid, th.n_e, th.n_HI, th.T,
-        chromosphere::equilibrium_heat_capacity(th.rho, th.T));
+        chromosphere::equilibrium_heat_capacity(th.rho, th.T), local_spacing);
 }
 
 } // namespace
@@ -114,6 +115,7 @@ int main(int argc, char** argv) {
     const bool ionization_on        = (ioniz_arg != "no-ionization");
     const bool cooling_on           = (cool_arg != "no-cooling");
     const bool profiling_on         = env_enabled("CHROMO_PROFILE");
+    const bool eos_counting_on       = env_enabled("CHROMO_EOS_COUNTS");
     const bool write_output         = env_enabled("CHROMO_OUTPUT", true);
     const bool write_gamma_diag     = env_enabled("CHROMO_GAMMA_DIAG", true);
     // Read-only face-flux diagnostic (default OFF). CHROMO_FACE_FLUX_DIAG=1 writes
@@ -123,8 +125,16 @@ int main(int argc, char** argv) {
     // CHROMO_FACE_FLUX_STRIDE sets the capture cadence in steps (default: the
     // snapshot stride). Enabling it changes no numerical result.
     const bool write_face_flux      = env_enabled("CHROMO_FACE_FLUX_DIAG", false);
+    // Read-only outer-face conduction diagnostic (default OFF). =1 writes a
+    // <out>.outercond sidecar with the OUTER-face quantities of the final converged
+    // conduction Newton iteration: T_top, T_wall, the physical and numerical face
+    // conductivities, and the corresponding q_phys / q_num / q_total. One row per
+    // captured step. Enabling it changes no numerical result.
+    const bool write_outer_cond     = env_enabled("CHROMO_OUTER_COND_DIAG", false);
     set_runtime_profiling(profiling_on);
     reset_runtime_profile();
+    set_eos_operation_counting(eos_counting_on);
+    reset_eos_operation_counts();
 
     float cfl = 0.25f;
     if (const char* e = std::getenv("CHROMO_CFL")) { try { cfl = std::stof(e); } catch (...) {} }
@@ -278,7 +288,8 @@ int main(int argc, char** argv) {
                            << "  " << th.x_eq << "  " << th.n_e << "  " << th.n_HI
                            << "  " << (th.p_i+th.p_n) << "  " << th.gamma1
                            << "  " << physical_conductivity(th.n_e,th.n_HI,th.T)
-                           << "  " << gamma_solver_conductivity(grid,th) << '\n';
+                           << "  " << gamma_solver_conductivity(
+                                  grid, th, grid.ds_i(i)) << '\n';
             }
         }
     };
@@ -341,6 +352,47 @@ int main(int argc, char** argv) {
         face_flux.precision(10);
     }
 
+    // Outer-face conduction sidecar. One row per captured step, holding the outer-face
+    // quantities of the FINAL CONVERGED Newton iteration of that step's conduction
+    // solve. t/step label the START of the step, matching the .faceflux convention.
+    std::ofstream outer_cond;
+    int outer_cond_stride = face_flux_stride;
+    if (const char* e = std::getenv("CHROMO_OUTER_COND_STRIDE")) {
+        try { outer_cond_stride = std::max(1, std::stoi(e)); } catch (...) {}
+    }
+    if (write_outer_cond) {
+        if (grid.eos_gamma_table.empty())
+            throw std::runtime_error(
+                "CHROMO_OUTER_COND_DIAG requires gamma-table mode (the capture lives "
+                "in apply_gamma_conduction_stage)");
+        outer_cond.open(out_path+".outercond");
+        if (!outer_cond) throw std::runtime_error("cannot open outer-conduction sidecar");
+        outer_cond << "# outer-face conduction diagnostic (read-only capture of the "
+                      "final converged apply_gamma_conduction_stage iteration)\n"
+                   << "# ns=" << grid.ns << " ds_km=" << (grid.ds_i(grid.ns-1)*1.0e-3f)
+                   << " numerical_diffusivity_per_length="
+                   << grid.numerical_diffusivity_per_length
+                   << " uniform_mesh=" << grid.uniform_mesh
+                   << " impose_outer_heat_flux=" << grid.impose_outer_heat_flux << '\n'
+                   << "# q = (kappa_phys_face + kappa_num_face)*(T_wall - T_top)/ds_face"
+                      "  [W m^-2, positive = into the top cell]\n"
+                   << "# columns=t step T_top T_wall kappa_phys_face chi_num_face "
+                      "kappa_num_face "
+                      "ds_face area_ratio q_phys q_num q_total\n";
+        outer_cond.precision(10);
+    }
+
+    auto write_outer_cond_record = [&](float t_now, int step_now) {
+        const OuterConductionCapture& oc = grid.outer_conduction_capture;
+        if (!outer_cond || !oc.valid) return;
+        outer_cond << t_now << ' ' << step_now << ' '
+                   << oc.T_top << ' ' << oc.T_wall << ' '
+                   << oc.kappa_phys_face << ' ' << oc.chi_num_face << ' '
+                   << oc.kappa_num_face << ' '
+                   << oc.ds_face << ' ' << oc.area_ratio << ' '
+                   << oc.q_phys << ' ' << oc.q_num << ' ' << oc.q_total << '\n';
+    };
+
     auto write_face_record = [&](float t_now, int step_now) {
         const GammaFaceFluxCapture& c = grid.face_flux_capture;
         if (!face_flux || !c.valid) return;
@@ -391,6 +443,10 @@ int main(int argc, char** argv) {
         if (write_face_flux)
             grid.capture_face_flux = (step % face_flux_stride == 0)
                 || (time + dt_avg >= total_time) || (step + 1 >= step_cap);
+        const bool capture_cond_now = write_outer_cond
+            && ((step % outer_cond_stride == 0)
+                || (time + dt_avg >= total_time) || (step + 1 >= step_cap));
+        grid.capture_outer_conduction = capture_cond_now;
 
         if (step % 100 == 0) {
             std::cout << "[" << mode << "] step = " << step
@@ -408,6 +464,10 @@ int main(int argc, char** argv) {
             write_face_record(time, step);   // t/step of the state the RHS was taken at
             grid.capture_face_flux = false;
         }
+        if (capture_cond_now) {
+            write_outer_cond_record(time, step);
+            grid.capture_outer_conduction = false;
+        }
         time += dt_avg;
         ++step;
         ++state_generation;
@@ -423,5 +483,11 @@ int main(int argc, char** argv) {
 
     std::cout << "[" << mode << "] END! step=" << step << " time=" << time << std::endl;
     print_runtime_profile(std::cout);
+    if (eos_counting_on) {
+        const EosOperationCounts counts = eos_operation_counts();
+        std::cout << "eos.gamma1_queries=" << counts.gamma1_queries << '\n'
+                  << "eos.temperature_logs=" << counts.temperature_logs << '\n'
+                  << "eos.n_h_logs=" << counts.n_h_logs << std::endl;
+    }
     return 0;
 }

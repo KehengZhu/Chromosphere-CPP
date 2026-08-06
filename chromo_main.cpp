@@ -2,6 +2,7 @@
 #include "physics.hpp"
 #include "profiling.hpp"
 #include "parallel.hpp"
+#include "run_control.hpp"
 #include "scenarios/scenario.hpp"
 
 #include <armadillo>
@@ -219,13 +220,28 @@ int main(int argc, char** argv) {
     float total_time = time_mult * 10.0f * arma::sum(grid.ds_i) / c_s_target;
     // Optional absolute stop time for reproducible long diagnostics. Unset keeps
     // the historical time_mult-derived behavior byte-for-byte unchanged.
-    if (const char* end = std::getenv("CHROMO_T_END")) {
+    const char* end_time_env = std::getenv("CHROMO_T_END");
+    bool end_time_requested = false;
+    if (end_time_env) {
         try {
-            const float requested = std::stof(end);
-            if (requested > 0.0f && std::isfinite(requested)) total_time = requested;
+            const float requested = std::stof(end_time_env);
+            if (requested > 0.0f && std::isfinite(requested)) {
+                total_time = requested;
+                end_time_requested = true;
+            }
         } catch (...) {}
     }
-    const int   step_cap   = static_cast<int>(std::max(10000.0f, 10000.0f * time_mult));
+    // Step cap. An explicit CHROMO_STEP_CAP always wins. Without it, a run that
+    // sets CHROMO_T_END is governed by the end time (the legacy time_mult cap
+    // would truncate it); a run without CHROMO_T_END keeps the legacy cap.
+    const StepCapSelection cap_sel = select_step_cap(
+        std::getenv("CHROMO_STEP_CAP"),
+        end_time_requested ? end_time_env : nullptr, time_mult);
+    if (!cap_sel.valid()) {
+        std::cerr << "step-cap error: " << cap_sel.error << std::endl;
+        return 1;
+    }
+    const long long step_cap = cap_sel.cap;
 
     std::ofstream logf("outputs/output.log", std::ios::app);
     logf << "[" << out_path << " mode=" << mode << "] Total time = " << total_time << std::endl;
@@ -269,7 +285,7 @@ int main(int argc, char** argv) {
                    << "# columns=rho_total v_cm T x_eq n_e n_HI p_total Gamma1 kappa_physical kappa_solver\n";
     }
 
-    auto write_frame = [&](float t_now, int step_now) {
+    auto write_frame = [&](float t_now, long long step_now) {
         ProfileScope output_timer(ProfileRegion::Output);
         if (fout) {
             fout << "# t = " << t_now << " step = " << step_now << '\n';
@@ -312,6 +328,22 @@ int main(int argc, char** argv) {
         static_cast<int>(10.0f * std::max(1.0f, time_mult / 5.0f)));
     if (const char* stride = std::getenv("CHROMO_FRAME_STRIDE")) {
         try { frame_stride = std::max(1, std::stoi(stride)); } catch (...) {}
+    }
+    // CHROMO_FRAME_DT switches the snapshot cadence from a step stride to
+    // physical seconds. Required for long CHROMO_T_END runs: the stride above is
+    // derived from time_mult, so a 1000 s run at a 20 s stride would emit tens of
+    // thousands of snapshots and spend most of its wall time formatting ASCII.
+    // Unset -> the legacy stride cadence is reproduced exactly.
+    OutputSchedule schedule = OutputSchedule::from_stride(frame_stride);
+    if (const char* e = std::getenv("CHROMO_FRAME_DT")) {
+        double frame_dt = 0.0;
+        try { frame_dt = std::stod(e); } catch (...) {}
+        if (!(frame_dt > 0.0) || !std::isfinite(frame_dt)) {
+            std::cerr << "CHROMO_FRAME_DT must be a positive finite number of "
+                         "physical seconds, got '" << e << "'" << std::endl;
+            return 1;
+        }
+        schedule = OutputSchedule::from_frame_dt(frame_dt);
     }
     // Face-flux sidecar. One record per captured step, written AFTER the step but
     // holding the RHS evaluation of the state at the START of that step (the flux
@@ -392,7 +424,7 @@ int main(int argc, char** argv) {
         outer_cond.precision(10);
     }
 
-    auto write_outer_cond_record = [&](float t_now, int step_now) {
+    auto write_outer_cond_record = [&](float t_now, long long step_now) {
         const OuterConductionCapture& oc = grid.outer_conduction_capture;
         if (!outer_cond || !oc.valid) return;
         outer_cond << t_now << ' ' << step_now << ' '
@@ -403,7 +435,7 @@ int main(int argc, char** argv) {
                    << oc.q_phys << ' ' << oc.q_num << ' ' << oc.q_total << '\n';
     };
 
-    auto write_face_record = [&](float t_now, int step_now) {
+    auto write_face_record = [&](float t_now, long long step_now) {
         const GammaFaceFluxCapture& c = grid.face_flux_capture;
         if (!face_flux || !c.valid) return;
         {
@@ -426,12 +458,15 @@ int main(int argc, char** argv) {
     };
 
     float     time         = 0.0f;
-    int       step         = 0;
+    long long step         = 0;
     std::uint64_t state_generation = 0;
     DecodedMixtureField decoded_storage[2];
     DecodedMixtureField* decoded=&decoded_storage[0];
     const DecodedMixtureField* previous_decoded=nullptr;
-    write_frame(time, step);
+    if (schedule.due(step, time)) {
+        write_frame(time, step);
+        schedule.note_written(step, time);
+    }
 
     while (time < total_time && step < step_cap) {
         grid.sim_time = time;   // expose current time to time-dependent terms (beam window)
@@ -487,11 +522,31 @@ int main(int argc, char** argv) {
                 ? &decoded_storage[1] : &decoded_storage[0];
         }
 
-        if (step % frame_stride == 0) write_frame(time, step);
+        if (schedule.due(step, time)) {
+            write_frame(time, step);
+            schedule.note_written(step, time);
+        }
     }
-    if (step % frame_stride != 0) write_frame(time, step);
+    // Always capture the final state, even when it does not land on the cadence.
+    if (!schedule.already_written(step)) {
+        write_frame(time, step);
+        schedule.note_written(step, time);
+    }
 
     std::cout << "[" << mode << "] END! step=" << step << " time=" << time << std::endl;
+    const Termination termination =
+        classify_termination(time, total_time, step, step_cap);
+    std::cout << "termination=" << termination_name(termination) << '\n'
+              << "requested_end_time=" << total_time << '\n'
+              << "final_physical_time=" << time << '\n'
+              << "final_step=" << step << '\n'
+              << "effective_step_cap=" << step_cap
+              << " (source=" << step_cap_source_name(cap_sel.source) << ")" << std::endl;
+    if (termination == Termination::StepCap) {
+        std::cerr << "WARNING: run stopped at the step cap (" << step_cap
+                  << ") after " << time << " of the requested " << total_time
+                  << " physical seconds. Raise or unset CHROMO_STEP_CAP." << std::endl;
+    }
     print_runtime_profile(std::cout);
     if (eos_counting_on) {
         const EosOperationCounts counts = eos_operation_counts();

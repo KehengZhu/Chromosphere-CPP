@@ -1501,3 +1501,103 @@ Result: N=2000 produces 2638 cells with 276.45 m coarse and 69.10 m
 outer-fine spacing, completes 712,320 steps, and gives
 `mean(F_eff)=6.1003e-10 kg m-2 s-1`, a 42.3% decrease from N=1000. This is a
 stable but still under-resolved result, not a convergence claim.
+
+### Third convergence point: R4-local N=4000 (OpenMP, 500 s)
+
+No visualization was generated; the metrics answer the question. Output:
+`outputs/model_column/outref_R4_local_N4000_500s.txt` with `.gamma_diag`,
+`.faceflux`, `.outercond`, and `.console.log` sidecars. Run with the committed
+OpenMP build at the workspace-default 12 threads (already established
+byte-identical to serial, so no equivalence run was repeated). The `240.0`
+positional multiplier only raises the driver step cap; `CHROMO_T_END=500` fixes
+the physical stop time. Diagnostic stride and capture width are scaled so the
+physical diagnostic coverage and sampling cadence match N=1000/N=2000.
+
+```bash
+cmake -S . -B build_omp -DCMAKE_BUILD_TYPE=Release \
+  -DCHROMO_ENABLE_OPENMP=ON -DLIBOMP_ROOT="$(brew --prefix libomp)"
+cmake --build build_omp -j4
+
+env OMP_DYNAMIC=FALSE OMP_MAX_ACTIVE_LEVELS=1 OMP_NUM_THREADS=12 \
+  ctest --test-dir build_omp --output-on-failure
+
+env OMP_DYNAMIC=FALSE OMP_MAX_ACTIVE_LEVELS=1 OMP_NUM_THREADS=12 \
+  GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+  ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_NS=4000 \
+  ISO_HYDRO_T_DECOUPLE=1 ISO_REFINE_PROFILE=outer ISO_REFINE_FACTOR=4 \
+  ISO_REFINE_S_LO_KM=500 ISO_REFINE_TRANSITION_KM=20 \
+  ISO_NUMERICAL_DIFFUSIVITY_MULT=1 CHROMO_T_END=500 CHROMO_FRAME_STRIDE=80000 \
+  CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=1280 CHROMO_FACE_FLUX_STRIDE=16000 \
+  CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=16000 \
+  ./scripts/run_chromo_omp.sh \
+  outputs/model_column/outref_R4_local_N4000_500s.txt \
+  full no-ionization model_column - 240.0 no-cooling \
+  > outputs/model_column/outref_R4_local_N4000_500s.console.log 2>&1
+
+/opt/miniconda3/bin/python util/outer_refine_diag.py \
+  --run R4_N1000=outputs/model_column/outref_R4_local_500s.txt \
+  --run R4_N2000=outputs/model_column/outref_R4_local_N2000_500s.txt \
+  --run R4_N4000=outputs/model_column/outref_R4_local_N4000_500s.txt \
+  --time 500 --window 2130 2150 \
+  --report outputs/model_column/outref_local_N1000_N2000_N4000_report.txt \
+  --json outputs/model_column/outref_local_N1000_N2000_N4000_metrics.json
+```
+
+`util/outer_refine_diag.py` gained an `outer_boundary_layer` helper and the
+`ds_face`, `T_wall - T_top`, `G_wall` and boundary-layer report rows; every
+pre-existing metric is unchanged and reproduces the saved N=1000/N=2000 values.
+
+Result: N=4000 produces 5275 cells (138.2 m coarse, 34.55 m outer-fine),
+completes 1,397,913 steps to 500 s, and gives `chi_num=6.9100e4 m2/s`,
+`q_num/q_total=0.0685`, and `mean(F_eff)=6.2250e-10 kg m-2 s-1` -- a **+2.04%**
+change from N=2000 versus **-42.27%** from N=1000 to N=2000, i.e. the successive
+difference shrank 35.8x. Emerging convergence; the limiting evaporation rate
+remains provisional and must not be quoted as a physical result.
+
+### 1000 s R4-local N=2000 production column (latest settings)
+
+Full 1000 s extension of the latest `model_column` configuration: 1600--2153 km
+domain, gamma-table EOS, decoupled hydro-T upper BC with the 22 kK conduction
+wall, x4 face-local outer refinement, production numerical diffusivity, cooling
+and the finite-rate ionization network off. 2638 cells (276.45 m coarse,
+69.10 m outer-fine), 1,395,699 steps to exactly t = 1000 s on the OpenMP build
+at 12 threads (~28 min wall). 350 native frames, all used in the movie.
+
+The `240.0` positional multiplier only raises the driver step cap;
+`CHROMO_T_END=1000` fixes the physical stop time.
+
+```bash
+env OMP_DYNAMIC=FALSE OMP_MAX_ACTIVE_LEVELS=1 OMP_NUM_THREADS=12 \
+  GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+  ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_NS=2000 \
+  ISO_HYDRO_T_DECOUPLE=1 ISO_REFINE_PROFILE=outer ISO_REFINE_FACTOR=4 \
+  ISO_REFINE_S_LO_KM=500 ISO_REFINE_TRANSITION_KM=20 \
+  ISO_NUMERICAL_DIFFUSIVITY_MULT=1 CHROMO_T_END=1000 CHROMO_FRAME_STRIDE=4000 \
+  CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=640 CHROMO_FACE_FLUX_STRIDE=8000 \
+  CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=8000 \
+  ./scripts/run_chromo_omp.sh \
+  outputs/model_column/outref_R4_local_N2000_1000s.txt \
+  full no-ionization model_column - 240.0 no-cooling \
+  > outputs/model_column/outref_R4_local_N2000_1000s.console.log 2>&1
+
+ANIM_MAX_FRAMES=350 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+  /opt/miniconda3/bin/python util/animate_isentropic.py \
+  outputs/model_column/outref_R4_local_N2000_1000s.txt \
+  visualization/model_column/outref_R4_local_N2000_1000s_evolution.mp4 20
+
+/opt/miniconda3/bin/python util/outer_refine_diag.py \
+  --run R4_N2000_1000s=outputs/model_column/outref_R4_local_N2000_1000s.txt \
+  --time 1000 --window 2130 2150 \
+  --report outputs/model_column/outref_R4_local_N2000_1000s_report.txt \
+  --json outputs/model_column/outref_R4_local_N2000_1000s_metrics.json
+```
+
+`outref_R4_local_N2000_1000s_evolution.mp4` -- 6-panel time evolution (T, V,
+physical `q_par`, rho, p, rho*V vs height), 350 frames at 20 fps (17.5 s).
+
+Metrics at t = 1000 s over 2130--2150 km: `A_M = 0.0102`, `Q_M = 0.00184`,
+`mean(F_eff) = 6.742e-10 kg m-2 s-1`, `q_num/q_total = 0.1289`,
+`T_wall - T_top = 92.8 K`, boundary layer 9.67 km / 141 cells. The ripple is
+~3x smaller than the same configuration at 500 s (`A_M = 0.0295`), and
+`mean(F_eff)` is +10.5% over the 500 s value -- still a provisional number, not
+a converged physical evaporation rate.

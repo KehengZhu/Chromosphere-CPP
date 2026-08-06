@@ -82,6 +82,43 @@ def mesh_stats(state_path, faces_km, win):
     }
 
 
+def outer_boundary_layer(h_km, T, frac=0.1):
+    """Outer thermal boundary layer from the `.gamma_diag` temperature profile.
+
+    ONE definition, applied identically at every resolution (do not switch it
+    between meshes):
+
+      G(h)   = |dT/ds| at cell centres (np.gradient on the ACTUAL non-uniform
+               cell-centre heights, so a graded mesh is handled correctly);
+      G_max  = max G over the whole column;
+      edge   = the deepest cell of the CONTIGUOUS run of top cells with
+               G >= frac * G_max   (frac = 0.1, i.e. the conventional
+               10 %-of-peak-gradient layer edge);
+      delta  = (outer cell centre) - (edge cell centre), in km.
+
+    `n_cells` is the number of cells in that contiguous run, i.e. how many cells
+    actually resolve the layer. `h_Gmax` says whether the steepest gradient sits
+    at the physical outer boundary or inside the resolved domain.
+    """
+    s = np.asarray(h_km) * 1.0e3
+    G = np.abs(np.gradient(np.asarray(T), s))
+    gmax = float(G.max())
+    thr = frac * gmax
+    i = len(G) - 1
+    while i > 0 and G[i - 1] >= thr:
+        i -= 1
+    return {
+        "bl_thickness_km": float(h_km[-1] - h_km[i]),
+        "bl_n_cells": int(len(G) - i),
+        "bl_edge_km": float(h_km[i]),
+        "bl_T_edge": float(T[i]),
+        "G_wall_profile_max": gmax,
+        "h_Gmax_km": float(h_km[int(np.argmax(G))]),
+        "G_top_cell": float(G[-1]),
+        "Gmax_at_outer_cell": int(int(np.argmax(G)) == len(G) - 1),
+    }
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -139,7 +176,12 @@ def main(argv=None):
             "split_max_relerr": fm["split_max_relerr"],
             "grade_monotone": int(np.all(gd >= 0.0) or np.all(gd <= 0.0)),
             "grade_Q_M": float(np.mean(np.abs(gd2)) / np.mean(np.abs(gseg))),
+            "ds_face_outer_km": float(ocr["ds_face"]) / 1.0e3,
+            "T_wall": ocr["T_wall"],
+            "dT_wall": ocr["T_wall"] - ocr["T_top"],
+            "G_wall": (ocr["T_wall"] - ocr["T_top"]) / ocr["ds_face"],
         }
+        out[label].update(outer_boundary_layer(gh, ga[:, 2]))
         profiles[label] = {
             "cell_km": ms["cell_km"], "width_km": ms["width_km"],
             "win_cell_km": col["cell_km"], "rhoV": (col["rho_cell"] * col["v_cell"]),
@@ -174,7 +216,18 @@ def main(argv=None):
         ("mean(rho V)", "M_mean", "%.5e"),
         ("mean(F_eff)", "f_eff_mean", "%.5e"),
         ("n extrema", "n_extrema", "%d"),
+        ("ds_face outer [km]", "ds_face_outer_km", "%.5f"),
         ("T_top [K]", "T_top", "%.1f"),
+        ("T_wall - T_top [K]", "dT_wall", "%.1f"),
+        ("G_wall [K/m]", "G_wall", "%.5f"),
+        ("BL thickness [km]", "bl_thickness_km", "%.3f"),
+        ("BL cells", "bl_n_cells", "%d"),
+        ("BL edge [km]", "bl_edge_km", "%.3f"),
+        ("BL T_edge [K]", "bl_T_edge", "%.1f"),
+        ("max|dT/ds| [K/m]", "G_wall_profile_max", "%.4f"),
+        ("h(max|dT/ds|) [km]", "h_Gmax_km", "%.3f"),
+        ("|dT/ds| top cell [K/m]", "G_top_cell", "%.4f"),
+        ("max grad at outer cell", "Gmax_at_outer_cell", "%d"),
         ("q_phys [W/m2]", "q_phys", "%.4f"),
         ("q_num  [W/m2]", "q_num", "%.4f"),
         ("q_total [W/m2]", "q_total", "%.4f"),

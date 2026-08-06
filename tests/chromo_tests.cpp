@@ -18,6 +18,7 @@
 #include "../physics.hpp"
 #include "../profiling.hpp"
 #include "../parallel.hpp"
+#include "../run_control.hpp"
 #include "../scenarios/analytic_canopy.hpp"
 #include "../scenarios/data_file_parser.hpp"
 #include "../scenarios/mesh.hpp"
@@ -4371,6 +4372,199 @@ static void test_outer_refined_mesh_ic_runs() {
 }
 
 // ----------------------------------------------------------------------------
+// Run control: step-cap selection, termination classification, and the snapshot
+// scheduler (run_control.hpp). All pure helpers — no simulation is run.
+
+static void test_step_cap_legacy_time_mult() {
+    // No CHROMO_T_END: the historical max(10000, 10000*time_mult) cap survives.
+    const StepCapSelection a = select_step_cap(nullptr, nullptr, 20.0f);
+    EXPECT_TRUE(a.valid());
+    EXPECT_TRUE(a.source == StepCapSource::LegacyTimeMult);
+    EXPECT_TRUE(a.cap == 200000);
+
+    const StepCapSelection b = select_step_cap(nullptr, nullptr, 1.0f);
+    EXPECT_TRUE(b.cap == 10000);
+    // The floor applies below time_mult = 1.
+    const StepCapSelection c = select_step_cap(nullptr, nullptr, 0.1f);
+    EXPECT_TRUE(c.cap == 10000);
+}
+
+static void test_step_cap_end_time_removes_legacy_cap() {
+    // The bug this fixes: CHROMO_T_END=1000 with time_mult=20 used to cap at
+    // 200000 steps (~140 of the 1000 requested seconds).
+    const StepCapSelection s = select_step_cap(nullptr, "1000", 20.0f);
+    EXPECT_TRUE(s.valid());
+    EXPECT_TRUE(s.source == StepCapSource::EndTime);
+    EXPECT_TRUE(s.cap == kUnboundedStepCap);
+    EXPECT_TRUE(s.cap > 1400000);   // steps actually needed at dt ~ 7e-4 s
+}
+
+static void test_step_cap_explicit_wins() {
+    const StepCapSelection with_end = select_step_cap("500000", "1000", 20.0f);
+    EXPECT_TRUE(with_end.valid());
+    EXPECT_TRUE(with_end.source == StepCapSource::Explicit);
+    EXPECT_TRUE(with_end.cap == 500000);
+
+    // An explicit cap also overrides the legacy cap when no end time is set.
+    const StepCapSelection no_end = select_step_cap("777", nullptr, 20.0f);
+    EXPECT_TRUE(no_end.source == StepCapSource::Explicit);
+    EXPECT_TRUE(no_end.cap == 777);
+}
+
+static void test_step_cap_rejects_invalid_values() {
+    const char* bad[] = {"0", "-5", "abc", "12x", "1e5", "3.5"};
+    for (const char* v : bad) {
+        const StepCapSelection s = select_step_cap(v, "1000", 20.0f);
+        EXPECT_TRUE(!s.valid());
+        EXPECT_TRUE(s.source == StepCapSource::Invalid);
+        EXPECT_TRUE(!s.error.empty());
+    }
+    // Out of long long range must be rejected, not wrapped.
+    const StepCapSelection huge = select_step_cap("99999999999999999999999", nullptr, 1.0f);
+    EXPECT_TRUE(!huge.valid());
+    // An empty string behaves as unset (getenv of an empty variable).
+    const StepCapSelection empty = select_step_cap("", nullptr, 20.0f);
+    EXPECT_TRUE(empty.valid());
+    EXPECT_TRUE(empty.source == StepCapSource::LegacyTimeMult);
+}
+
+static void test_step_cap_no_overflow() {
+    // Absurd time_mult must not overflow the float expression or the cast.
+    const StepCapSelection big = select_step_cap(nullptr, nullptr, 1.0e30f);
+    EXPECT_TRUE(big.valid());
+    EXPECT_TRUE(big.cap == kUnboundedStepCap);
+    const StepCapSelection inf = select_step_cap(
+        nullptr, nullptr, std::numeric_limits<float>::infinity());
+    EXPECT_TRUE(inf.valid());
+    EXPECT_TRUE(inf.cap == kUnboundedStepCap);
+    // Every cap stays far below the long long ceiling, so `step + 1` and
+    // `step < cap` cannot overflow.
+    EXPECT_TRUE(kUnboundedStepCap < std::numeric_limits<long long>::max() / 1000);
+    // A very large requested end time still leaves the cap unbounded.
+    const StepCapSelection long_run = select_step_cap(nullptr, "1e9", 1.0f);
+    EXPECT_TRUE(long_run.cap == kUnboundedStepCap);
+}
+
+static void test_termination_classification() {
+    EXPECT_TRUE(classify_termination(20.0002, 20.0, 28466, kUnboundedStepCap)
+                == Termination::EndTime);
+    // Capped short of the requested end time — must be visibly identifiable.
+    EXPECT_TRUE(classify_termination(140.3, 1000.0, 200000, 200000)
+                == Termination::StepCap);
+    EXPECT_TRUE(classify_termination(5.0, 1000.0, 100, kUnboundedStepCap)
+                == Termination::Other);
+    // Both fire on the same step: reaching the end time wins.
+    EXPECT_TRUE(classify_termination(1000.0, 1000.0, 500, 500)
+                == Termination::EndTime);
+}
+
+static void test_output_schedule_legacy_stride() {
+    OutputSchedule s = OutputSchedule::from_stride(10);
+    EXPECT_TRUE(!s.time_based);
+    EXPECT_TRUE(s.due(0, 0.0));
+    s.note_written(0, 0.0);
+    EXPECT_TRUE(!s.due(0, 0.0));        // never twice for the same step
+    EXPECT_TRUE(!s.due(5, 0.5));
+    EXPECT_TRUE(s.due(10, 1.0));
+    s.note_written(10, 1.0);
+    EXPECT_TRUE(!s.due(11, 1.1));
+    EXPECT_TRUE(s.due(20, 2.0));
+    // Final-state rule: a step off the stride has not been written yet.
+    EXPECT_TRUE(!s.already_written(23));
+}
+
+static void test_output_schedule_frame_dt_cadence() {
+    OutputSchedule s = OutputSchedule::from_frame_dt(1.0);
+    EXPECT_TRUE(s.time_based);
+    // Initial state is always written.
+    EXPECT_TRUE(s.due(0, 0.0));
+    s.note_written(0, 0.0);
+    EXPECT_REL(s.next_output_time(), 1.0, 1e-12);
+    EXPECT_TRUE(!s.due(1, 0.5));
+    EXPECT_TRUE(!s.due(2, 0.999));
+    EXPECT_TRUE(s.due(3, 1.0004));
+    s.note_written(3, 1.0004);
+    EXPECT_REL(s.next_output_time(), 2.0, 1e-12);
+    EXPECT_TRUE(!s.due(4, 1.5));
+}
+
+static void test_output_schedule_multi_interval_step() {
+    // A step that crosses several nominal output times writes the state ONCE
+    // and resumes at the next uncrossed time.
+    OutputSchedule s = OutputSchedule::from_frame_dt(1.0);
+    s.note_written(0, 0.0);
+    EXPECT_TRUE(s.due(1, 3.7));
+    s.note_written(1, 3.7);
+    EXPECT_REL(s.next_output_time(), 4.0, 1e-12);
+    EXPECT_TRUE(!s.due(2, 3.9));
+    EXPECT_TRUE(s.due(3, 4.05));
+}
+
+static void test_output_schedule_no_drift_and_no_duplicates() {
+    // Drive the scheduler exactly as the driver loop does: 100 physical seconds
+    // in 1 ms steps with a 0.1 s cadence. Requires 1001 frames (t = 0 .. 100),
+    // no duplicated step, and no cadence drift.
+    const double frame_dt = 0.1, dt = 1.0e-3, t_end = 100.0;
+    OutputSchedule s = OutputSchedule::from_frame_dt(frame_dt);
+    long long step = 0, frames = 0, last_frame_step = -1;
+    double t = 0.0, max_lateness = 0.0;
+    if (s.due(step, t)) { ++frames; last_frame_step = step; s.note_written(step, t); }
+    while (t < t_end) {
+        t += dt;
+        ++step;
+        if (s.due(step, t)) {
+            EXPECT_TRUE(step != last_frame_step);
+            const double nominal = static_cast<double>(frames) * frame_dt;
+            max_lateness = std::max(max_lateness, std::abs(t - nominal));
+            ++frames;
+            last_frame_step = step;
+            s.note_written(step, t);
+        }
+    }
+    if (!s.already_written(step)) { ++frames; s.note_written(step, t); }
+    EXPECT_TRUE(frames == 1001);
+    // Each frame lands within one timestep of its nominal time — the error does
+    // NOT grow with elapsed time, which is the point of the integer index.
+    EXPECT_TRUE(max_lateness < 2.0 * dt);
+}
+
+static void test_output_schedule_final_frame_not_duplicated() {
+    // Last step landing exactly on a cadence time: the cadence writes it, and
+    // the final-state rule must not write the same step a second time. dt = 0.5
+    // is exact in binary, so step 8 lands on t = 4.0 with no rounding slack.
+    const double frame_dt = 1.0, dt = 0.5;
+    OutputSchedule s = OutputSchedule::from_frame_dt(frame_dt);
+    long long step = 0, frames = 0;
+    double t = 0.0;
+    if (s.due(step, t)) { ++frames; s.note_written(step, t); }
+    while (t < 4.0) {
+        t += dt; ++step;
+        if (s.due(step, t)) { ++frames; s.note_written(step, t); }
+    }
+    const bool final_already_written = s.already_written(step);
+    if (!final_already_written) { ++frames; s.note_written(step, t); }
+    EXPECT_TRUE(final_already_written);
+    EXPECT_TRUE(frames == 5);   // t = 0, 1, 2, 3, 4
+
+    // Converse case: the run ends BETWEEN cadence times (t_end = 4.5, cadence
+    // 1 s), so the final state is genuinely new and must be written exactly once.
+    OutputSchedule s2 = OutputSchedule::from_frame_dt(1.0);
+    long long step2 = 0, frames2 = 0;
+    double t2 = 0.0;
+    if (s2.due(step2, t2)) { ++frames2; s2.note_written(step2, t2); }
+    while (t2 < 4.5) {
+        t2 += 0.3; ++step2;
+        if (s2.due(step2, t2)) { ++frames2; s2.note_written(step2, t2); }
+    }
+    EXPECT_TRUE(t2 > 4.0 && t2 < 5.0);        // stopped between cadence times
+    EXPECT_TRUE(!s2.already_written(step2));  // ... so it was not yet written
+    ++frames2;
+    s2.note_written(step2, t2);
+    EXPECT_TRUE(!s2.due(step2, t2));          // no second write of the same step
+    EXPECT_TRUE(frames2 == 6);                // t = 0, 1, 2, 3, 4, final
+}
+
+// ----------------------------------------------------------------------------
 
 int main() {
     std::cout << "===== Chromosphere test suite =====\n\n";
@@ -4468,6 +4662,19 @@ int main() {
     RUN(test_uniform_regression_refinement_unset);
     RUN(test_refined_mesh_ic_runs);
     RUN(test_outer_refined_mesh_ic_runs);
+
+    // Run control: long-run step cap, termination reason, snapshot cadence.
+    RUN(test_step_cap_legacy_time_mult);
+    RUN(test_step_cap_end_time_removes_legacy_cap);
+    RUN(test_step_cap_explicit_wins);
+    RUN(test_step_cap_rejects_invalid_values);
+    RUN(test_step_cap_no_overflow);
+    RUN(test_termination_classification);
+    RUN(test_output_schedule_legacy_stride);
+    RUN(test_output_schedule_frame_dt_cadence);
+    RUN(test_output_schedule_multi_interval_step);
+    RUN(test_output_schedule_no_drift_and_no_duplicates);
+    RUN(test_output_schedule_final_frame_not_duplicated);
 
     std::cout << "\n===== Summary =====\n";
     std::cout << "Passed: " << g_pass << "\n";

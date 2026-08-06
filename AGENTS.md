@@ -53,5 +53,131 @@ Exceptions:
 - Do not assume 12 threads is optimal on different hardware; rerun thread scaling after changing machines.
 - Do not hard-code the thread count in C++, CMake, or the numerical algorithm.
 
+## Validated production CFL and long-run controls
+
+`CHROMO_CFL=0.50` is the **validated production runtime default for the production-shaped `model_column` case (2638 refined cells) on the current Apple Silicon workstation**. It is applied by `scripts/run_chromo_realtime.sh`, not by the solver. Evidence: `docs/long_run_output_and_cfl_validation.md`.
+
+The conservative hard-coded solver default remains `CHROMO_CFL=0.25`, and 0.25 stays the comparison reference. Do not change the C++ default. Rerun the sweep before trusting 0.50 on different hardware or a materially different model shape.
+
+Use `scripts/run_chromo_realtime.sh` for long runs; it defaults to CFL 0.50, the 12-thread OpenMP runtime, and low-I/O output (all snapshot and sidecar diagnostics off, profiling on). Every default preserves an explicit environment override. `scripts/run_chromo_omp.sh` remains the generic OpenMP launcher.
+
+Two run-control variables matter for long runs:
+
+- `CHROMO_T_END` — absolute stop time in physical seconds. When it is set, the legacy `time_mult`-derived step cap no longer applies, so a long run cannot be silently truncated.
+- `CHROMO_FRAME_DT` — snapshot cadence in **physical seconds** instead of the legacy `time_mult`-derived step stride. Required whenever output is enabled on a long run; without it a 1000 s run emits tens of thousands of ASCII snapshots and the wall time is dominated by formatting.
+
+`CHROMO_STEP_CAP` sets an explicit step cap and overrides both rules; invalid or non-positive values are rejected rather than silently replaced. Every run prints `termination=end_time|step_cap|other` together with the requested end time, final time, final step, and effective cap — always check that a long run ended with `termination=end_time`.
+
+Low-I/O production run:
+
+```bash
+CHROMO_T_END=1000 scripts/run_chromo_realtime.sh out.txt \
+    full no-ionization model_column - 20.0 no-cooling
+```
+
+Same run with snapshots at one frame per physical second:
+
+```bash
+CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=1 \
+scripts/run_chromo_realtime.sh out.txt \
+    full no-ionization model_column - 20.0 no-cooling
+```
+
+## Repository-wide engineering discipline
+
+Treat every task as a production-quality engineering task. The default priority order is:
+
+1. Correct and reliable behavior.
+2. Scientifically and numerically accurate results.
+3. Reproducible evidence that supports the decision being made.
+4. Simple, maintainable implementation.
+5. Performance and convenience improvements.
+
+Do not trade correctness for speed, but also do not confuse more code, more abstraction, or more validation with higher quality.
+
+### Avoid overengineering
+
+- Prefer the smallest change that clearly solves the actual problem.
+- Use focused helper functions instead of introducing a framework, class hierarchy, policy system, or generalized subsystem without a demonstrated need.
+- Do not refactor unrelated code while implementing a narrow task.
+- Do not design for hypothetical future requirements unless the current task explicitly depends on them.
+- Do not add layers of wrappers, configuration objects, templates, or indirection when a direct implementation is easier to review and equally safe.
+- Preserve existing interfaces and behavior unless changing them is necessary for correctness or explicitly requested.
+
+### Validate according to risk
+
+Verification should answer material questions about correctness, reliability, numerical behavior, or performance. Do enough to establish trustworthy evidence, then stop.
+
+- Prioritize tests that exercise the changed behavior and realistic production paths.
+- Re-run broad test suites after changes that could affect them, but do not repeatedly rerun unchanged checks without a concrete reason.
+- Use hashes and byte comparisons only when exact identity is itself important, such as regression preservation, deterministic output, or legacy compatibility.
+- Do not generate or compare hashes for every intermediate artifact when the result cannot affect the decision.
+- Do not require byte identity where numerical or physical equivalence is the correct standard.
+- Use absolute errors, relative errors with defensible denominator floors, and physically meaningful observables where appropriate.
+- Treat small timing variation, harmless formatting changes, and differences far below discretization or physical uncertainty as non-blocking unless they indicate a real bug.
+
+### Focus on material issues
+
+Investigate a discrepancy when it is scientifically meaningful, numerically suspicious, persistent, or large enough to change the production decision. Do not spend substantial effort on cosmetic details or artificial edge cases that cannot affect real use.
+
+A newly discovered issue is a blocker only if it can materially affect one or more of:
+
+- correctness;
+- scientific interpretation;
+- numerical stability or convergence;
+- data integrity;
+- requested output or termination behavior;
+- production performance;
+- reproducibility;
+- the final GO/NO_GO decision.
+
+Record unrelated minor issues briefly and leave them for a separate task.
+
+### Use staged validation
+
+For expensive experiments, simulations, or parameter sweeps, use a funnel:
+
+1. Run inexpensive smoke and stability checks.
+2. Reject clearly invalid candidates early.
+3. Perform detailed comparisons only for plausible candidates.
+4. Run long or expensive acceptance cases only for the selected candidate or the smallest set needed to resolve uncertainty.
+
+Do not run several costly production-scale cases when one controlled run is sufficient.
+
+### Protect existing work
+
+- Inspect repository status and existing diffs before editing.
+- Preserve unrelated uncommitted changes.
+- Do not reset, revert, overwrite, or broadly reformat work outside the task scope.
+- Keep patches narrow, reviewable, and attributable to the requested task.
+- Keep generated outputs and build products out of source patches unless they are explicitly required deliverables.
+
+### Stop when the decision is supported
+
+Once the requested behavior is correct, the important tests pass, the evidence supports the conclusion, and material risks are documented, stop. Do not continue polishing, benchmarking, or redesigning merely because additional work is possible.
+
+If a target is not achieved, report the measured gap and the most important remaining blocker. Do not silently expand into a new optimization or redesign phase.
+
+### Reporting standard
+
+Final recaps should be compact and decision-oriented. Emphasize:
+
+- what changed;
+- why it was necessary;
+- what was validated;
+- the material results;
+- remaining production risks;
+- the final status.
+
+Avoid exhaustive command transcripts, repeated hashes, low-value implementation trivia, and long lists of insignificant differences.
+
+The governing principle is:
+
+```text
+Reliable and accurate production behavior is mandatory.
+Simple and sufficient evidence is preferred.
+More validation is not automatically better validation.
+```
+
 ## Reference Papers
 Reference Papers that you may need to understand a physical process or code implementation are in docs/supporting-papers. Check them first before you prompt the user to download the papers.

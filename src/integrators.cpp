@@ -517,19 +517,23 @@ static double outer_conduction_wall_T(const Grid& grid, double ghost_T) {
         : ghost_T;
 }
 
-// The outer ghost as the CONDUCTION rows see it: the wall temperature (possibly
-// overridden away from the hydro ghost's) together with the ghost density's Saha
-// ionization evaluated AT that wall temperature, so κ_outer(n_e, n_HI, T) stays
-// self-consistent with the Dirichlet datum it multiplies. Without the override
-// this is exactly the decoded hydro ghost, unchanged.
+// The outer state as the CONDUCTION rows see it. When the hydro/conduction
+// temperatures are decoupled, the imposed temperature lives at the PHYSICAL
+// boundary face, not at a fictitious ghost centre. Reconstruct the material
+// state at that face from the externally imposed hydro back-pressure and the
+// fixed face temperature, then evaluate kappa there. Without the override this
+// remains the legacy decoded hydro ghost state.
 struct OuterConductionGhost { double T, n_e, n_HI; };
 static OuterConductionGhost outer_conduction_ghost(
     const Grid& grid, const CaloricMixtureThermo& ghost) {
     if (!grid.outer_conduction_temperature_override)
         return {ghost.T, ghost.n_e, ghost.n_HI};
     const double T = static_cast<double>(grid.outer_conduction_temperature);
-    const double x = saha_ionization_fraction_n_h(ghost.n_H, T);
-    return {T, x*ghost.n_H, (1.0-x)*ghost.n_H};
+    const double pressure = ghost.p_i + ghost.p_n;
+    const double rho = equilibrium_density_from_pressure(pressure, T);
+    const double n_h = rho/eos_constants::m_h;
+    const double x = saha_ionization_fraction_n_h(n_h, T);
+    return {T, x*n_h, (1.0-x)*n_h};
 }
 
 static CaloricMixtureThermo decode_gamma_ghost(
@@ -726,8 +730,12 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
                             ? face_k(s.conductivity[i],k_inner,grid.ds_i(i),grid.ds_i(i))
                             : face_k(s.conductivity[i],s.conductivity[i-1],
                                      grid.ds_i(i),grid.ds_i(i-1));
+                        const bool physical_outer_face =
+                            i+1 == ns && grid.outer_conduction_temperature_override;
                         const double kr = i+1 == ns
-                            ? face_k(s.conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i))
+                            ? (physical_outer_face
+                                ? k_outer
+                                : face_k(s.conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i)))
                             : face_k(s.conductivity[i],s.conductivity[i+1],
                                      grid.ds_i(i),grid.ds_i(i+1));
                         double cv_l=s.capacity[i], cv_r=s.capacity[i];
@@ -735,8 +743,11 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
                         if (i+1<ns) cv_r=0.5*(s.capacity[i]+s.capacity[i+1]);
                         const double k_num_l = numerical_diffusivity_at_face(
                             grid, grid.ds_imh_i(i))*cv_l;
+                        const double ds_right = physical_outer_face
+                            ? 0.5*static_cast<double>(grid.ds_i(i))
+                            : static_cast<double>(grid.ds_iph_i(i));
                         const double k_num_r = numerical_diffusivity_at_face(
-                            grid, grid.ds_iph_i(i))*cv_r;
+                            grid, ds_right)*cv_r;
                         if (i+1 == ns) {
                             diag_kr_top = kr;
                             diag_cv_r_top = cv_r;
@@ -744,7 +755,7 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
                         s.g_left[i] = grid.B_i(i)/grid.ds_i(i)
                                   * (kl+k_num_l)/grid.B_imh(i)/grid.ds_imh_i(i);
                         s.g_right[i] = grid.B_i(i)/grid.ds_i(i)
-                                   * (kr+k_num_r)/grid.B_iph(i)/grid.ds_iph_i(i);
+                                   * (kr+k_num_r)/grid.B_iph(i)/ds_right;
                     } catch (...) {
                         failure.capture(i, std::current_exception());
                     }
@@ -879,7 +890,9 @@ static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, doub
         oc.T_top  = s.temperature[ns-1];
         oc.T_wall = wall.T;
         oc.kappa_phys_face = diag_kr_top;
-        oc.ds_face    = grid.ds_iph_i(ns-1);
+        oc.ds_face    = grid.outer_conduction_temperature_override
+            ? 0.5*static_cast<double>(grid.ds_i(ns-1))
+            : static_cast<double>(grid.ds_iph_i(ns-1));
         oc.chi_num_face = numerical_diffusivity_at_face(grid, oc.ds_face);
         oc.kappa_num_face  = oc.chi_num_face*diag_cv_r_top;
         oc.area_ratio = grid.B_i(ns-1)/grid.B_iph(ns-1);
@@ -929,17 +942,24 @@ double gamma_conduction_residual_max(const Grid& grid, const Vec& before,
         const double kl = i == 0
             ? face_k(conductivity[i],k_inner,grid.ds_i(i),grid.ds_i(i))
             : face_k(conductivity[i],conductivity[i-1],grid.ds_i(i),grid.ds_i(i-1));
+        const bool physical_outer_face =
+            i+1 == ns && grid.outer_conduction_temperature_override;
         const double kr = i+1 == ns
-            ? face_k(conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i))
+            ? (physical_outer_face
+                ? k_outer
+                : face_k(conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i)))
             : face_k(conductivity[i],conductivity[i+1],grid.ds_i(i),grid.ds_i(i+1));
         const double cv_l = i ? 0.5*(capacity[i]+capacity[i-1]) : capacity[i];
         const double cv_r = i+1 < ns ? 0.5*(capacity[i]+capacity[i+1]) : capacity[i];
         double gl = grid.B_i(i)/grid.ds_i(i)
                   *(kl+numerical_diffusivity_at_face(grid,grid.ds_imh_i(i))*cv_l)
                   /grid.B_imh(i)/grid.ds_imh_i(i);
+        const double ds_right = physical_outer_face
+            ? 0.5*static_cast<double>(grid.ds_i(i))
+            : static_cast<double>(grid.ds_iph_i(i));
         double gr = grid.B_i(i)/grid.ds_i(i)
-                  *(kr+numerical_diffusivity_at_face(grid,grid.ds_iph_i(i))*cv_r)
-                  /grid.B_iph(i)/grid.ds_iph_i(i);
+                  *(kr+numerical_diffusivity_at_face(grid,ds_right)*cv_r)
+                  /grid.B_iph(i)/ds_right;
         const double tl = i ? now.temperature(i-1) : inner.T;
         const double tr = i+1 < ns ? now.temperature(i+1) : wall.T;
         double divergence = gr*(tr-now.temperature(i))-gl*(now.temperature(i)-tl);

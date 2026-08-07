@@ -68,6 +68,30 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
     //   channel counts and the radiative loss overflow float32 at photospheric density
     //   (n ~ 1e23 ⇒ n² ≫ FLT_MAX). All are env defaults the user can still override.
     if (name == "model_column" || name == "model_isentropic" || name == "model_gentle") {
+        if (name == "model_column" || name == "model_isentropic") {
+            // Canonical reduced release model. Keep these as override-preserving
+            // scenario defaults so selecting model_column means the validated
+            // Gamma/Saha N=500/R4 physical-conduction-only model without requiring
+            // a launcher-specific collection of ISO_* assignments.
+            if (!std::getenv("GAMMA_TABLE") && !std::getenv("ISO_GAMMA"))
+                set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
+            set_env_default("ISO_H_BASE",                     "1600");
+            set_env_default("ISO_DH",                         "553");
+            set_env_default("ISO_NS",                         "500");
+            set_env_default("ISO_HEAT_FLUX",                  "1");
+            set_env_default("ISO_T_TOP",                      "22000");
+            set_env_default("ISO_HYDRO_T_DECOUPLE",           "1");
+            set_env_default("ISO_REFINE_PROFILE",             "outer");
+            set_env_default("ISO_REFINE_FACTOR",              "4");
+            set_env_default("ISO_REFINE_S_LO_KM",             "500");
+            set_env_default("ISO_REFINE_TRANSITION_KM",       "20");
+            set_env_default("ISO_NUMERICAL_DIFFUSIVITY_MULT", "0");
+            set_env_default("ISO_COOLING",                    "0");
+            set_env_default("ISO_TRAC",                       "0");
+            set_env_default("ISO_CORONA",                     "0");
+            set_env_default("ISO_TWO_FLUID",                  "0");
+            set_env_default("ISO_IONIZATION",                 "0");
+        }
         if (name == "model_gentle") {
             set_env_default("ISO_CORONA",     "1");
             set_env_default("ISO_H_BASE",     "1003");

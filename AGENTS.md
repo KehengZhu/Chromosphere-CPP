@@ -55,11 +55,11 @@ Exceptions:
 
 ## Validated production CFL and long-run controls
 
-`CHROMO_CFL=0.50` is the **validated production runtime default for the production-shaped `model_column` case (2638 refined cells) on the current Apple Silicon workstation**. It is applied by `scripts/run_chromo_realtime.sh`, not by the solver. Evidence: `docs/long_run_output_and_cfl_validation.md`.
+`CHROMO_CFL=0.50` is the **validated production runtime default for the reduced `model_column` release configuration: coarse-equivalent N=500, R4 outer refinement, 661 actual cells, physical-face 22,000 K conductive boundary, and physical conduction only**. Evidence: `docs/coarse_model_column_physical_conduction_recap.md`.
 
 The conservative hard-coded solver default remains `CHROMO_CFL=0.25`, and 0.25 stays the comparison reference. Do not change the C++ default. Rerun the sweep before trusting 0.50 on different hardware or a materially different model shape.
 
-Use `scripts/run_chromo_realtime.sh` for long runs; it defaults to CFL 0.50, the 12-thread OpenMP runtime, and low-I/O output (all snapshot and sidecar diagnostics off, profiling on). Every default preserves an explicit environment override. `scripts/run_chromo_omp.sh` remains the generic OpenMP launcher.
+The `model_column` scenario itself supplies the override-preserving defaults for the validated Gamma/Saha N=500/R4 physical-conduction-only release model, including the production Gamma table and model/grid `ISO_*` settings. Use `scripts/run_chromo_realtime.sh` for long production runs; it adds CFL 0.50, the 12-thread OpenMP runtime, and low-I/O runtime defaults but does not independently define the physical model. Explicit environment assignments still win. `scripts/run_chromo_omp.sh` remains the generic OpenMP launcher.
 
 Two run-control variables matter for long runs:
 

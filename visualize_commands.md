@@ -1595,9 +1595,108 @@ ANIM_MAX_FRAMES=350 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
 `outref_R4_local_N2000_1000s_evolution.mp4` -- 6-panel time evolution (T, V,
 physical `q_par`, rho, p, rho*V vs height), 350 frames at 20 fps (17.5 s).
 
+`outref_R4_local_N2000_1000s_final_profiles.png` -- final saved 6-panel frame
+used by the release paper. It is extracted from the verified movie above, so it
+inherits the same run configuration and plotted quantities.
+
+```bash
+ffmpeg -y \
+  -i visualization/model_column/outref_R4_local_N2000_1000s_evolution.mp4 \
+  -vf "select=eq(n\\,349)" -frames:v 1 \
+  visualization/model_column/outref_R4_local_N2000_1000s_final_profiles.png
+```
+
 Metrics at t = 1000 s over 2130--2150 km: `A_M = 0.0102`, `Q_M = 0.00184`,
 `mean(F_eff) = 6.742e-10 kg m-2 s-1`, `q_num/q_total = 0.1289`,
 `T_wall - T_top = 92.8 K`, boundary layer 9.67 km / 141 cells. The ripple is
 ~3x smaller than the same configuration at 500 s (`A_M = 0.0295`), and
 `mean(F_eff)` is +10.5% over the 500 s value -- still a provisional number, not
 a converged physical evaporation rate.
+
+### Historical N=2000 previous-production mesh and initial temperature
+
+`model_column_ns2000_mesh_temperature_initial.png` and `.pdf` -- exact cell width
+and EOS-aware initial (`t=0`) temperature versus height for the historical
+coarse-equivalent N=2000 previous-production column. The static x4 outer refinement adds
+cells, giving 2638 cells over 1600--2153 km.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
+  util/plot_model_column_mesh_temperature.py
+```
+
+### `model_column_2000s_evolution.mp4` -- historical 2000 s previous-production run
+
+Full-length (t = 0 -> 2000 s) evolution of the **historical previous-production
+`model_column` configuration** (2638 refined cells: `ISO_NS=2000` with the
+`outer` R4 local refinement above 500 km, domain h = 1600 -> 2153 km, gamma
+table EOS, hydro-T-decoupled upper BC, conduction on, no cooling). Launched
+through `scripts/run_chromo_realtime.sh` so it inherits the validated
+`CHROMO_CFL=0.50` and the 12-thread OpenMP runtime; `CHROMO_T_END=2000` gives a
+true end-time termination and `CHROMO_FRAME_DT=4` keeps the snapshot count at
+501 instead of tens of thousands. Standard 2x3 `animate_isentropic.py` panels
+(T, V [km/s], physical `q_par`, rho, p, rho*V vs height), 500 frames @ 25 fps
+(20 s). Run summary: `termination=end_time`, final step 1,395,700,
+mean dt 1.4054e-3 s, wall time 1826.5 s (0.91x real time), no NaN / clamp /
+floor activation.
+
+```bash
+GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_NS=2000 \
+ISO_HYDRO_T_DECOUPLE=1 ISO_REFINE_PROFILE=outer ISO_REFINE_FACTOR=4 \
+ISO_REFINE_S_LO_KM=500 ISO_REFINE_TRANSITION_KM=20 ISO_NUMERICAL_DIFFUSIVITY_MULT=1 \
+CHROMO_T_END=2000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=4 \
+/usr/bin/time -p scripts/run_chromo_realtime.sh \
+  outputs/model_column/realtime_2000s_cfl050.txt \
+  full no-ionization model_column - 20.0 no-cooling \
+  > outputs/model_column/realtime_2000s_cfl050.console.log 2>&1
+
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/realtime_2000s_cfl050.txt \
+  visualization/model_column/model_column_2000s_evolution.mp4 25
+```
+
+### `model_column_4000s_evolution.mp4` -- historical 4000 s previous-production run
+
+Full-length (t = 0 -> 4000 s) continuation of the same historical
+previous-production N=2000 configuration documented above. The x4 outer
+refinement gives 2638 cells, and `CHROMO_FRAME_DT=8` records 501 synchronized
+solution/EOS frames without excessive ASCII output. The run reached exactly
+4000 s with `termination=end_time` at step 2,761,034 in 3463.52 s wall time;
+the saved fields and EOS sidecar are finite, with no warning, clamp, or floor
+activation. Standard 2x3 `animate_isentropic.py` panels (T, V [km/s], physical
+`q_par`, rho, p, rho*V vs height), 500 frames @ 25 fps (20 s).
+
+```bash
+GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
+ISO_H_BASE=1600 ISO_DH=553 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_NS=2000 \
+ISO_HYDRO_T_DECOUPLE=1 ISO_REFINE_PROFILE=outer ISO_REFINE_FACTOR=4 \
+ISO_REFINE_S_LO_KM=500 ISO_REFINE_TRANSITION_KM=20 ISO_NUMERICAL_DIFFUSIVITY_MULT=1 \
+CHROMO_T_END=4000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=8 \
+/usr/bin/time -p scripts/run_chromo_realtime.sh \
+  outputs/model_column/realtime_4000s_cfl050.txt \
+  full no-ionization model_column - 20.0 no-cooling \
+  > outputs/model_column/realtime_4000s_cfl050.console.log 2>&1
+
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/realtime_4000s_cfl050.txt \
+  visualization/model_column/model_column_4000s_evolution.mp4 25
+```
+
+### `model_column_release_N1000_4000s_evolution.mp4` -- focused long-duration resolution test
+
+Directly comparable 0--4000 s animation for the physical-conduction-only release
+model with only the coarse-equivalent resolution overridden from N=500 to N=1000.
+The run uses R4 outer refinement (1320 actual cells), the fixed 22,000 K physical-face
+conductive boundary, Gamma/Saha EOS, hydro-T decoupling, and CFL=0.50. The animation
+uses the same standard 2x3 `animate_isentropic.py` panels and frame cap as the N500
+release visualization.
+
+```bash
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/model_column_release_N1000_4000s.txt \
+  visualization/model_column/model_column_release_N1000_4000s_evolution.mp4 25
+```

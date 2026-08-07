@@ -863,6 +863,52 @@ static std::string production_gamma_table_path() {
     throw std::runtime_error("production Gamma1 table not found from test working directory");
 }
 
+static void clear_model_column_release_defaults_env() {
+    const char* keys[] = {
+        "GAMMA_TABLE", "ISO_GAMMA", "ISO_H_BASE", "ISO_DH", "ISO_NS",
+        "ISO_HEAT_FLUX", "ISO_T_TOP", "ISO_HYDRO_T_DECOUPLE",
+        "ISO_REFINE_PROFILE", "ISO_REFINE_FACTOR", "ISO_REFINE_S_LO_KM",
+        "ISO_REFINE_TRANSITION_KM", "ISO_NUMERICAL_DIFFUSIVITY_MULT",
+        "ISO_COOLING", "ISO_TRAC", "ISO_CORONA", "ISO_TWO_FLUID",
+        "ISO_IONIZATION"
+    };
+    for (const char* key : keys) unsetenv(key);
+}
+
+static void test_model_column_release_scenario_defaults_and_overrides() {
+    clear_model_column_release_defaults_env();
+    Scenario sc = make_scenario("model_column", "");
+    EXPECT_TRUE(sc.peek_ns() == 500u);
+    EXPECT_TRUE(std::string(std::getenv("GAMMA_TABLE")) ==
+                "data/eos/gamma1_hydrogen_v1.dat");
+    EXPECT_TRUE(std::string(std::getenv("ISO_H_BASE")) == "1600");
+    EXPECT_TRUE(std::string(std::getenv("ISO_DH")) == "553");
+    EXPECT_TRUE(std::string(std::getenv("ISO_HEAT_FLUX")) == "1");
+    EXPECT_TRUE(std::string(std::getenv("ISO_T_TOP")) == "22000");
+    EXPECT_TRUE(std::string(std::getenv("ISO_HYDRO_T_DECOUPLE")) == "1");
+    EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_PROFILE")) == "outer");
+    EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_FACTOR")) == "4");
+    EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_S_LO_KM")) == "500");
+    EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_TRANSITION_KM")) == "20");
+    EXPECT_TRUE(std::string(std::getenv("ISO_NUMERICAL_DIFFUSIVITY_MULT")) == "0");
+    EXPECT_TRUE(std::string(std::getenv("ISO_COOLING")) == "0");
+    EXPECT_TRUE(std::string(std::getenv("ISO_TRAC")) == "0");
+    EXPECT_TRUE(std::string(std::getenv("ISO_CORONA")) == "0");
+    EXPECT_TRUE(std::string(std::getenv("ISO_TWO_FLUID")) == "0");
+    EXPECT_TRUE(std::string(std::getenv("ISO_IONIZATION")) == "0");
+
+    clear_model_column_release_defaults_env();
+    setenv("ISO_NS", "777", 1);
+    setenv("ISO_HEAT_FLUX", "0", 1);
+    setenv("ISO_GAMMA", "1.05", 1);
+    Scenario diagnostic = make_scenario("model_column", "");
+    EXPECT_TRUE(diagnostic.peek_ns() == 777u);
+    EXPECT_TRUE(std::string(std::getenv("ISO_HEAT_FLUX")) == "0");
+    EXPECT_TRUE(std::string(std::getenv("ISO_GAMMA")) == "1.05");
+    EXPECT_TRUE(std::getenv("GAMMA_TABLE") == nullptr);
+    clear_model_column_release_defaults_env();
+}
+
 static void test_final_serial_log_aware_eos_and_gamma1_contracts() {
     const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
     const std::vector<std::pair<double,double>> states = {
@@ -984,6 +1030,26 @@ static void test_final_serial_log_aware_eos_and_gamma1_contracts() {
 
     const double total_momentum = momentum_i+momentum_n;
     const double total_energy = energy_i+energy_n;
+
+    // The equilibrium projection acts on the conserved mixture totals, so a
+    // small finite undershoot in a trace predictor row is recoverable. This is
+    // deliberately narrower than decode_equilibrium_mixture(), which still
+    // requires both stored density rows to be positive.
+    const double rho_n_undershoot = -1.0e-10*rho;
+    const double rho_i_compensated = rho-rho_n_undershoot;
+    const double momentum_n_predictor = -1.0e-10*total_momentum;
+    const double momentum_i_predictor = total_momentum-momentum_n_predictor;
+    const double energy_n_predictor = -1.0e-10*total_energy;
+    const double energy_i_predictor = total_energy-energy_n_predictor;
+    const ProjectedMixtureRows recovered = project_equilibrium_rows(
+        table, rho_i_compensated, rho_n_undershoot,
+        momentum_i_predictor, momentum_n_predictor,
+        energy_i_predictor, energy_n_predictor, phi, 1.0e-8);
+    EXPECT_TRUE(recovered.rho_i > 0.0 && recovered.rho_n > 0.0);
+    EXPECT_REL(recovered.rho_i+recovered.rho_n, rho, 2e-15);
+    EXPECT_REL(recovered.momentum_i+recovered.momentum_n, total_momentum, 2e-15);
+    EXPECT_REL(recovered.energy_i+recovered.energy_n, total_energy, 2e-15);
+
     reset_eos_operation_counts();
     const ProjectedMixtureRows packed_rows =
         pack_equilibrium_rows_from_known_temperature(
@@ -1437,6 +1503,9 @@ static void test_stage9_evaporation_vs_fixed_gamma() {
     setenv("ISO_CORONA","0",1); setenv("ISO_TRAC","0",1);
     setenv("ISO_TJUMP_A","1.3",1); setenv("ISO_TJUMP_B","1.0",1);
     setenv("ISO_INNER_T_NEUMANN","1",1);
+    // This historical Stage-9 regression predates the physical-conduction-only
+    // production baseline; keep its old artificial-conduction coefficient explicit.
+    setenv("ISO_NUMERICAL_DIFFUSIVITY_MULT","1",1);
     const EvaporationDiagnostic fixed = run_stage9_evaporation_comparison(false);
     const EvaporationDiagnostic gamma = run_stage9_evaporation_comparison(true);
     EXPECT_TRUE(std::isfinite(fixed.upward_mass_flux) && std::isfinite(gamma.upward_mass_flux));
@@ -1459,7 +1528,7 @@ static void test_stage9_evaporation_vs_fixed_gamma() {
     unsetenv("ISO_HEAT_FLUX"); unsetenv("ISO_COOLING");
     unsetenv("ISO_CORONA"); unsetenv("ISO_TRAC");
     unsetenv("ISO_TJUMP_A"); unsetenv("ISO_TJUMP_B");
-    unsetenv("ISO_INNER_T_NEUMANN");
+    unsetenv("ISO_INNER_T_NEUMANN"); unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
 }
 
 static void test_stage5_gamma_integrator_projection_and_guards() {
@@ -1813,7 +1882,12 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
             grid.eos_gamma_table, u(cons::RHO_I), u(cons::RHO_N),
             u(cons::MOM_I), u(cons::MOM_N), u(cons::E_I), u(cons::E_N), phi);
         const double h_km = phi/(grid.g*1000.0);
-        EXPECT_REL(th.T, c7_full_temperature_pchip(h_km), 3e-5);
+        constexpr double inv_sqrt3 = 0.57735026918962576451;
+        const double half_km = 0.5*grid.ds_i(i)*1.0e-3;
+        const double T_average = 0.5*(
+            c7_full_temperature_pchip(h_km-half_km*inv_sqrt3)
+           +c7_full_temperature_pchip(h_km+half_km*inv_sqrt3));
+        EXPECT_REL(th.T, T_average, 3e-5);
         EXPECT_REL(th.x_eq, saha_ionization_fraction_n_h(th.n_H, th.T), 2e-13);
         const double p = th.p_i+th.p_n;
         const double invH = grid.g*eos_constants::m_h/
@@ -1892,7 +1966,7 @@ static void clear_decoupling_env() {
     unsetenv("ISO_TWO_FLUID"); unsetenv("ISO_IONIZATION"); unsetenv("ISO_COOLING");
     unsetenv("ISO_CORONA");    unsetenv("ISO_TRAC");       unsetenv("ISO_HEAT_FLUX");
     unsetenv("ISO_H_BASE");    unsetenv("ISO_DH");         unsetenv("ISO_T_TOP");
-    unsetenv("ISO_HYDRO_T_DECOUPLE");
+    unsetenv("ISO_HYDRO_T_DECOUPLE"); unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
 }
 
 static MixtureThermo decode_cell(const Grid& grid, const Vec& state, arma::uword i) {
@@ -2144,11 +2218,10 @@ static void test_face_flux_capture_matches_production_continuity() {
 }
 
 // Grid::capture_outer_conduction must (a) never change a number and (b) report the
-// outer-face quantities the conduction solve actually used: the physical face
-// conductivity as the ARITHMETIC face average of the top cell and the wall ghost
-// (the ghost's kappa evaluated at the WALL temperature with the wall's Saha
-// ionization), plus C_num*ds_iph*C_V(top) — over ds_iph_i(ns-1), which is
-// the full cell width (top-cell CENTRE to ghost CENTRE), not half of it.
+// physical-boundary-face quantities the conduction solve actually used. In the
+// decoupled model_column path the 22 kK Dirichlet datum is located half a top-cell
+// width from the live centre, and kappa is evaluated at the physical face state
+// (fixed external pressure + T_face), not at a fictitious reflected ghost centre.
 static void test_outer_conduction_capture_matches_solver_face() {
     const arma::uword ns = 200;
     Grid grid;
@@ -2156,7 +2229,7 @@ static void test_outer_conduction_capture_matches_solver_face() {
     model_column_update_bc(grid, state);
     EXPECT_TRUE(grid.enable_conduction);
     EXPECT_TRUE(!grid.impose_outer_heat_flux);
-    EXPECT_TRUE(grid.numerical_diffusivity_per_length > 0.0f);
+    EXPECT_REL(grid.numerical_diffusivity_per_length, 0.0f, 0.0);
     const Vec dt = cal_dt_i(grid, state);
     const DecodedMixtureField decoded = decode_mixture_field(grid, state, 1);
 
@@ -2174,59 +2247,85 @@ static void test_outer_conduction_capture_matches_solver_face() {
 
     // (b) the formula, rebuilt from independent pieces.
     EXPECT_REL(oc.T_wall, grid.outer_conduction_temperature, 1e-12);
-    EXPECT_REL(oc.ds_face, grid.ds_iph_i(ns-1), 1e-12);
-    EXPECT_REL(oc.ds_face, grid.ds_i(ns-1), 1e-12);       // uniform mesh, Neumann ghost
-    EXPECT_REL(oc.area_ratio, 1.0, 1e-12);                // straight column, B ≡ 1
+    EXPECT_REL(oc.ds_face, 0.5*grid.ds_i(ns-1), 1e-12);
+    EXPECT_REL(grid.ds_iph_i(ns-1), grid.ds_i(ns-1), 1e-12); // hydro ghost remains mirrored
+    EXPECT_REL(oc.area_ratio, 1.0, 1e-12);                    // straight column, B ≡ 1
 
-    // Wall-side kappa: the ghost DENSITY with Saha re-evaluated at T_wall.
+    // Physical-face kappa: fixed external pressure, evaluated at T_face.
     const MixtureThermo ghost = decode_outer_ghost(grid, grid.outer_boundary0_i);
-    const double x_wall = saha_ionization_fraction_n_h(ghost.n_H, oc.T_wall);
-    const double k_wall = physical_conductivity(
-        x_wall*ghost.n_H, (1.0-x_wall)*ghost.n_H, oc.T_wall);
-    // Top-cell kappa at the CONVERGED temperature the capture reports.
-    const double n_h_top = oc.T_top > 0.0
-        ? decode_cell(grid, after_off, ns-1).rho/eos_constants::m_h : 0.0;
-    const double x_top = saha_ionization_fraction_n_h(n_h_top, oc.T_top);
-    const double k_top = physical_conductivity(
-        x_top*n_h_top, (1.0-x_top)*n_h_top, oc.T_top);
-    EXPECT_REL(oc.kappa_phys_face, 0.5*(k_top+k_wall), 1e-6);
-    EXPECT_REL(oc.kappa_num_face,
-        numerical_diffusivity_at_face(grid, oc.ds_face)
-            *equilibrium_heat_capacity(decode_cell(grid, after_off, ns-1).rho, oc.T_top),
-        1e-6);
-    EXPECT_REL(oc.chi_num_face,
-        numerical_diffusivity_at_face(grid, grid.ds_iph_i(ns-1)), 1e-12);
+    const double p_face = ghost.p_i + ghost.p_n;
+    const double rho_face = equilibrium_density_from_pressure(p_face, oc.T_wall);
+    const double n_h_face = rho_face/eos_constants::m_h;
+    const double x_face = saha_ionization_fraction_n_h(n_h_face, oc.T_wall);
+    const double k_face = physical_conductivity(
+        x_face*n_h_face, (1.0-x_face)*n_h_face, oc.T_wall);
+    EXPECT_REL(oc.kappa_phys_face, k_face, 1e-6);
+    EXPECT_REL(oc.kappa_num_face, 0.0, 0.0);
+    EXPECT_REL(oc.chi_num_face, 0.0, 0.0);
     EXPECT_REL(oc.q_phys,
         oc.kappa_phys_face*(oc.T_wall-oc.T_top)/oc.ds_face, 1e-12);
-    EXPECT_REL(oc.q_num, oc.kappa_num_face*(oc.T_wall-oc.T_top)/oc.ds_face, 1e-12);
-    EXPECT_REL(oc.q_total, oc.q_phys+oc.q_num, 1e-12);
-    // The wall is hotter than the top cell here, so the flux heats the top cell.
+    EXPECT_REL(oc.q_num, 0.0, 0.0);
+    EXPECT_REL(oc.q_total, oc.q_phys, 1e-12);
+    // The wall is hotter than the top cell here, so the flux heats the top cell,
+    // while the live top cell remains an evolved unknown rather than a pinned value.
     EXPECT_TRUE(oc.q_total > 0.0);
-    // Numerical conduction is NOT a small correction at this resolution.
-    EXPECT_TRUE(oc.q_num > 0.2*oc.q_total);
+    EXPECT_TRUE(std::abs(oc.T_top-oc.T_wall) > 1.0e-3);
 
-    // ISO_NUMERICAL_DIFFUSIVITY_MULT=0 must zero the numerical term ONLY.
-    const double k_phys_before = oc.kappa_phys_face;
-    setenv("ISO_NUMERICAL_DIFFUSIVITY_MULT", "0", 1);
-    Grid g0;
-    Vec s0 = setup_decoupling_column(g0, true, ns);
-    model_column_update_bc(g0, s0);
-    EXPECT_REL(g0.numerical_diffusivity_per_length, 0.0f, 0.0);
-    EXPECT_TRUE(g0.enable_conduction);
-    g0.capture_outer_conduction = true;
-    advance_Euler_state(g0, s0, cal_dt_i(g0, s0), decode_mixture_field(g0, s0, 1));
-    g0.capture_outer_conduction = false;
-    EXPECT_REL(g0.outer_conduction_capture.q_num, 0.0, 0.0);
-    EXPECT_REL(g0.outer_conduction_capture.q_total,
-               g0.outer_conduction_capture.q_phys, 1e-12);
-    // Same IC, same wall ⇒ the physical face conductivity is essentially unchanged.
-    // Not exactly: one step already reaches a slightly different converged T_top
-    // without the numerical term, and kappa_e ~ T^{5/2} amplifies that. A few tenths
-    // of a percent is the expected size; a factor-level change would mean the
-    // override had leaked into the physical conductivity.
-    EXPECT_REL(g0.outer_conduction_capture.kappa_phys_face, k_phys_before, 2e-2);
+    // The historical mesh-scaled term remains available only as an explicit
+    // diagnostic; enabling it must not alter the physical-face geometry.
+    setenv("ISO_NUMERICAL_DIFFUSIVITY_MULT", "1", 1);
+    Grid gd;
+    Vec sd = setup_decoupling_column(gd, true, ns);
+    model_column_update_bc(gd, sd);
+    EXPECT_TRUE(gd.numerical_diffusivity_per_length > 0.0f);
+    gd.capture_outer_conduction = true;
+    advance_Euler_state(gd, sd, cal_dt_i(gd, sd), decode_mixture_field(gd, sd, 1));
+    gd.capture_outer_conduction = false;
+    EXPECT_REL(gd.outer_conduction_capture.ds_face, 0.5*gd.ds_i(ns-1), 1e-12);
+    EXPECT_TRUE(gd.outer_conduction_capture.q_num > 0.0);
     unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
 
+    clear_decoupling_env();
+}
+
+static void test_outer_conduction_physical_face_is_mesh_independent() {
+    for (const arma::uword ns : {80u, 160u}) {
+        Grid grid;
+        Vec state = setup_decoupling_column(grid, true, ns);
+        model_column_update_bc(grid, state);
+        grid.capture_outer_conduction = true;
+        advance_Euler_state(grid, state, cal_dt_i(grid, state),
+                            decode_mixture_field(grid, state, 1));
+        grid.capture_outer_conduction = false;
+        const OuterConductionCapture& oc = grid.outer_conduction_capture;
+        EXPECT_TRUE(oc.valid);
+        EXPECT_REL(oc.T_wall, 22000.0, 1e-12);
+        EXPECT_REL(oc.ds_face, 0.5*grid.ds_i(ns-1), 1e-12);
+        // The conduction boundary is the same physical domain face at both
+        // resolutions; only the centre-to-face half-cell distance changes.
+        EXPECT_REL(grid.phi_g_iph(ns-1)/grid.g, 553000.0, 2e-6);
+        EXPECT_REL(oc.q_num, 0.0, 0.0);
+        clear_decoupling_env();
+    }
+}
+
+static void test_model_column_gamma_ic_uses_cell_average_temperature() {
+    constexpr arma::uword ns = 40;
+    Grid grid;
+    Vec state = setup_decoupling_column(grid, true, ns);
+    const arma::uword top = ns-1;
+    const double h_lo = 1600.0 + 553.0*static_cast<double>(top)/ns;
+    const double h_hi = 2153.0;
+    constexpr double inv_sqrt3 = 0.57735026918962576451;
+    const double mid = 0.5*(h_lo+h_hi);
+    const double half = 0.5*(h_hi-h_lo);
+    const double expected = 0.5*(
+        c7_full_temperature_pchip(mid-half*inv_sqrt3)
+       +c7_full_temperature_pchip(mid+half*inv_sqrt3));
+    const double centre_sample = c7_full_temperature_pchip(mid);
+    const double actual = decode_cell(grid, state, top).T;
+    EXPECT_REL(actual, expected, 2e-5);
+    EXPECT_TRUE(std::abs(actual-centre_sample) > 1.0e-2);
     clear_decoupling_env();
 }
 
@@ -4577,6 +4676,7 @@ int main() {
     RUN(test_broadcast_static_metric_cache);
     RUN(test_equilibrium_density_from_pressure_matches_bisection);
     RUN(test_eos_gamma_table_loader_and_interpolation);
+    RUN(test_model_column_release_scenario_defaults_and_overrides);
     RUN(test_final_serial_log_aware_eos_and_gamma1_contracts);
     RUN(test_final_serial_one_update_and_fallback_regression);
     RUN(test_openmp_thread_safety_contracts);
@@ -4594,6 +4694,8 @@ int main() {
     RUN(test_upper_bc_hydro_conduction_temperature_decoupling);
     RUN(test_face_flux_capture_matches_production_continuity);
     RUN(test_outer_conduction_capture_matches_solver_face);
+    RUN(test_outer_conduction_physical_face_is_mesh_independent);
+    RUN(test_model_column_gamma_ic_uses_cell_average_temperature);
     RUN(test_stage6_projection_heating_dt_convergence);
     RUN(test_cons_prim_roundtrip);
 

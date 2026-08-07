@@ -97,7 +97,8 @@ int main(int argc, char** argv) {
     // Usage: chromo_main [output_path] [mode] [ionization] [scenario] [data_path] [time_mult] [cooling]
     //   output_path:  defaults to "output.txt"
     //   mode:         "full" (semi-implicit, default) or "explicit" (R_I ≡ 0)
-    //   ionization:   "ionization" (default — Stage E enabled) or "no-ionization"
+    //   ionization:   "ionization" or "no-ionization" (default: no-ionization for
+    //                 the default model_column release, ionization otherwise)
     //   scenario:     "model_column" (default — the unified chromosphere→corona column;
     //                 accepts "model_isentropic" / "model_gentle" as aliases) |
     //                 "model_c7" | "model_flare" | "pfss_field_line" | "analytic_canopy"
@@ -105,15 +106,19 @@ int main(int argc, char** argv) {
     //                 ignored otherwise (pass "-" or "" for scenarios that don't use it)
     //   time_mult:    multiplier on the default total_time (default 1.0). Step
     //                 cap scales accordingly so a longer run is not truncated.
-    //   cooling:      "cooling" (Stage R: CL2012 optically-thick + optically-thin
-    //                 radiative cooling, enabled by DEFAULT) or "no-cooling"
+    //   cooling:      "cooling" or "no-cooling" (default: no-cooling for the
+    //                 default model_column release, cooling otherwise)
     const std::string out_path      = (argc > 1) ? argv[1] : "outputs/output.txt";
     const std::string mode          = (argc > 2) ? argv[2] : "full";
-    const std::string ioniz_arg     = (argc > 3) ? argv[3] : "ionization";
     const std::string scenario_name = (argc > 4) ? argv[4] : "model_column";
+    const bool release_column = scenario_name == "model_column"
+                             || scenario_name == "model_isentropic";
+    const std::string ioniz_arg     = (argc > 3) ? argv[3]
+                                                 : (release_column ? "no-ionization" : "ionization");
     const std::string data_path     = (argc > 5) ? argv[5] : "";
     const float       time_mult     = (argc > 6) ? std::stof(argv[6]) : 1.0f;
-    const std::string cool_arg      = (argc > 7) ? argv[7] : "cooling";
+    const std::string cool_arg      = (argc > 7) ? argv[7]
+                                                 : (release_column ? "no-cooling" : "cooling");
     const bool explicit_only        = (mode == "explicit");
     const bool ionization_on        = (ioniz_arg != "no-ionization");
     const bool cooling_on           = (cool_arg != "no-cooling");
@@ -335,6 +340,10 @@ int main(int argc, char** argv) {
     // thousands of snapshots and spend most of its wall time formatting ASCII.
     // Unset -> the legacy stride cadence is reproduced exactly.
     OutputSchedule schedule = OutputSchedule::from_stride(frame_stride);
+    int progress_stride = 100;
+    if (const char* e = std::getenv("CHROMO_PROGRESS_STRIDE")) {
+        try { progress_stride = std::max(1, std::stoi(e)); } catch (...) {}
+    }
     if (const char* e = std::getenv("CHROMO_FRAME_DT")) {
         double frame_dt = 0.0;
         try { frame_dt = std::stod(e); } catch (...) {}
@@ -493,7 +502,7 @@ int main(int argc, char** argv) {
                 || (time + dt_avg >= total_time) || (step + 1 >= step_cap));
         grid.capture_outer_conduction = capture_cond_now;
 
-        if (step % 100 == 0) {
+        if (step % progress_stride == 0) {
             std::cout << "[" << mode << "] step = " << step
                       << "  dt = " << dt_avg
                       << "  time = " << time

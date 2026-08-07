@@ -37,14 +37,16 @@ export CHROMO_FACE_FLUX_DIAG="${CHROMO_FACE_FLUX_DIAG:-0}"
 export CHROMO_OUTER_COND_DIAG="${CHROMO_OUTER_COND_DIAG:-0}"
 export CHROMO_EOS_COUNTS="${CHROMO_EOS_COUNTS:-0}"
 export CHROMO_PROFILE="${CHROMO_PROFILE:-1}"
+export CHROMO_PROGRESS_STRIDE="${CHROMO_PROGRESS_STRIDE:-10000}"
 
-# Validated production runtime default for the current model (2638-cell refined
-# model_column) on the current Apple Silicon workstation. See
-# docs/long_run_output_and_cfl_validation.md. The conservative hard-coded solver
-# default remains CHROMO_CFL=0.25; this launcher raises it only for the
-# production-shaped configuration that was actually validated. Rerun the sweep
-# before trusting this value on different hardware or a different model shape.
-export CHROMO_CFL="${CHROMO_CFL:-0.50}"
+# Model/grid/physics defaults belong to the model_column scenario itself. This
+# launcher adds runtime policy only. CFL=0.50 is validated for the canonical
+# N=500/R4, 661-cell physical-conduction-only model_column release. Other
+# scenarios retain the solver's conservative CHROMO_CFL=0.25 fallback unless
+# CHROMO_CFL is explicitly supplied.
+if [[ "${4:-}" == "model_column" || "${4:-}" == "model_isentropic" ]]; then
+    export CHROMO_CFL="${CHROMO_CFL:-0.50}"
+fi
 
 if [[ ! -x "${CHROMO_BINARY}" ]]; then
     echo "OpenMP chromo_main not found or not executable: ${CHROMO_BINARY}" >&2

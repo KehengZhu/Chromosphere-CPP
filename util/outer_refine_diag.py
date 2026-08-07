@@ -82,6 +82,26 @@ def mesh_stats(state_path, faces_km, win):
     }
 
 
+def full_cell_widths_m(face_col, meta):
+    """Exact FV widths from a full face-flux geometry capture, or None."""
+    if int(meta.get("first_cell", -1)) != 0:
+        return None
+    faces = np.asarray(face_col["face_km"])
+    cells = np.asarray(face_col["cell_km"])
+    if not len(faces) or len(faces) != len(cells):
+        return None
+    widths_km = np.concatenate(([2.0*(faces[0]-cells[0])], np.diff(faces)))
+    return widths_km*1.0e3
+
+
+def integrate_outer_flux(oc, t_target, column):
+    """Trapezoidal time integral of a captured outer-face flux through t_target."""
+    k = int(np.argmin(np.abs(oc["t"]-t_target)))
+    t = np.asarray(oc["t"][:k+1])
+    q = np.asarray(oc[column][:k+1])
+    return float(np.trapezoid(q, t)) if len(t) > 1 else 0.0
+
+
 def outer_boundary_layer(h_km, T, frac=0.1):
     """Outer thermal boundary layer from the `.gamma_diag` temperature profile.
 
@@ -145,6 +165,13 @@ def main(argv=None):
         ocr = pick_outer(oc, args.time)
         gh, gframes = load_gamma_diag(path)
         _, ga = pick_gamma(gframes, args.time)
+        widths_m = full_cell_widths_m(col, meta)
+        mass_now = mass_rel = float("nan")
+        if widths_m is not None and len(widths_m) == len(col["rho_cell"]):
+            mass0 = float(np.sum(ref["rho_cell"]*widths_m))
+            mass_now = float(np.sum(col["rho_cell"]*widths_m))
+            mass_rel = mass_now/mass0 - 1.0
+        upper = (gh >= win[0]) & (gh <= win[1])
         gm = ga[:, 0] * ga[:, 1]
         grade = (gh >= 2079.0) & (gh <= 2101.0)
         gseg = gm[grade]
@@ -169,6 +196,8 @@ def main(argv=None):
             "n_extrema": fm["n_extrema"], "lambda_km": fm["lambda_km"],
             "T_top": ocr["T_top"], "q_phys": ocr["q_phys"], "q_num": ocr["q_num"],
             "q_total": ocr["q_total"],
+            "E_phys_Jm2": integrate_outer_flux(oc, args.time, "q_phys"),
+            "E_total_Jm2": integrate_outer_flux(oc, args.time, "q_total"),
             "chi_num_face": ocr["chi_num_face"],
             "kappa_phys_face": ocr["kappa_phys_face"],
             "kappa_num_face": ocr["kappa_num_face"],
@@ -180,6 +209,11 @@ def main(argv=None):
             "T_wall": ocr["T_wall"],
             "dT_wall": ocr["T_wall"] - ocr["T_top"],
             "G_wall": (ocr["T_wall"] - ocr["T_top"]) / ocr["ds_face"],
+            "column_mass_kgm2": mass_now,
+            "column_mass_rel_change": mass_rel,
+            "p_top_Pa": float(ga[-1, 6]),
+            "v_window_mean_ms": float(np.mean(ga[upper, 1])),
+            "v_abs_max_ms": float(np.max(np.abs(ga[:, 1]))),
         }
         out[label].update(outer_boundary_layer(gh, ga[:, 2]))
         profiles[label] = {
@@ -231,6 +265,12 @@ def main(argv=None):
         ("q_phys [W/m2]", "q_phys", "%.4f"),
         ("q_num  [W/m2]", "q_num", "%.4f"),
         ("q_total [W/m2]", "q_total", "%.4f"),
+        ("int q_phys dt [J/m2]", "E_phys_Jm2", "%.4f"),
+        ("column mass [kg/m2]", "column_mass_kgm2", "%.6e"),
+        ("column mass drift", "column_mass_rel_change", "%.4e"),
+        ("p_top [Pa]", "p_top_Pa", "%.6e"),
+        ("mean V window [m/s]", "v_window_mean_ms", "%.4f"),
+        ("max |V| [m/s]", "v_abs_max_ms", "%.4f"),
         ("q_num/q_total", "q_num_frac", "%.4f"),
         ("split max relerr", "split_max_relerr", "%.2e"),
         ("grade monotone (2079-2101)", "grade_monotone", "%d"),

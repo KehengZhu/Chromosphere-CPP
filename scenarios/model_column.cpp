@@ -131,6 +131,19 @@ void c7_cell(float h_km, float& T, float& n_i, float& n_n) {
     n_i = n_e;
     n_n = n_HI;
 }
+
+// Cell-average of the prescribed C7/PCHIP temperature for the finite-volume
+// Gamma/Saha IC. Two-point Gauss-Legendre quadrature is enough for the smooth
+// PCHIP segments and removes the O(ds) top-cell centre-sampling shift under
+// refinement without introducing a general quadrature framework.
+double c7_temperature_cell_average(double h_lo_km, double h_hi_km) {
+    constexpr double inv_sqrt3 = 0.57735026918962576451;
+    const double mid = 0.5*(h_lo_km+h_hi_km);
+    const double half = 0.5*(h_hi_km-h_lo_km);
+    const double h0 = mid-half*inv_sqrt3;
+    const double h1 = mid+half*inv_sqrt3;
+    return 0.5*(c7_full_temperature_pchip(h0)+c7_full_temperature_pchip(h1));
+}
 } // namespace
 
 Vec model_column_ic(Grid& grid) {
@@ -235,10 +248,13 @@ Vec model_column_ic(Grid& grid) {
         }
     }
 
-    // --- profile (T, n_i, n_n) sampled at cell centers --------------------
+    // --- finite-volume profile (T, n_i, n_n) -------------------------------
     // Real C7 T(h) and ionization FRACTION with the total density re-integrated
     // hydrostatically from the base (p(h)=p_base·exp(−∫ g/(R_s T) dh), R_s local),
     // so V≈0 is a clean discrete fixed point and any flow is heat-flux driven.
+    // The production Gamma/Saha path stores a cell-average C7/PCHIP temperature
+    // rather than a centre point sample, so refinement represents the same
+    // continuum upper thermal profile instead of shifting the top-cell datum.
     Vec  T_c(grid.ns), ni_c(grid.ns), nn_c(grid.ns);
     double ln_p = 0.0, prev_h = h_base, prev_invH = 0.0;
     {
@@ -252,7 +268,9 @@ Vec model_column_ic(Grid& grid) {
         const double h_c = 0.5 * (h_F(i) + h_F(i + 1));        // km
         float T, n_i, n_n;
         c7_cell(static_cast<float>(h_c), T, n_i, n_n);
-        if (gamma_mode) T = static_cast<float>(c7_full_temperature_pchip(h_c));
+        if (gamma_mode) {
+            T = static_cast<float>(c7_temperature_cell_average(h_F(i), h_F(i+1)));
+        }
         const double dh_m = (h_c-prev_h)*1000.0;
         double x = n_i/(n_i+n_n);
         if (gamma_mode) {
@@ -543,16 +561,13 @@ Vec model_column_ic(Grid& grid) {
     // Stage 1: conduction OFF (adiabatic Euler steady state). Stage 2: ON, driven
     // by the top T jump (or the imposed q(T) flux / coronal heating).
     grid.enable_conduction        = relaxing0 ? false : heat_flux_on;
-    // Numerical diffusivity is folded into Stage D, so it acts only when conduction
-    // is on. A grid-scaled value damps TR-gradient ringing; corona needs more (the
-    // resolved-corona drainage front is near-transonic on a coarse grid).
-    // ISO_NUMERICAL_DIFFUSIVITY_MULT is a DIAGNOSTIC override on this coefficient
-    // only (=1 unset ⇒ production behaviour; =0 ⇒ numerical conduction off with the
-    // physical conductivity, hydro, boundaries, EOS, limiter, CFL and well-balancing
-    // all untouched). Used to test whether the grid-scaled numerical conduction is
-    // what makes the evaporation rate resolution-dependent.
+    // Production model_column uses PHYSICAL conduction only. Keep the old
+    // mesh-scaled artificial diffusivity behind an explicit diagnostic multiplier
+    // for controlled legacy comparisons, but never enable it implicitly.
+    // ISO_NUMERICAL_DIFFUSIVITY_MULT=1 restores the historical C_num=2000 m/s
+    // (4x in the resolved-corona testbed); unset/0 is the production baseline.
     const float diff_mult = (kCorona ? 4.0f : 1.0f)
-                          * env_f("ISO_NUMERICAL_DIFFUSIVITY_MULT", 1.0f);
+                          * env_f("ISO_NUMERICAL_DIFFUSIVITY_MULT", 0.0f);
     grid.numerical_diffusivity_per_length = heat_flux_on
         ? (diff_mult * 2.0e3f) : 0.0f;
 

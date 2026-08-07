@@ -674,9 +674,15 @@ ProjectedRowsResult project_rows_impl(
     double momentum_i, double momentum_n, double energy_i, double energy_n,
     double phi_of_this_state, double trace_fraction_floor,
     double temperature_guess, bool debug_clamp) {
-    require_finite_positive(rho_i, "rho_i");
-    require_finite_positive(rho_n, "rho_n");
-    if (!std::isfinite(momentum_i) || !std::isfinite(momentum_n)
+    // In equilibrium single-fluid mode the two density rows are only a
+    // predictor representation: this projection immediately reconstructs them
+    // from the conserved total density and the Saha equilibrium fraction. A
+    // tiny trace-row undershoot from the explicit hydro predictor therefore
+    // must not abort an otherwise valid conservative state. Keep the strict
+    // per-row positivity requirement in the ordinary EOS decoders; here the
+    // physically relevant requirements are finite rows and positive total rho.
+    if (!std::isfinite(rho_i) || !std::isfinite(rho_n)
+        || !std::isfinite(momentum_i) || !std::isfinite(momentum_n)
         || !std::isfinite(energy_i) || !std::isfinite(energy_n)
         || !std::isfinite(phi_of_this_state))
         throw std::domain_error("mixture state values must be finite");

@@ -107,6 +107,11 @@ struct MixtureFaceState {
     ProjectedMixture conserved;
     double p_total;
     double sound_speed;
+    /// General-EOS pressure response at fixed total density,
+    /// b = (\partial p / \partial e_int)_rho. This is distinct from Gamma1:
+    /// Gamma1 fixes the isentropic acoustic speed, while b fixes the energy
+    /// component of the Euler characteristic vectors.
+    double dp_deint_rho;
 };
 
 /// Rectangular log(T)-log(n_H) table of the equilibrium sound-speed index Gamma1.

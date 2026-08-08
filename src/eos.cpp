@@ -887,8 +887,13 @@ MixtureFaceState face_state_from_eval(
         1.5*p_e, thermo};
     const double p_total = p_i + p_n;
     const double sound_speed = std::sqrt(gamma.gamma_sound * p_total / rho_total);
+    const double dx_d_t = saha_dx_d_temperature(ev.x, temperature);
+    const double dp_d_t_rho = n_h * eos_constants::k_b
+        * (1.0 + ev.x + temperature * dx_d_t);
+    const double de_d_t_rho = caloric_capacity(n_h, ev.x, temperature);
+    const double dp_deint_rho = dp_d_t_rho / de_d_t_rho;
     return MixtureFaceState{{rho_total, velocity, temperature}, conserved,
-                            p_total, sound_speed};
+                            p_total, sound_speed, dp_deint_rho};
 }
 
 void validate_face_inputs(const EosGammaTable& table, double rho_total,

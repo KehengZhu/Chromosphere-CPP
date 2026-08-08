@@ -1273,6 +1273,18 @@ static void test_stage5_6_equilibrium_face_flux_and_sound_speed() {
                 + face.p_total)*velocity, 2e-15);
     EXPECT_REL(face.sound_speed*face.sound_speed,
                face.conserved.thermo.gamma1*face.p_total/rho, 2e-15);
+    // b=(dp/de_int)_rho is a caloric derivative, distinct from Gamma1. Verify
+    // the stored analytic value against a centered finite difference at fixed rho.
+    const double dT = 1.0e-4*temperature;
+    auto pressure_at = [&](double T) {
+        const double x = saha_ionization_fraction_n_h(n_h,T);
+        return (1.0+x)*n_h*eos_constants::k_b*T;
+    };
+    const double b_fd = (pressure_at(temperature+dT)-pressure_at(temperature-dT))
+        /(equilibrium_internal_energy(rho,temperature+dT)
+          -equilibrium_internal_energy(rho,temperature-dT));
+    EXPECT_REL(face.dp_deint_rho,b_fd,2e-7);
+    EXPECT_TRUE(face.dp_deint_rho > 0.0 && face.dp_deint_rho < 2.0/3.0);
     const MixtureThermo decoded = decode_equilibrium_mixture(
         table, face.conserved.rho_i, face.conserved.rho_n,
         face.conserved.momentum_i, face.conserved.momentum_n,
@@ -1967,6 +1979,7 @@ static void clear_decoupling_env() {
     unsetenv("ISO_CORONA");    unsetenv("ISO_TRAC");       unsetenv("ISO_HEAT_FLUX");
     unsetenv("ISO_H_BASE");    unsetenv("ISO_DH");         unsetenv("ISO_T_TOP");
     unsetenv("ISO_HYDRO_T_DECOUPLE"); unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
+    unsetenv("ISO_RIEMANN");
 }
 
 static MixtureThermo decode_cell(const Grid& grid, const Vec& state, arma::uword i) {
@@ -2213,6 +2226,69 @@ static void test_face_flux_capture_matches_production_continuity() {
     rhs_explicit_state(grid, state);
     grid.capture_face_flux = false;
     EXPECT_TRUE(std::abs(c.f_total[ns-1] - before) > 0.0);
+
+    clear_decoupling_env();
+}
+
+static void test_roe_local_face_flux_and_projection() {
+    const arma::uword ns = 80;
+    Grid grid;
+    Vec state = setup_decoupling_column(grid, false, ns);
+    model_column_update_bc(grid, state);
+    const Vec dt = cal_dt_i(grid, state);
+    grid.dt_state.zeros();
+    for (arma::uword k = 0; k < num_of_eq; ++k)
+        grid.dt_state += scalar_to(grid, dt, k);
+
+    // Capture the same reconstructed state with each corrector flux. Roe-local
+    // must actually differ from Rusanov on the stratified TR, while remaining a
+    // conservative finite-volume mass flux.
+    grid.capture_face_flux = true;
+    grid.roe_characteristic_flux = false;
+    rhs_explicit_state(grid, state);
+    const std::vector<double> f_rusanov = grid.face_flux_capture.f_total;
+
+    grid.roe_characteristic_flux = true;
+    const Vec rhs_roe = rhs_explicit_state(grid, state);
+    EXPECT_TRUE(!rhs_roe.has_nan());
+    const GammaFaceFluxCapture& c = grid.face_flux_capture;
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    double flux_scale = 0.0, max_solver_delta = 0.0;
+    double worst_split = 0.0, worst_continuity = 0.0;
+    for (arma::uword i = 0; i < ns; ++i) {
+        EXPECT_TRUE(std::isfinite(c.f_total[i]) && std::isfinite(c.f_diff[i]));
+        flux_scale = std::max(flux_scale, std::abs(c.f_total[i]));
+        max_solver_delta = std::max(max_solver_delta,
+            std::abs(c.f_total[i]-f_rusanov[i]));
+        worst_split = std::max(worst_split,
+            std::abs(c.f_central[i]+c.f_diff[i]-c.f_total[i])
+            /std::max(std::abs(c.f_total[i]),1e-30));
+    }
+    EXPECT_TRUE(max_solver_delta > 1e-8*std::max(flux_scale,1e-30));
+    EXPECT_TRUE(worst_split < 1e-12);
+
+    double rhs_scale = 0.0;
+    for (arma::uword i = 1; i < ns; ++i) {
+        const double produced =
+            static_cast<double>(rhs_roe(arma::sub2ind(sz,i,cons::RHO_I)))
+          + static_cast<double>(rhs_roe(arma::sub2ind(sz,i,cons::RHO_N)));
+        const double from_faces = -(c.f_total[i]-c.f_total[i-1])/grid.ds_i(i)
+                                - c.eq_residual_mass[i];
+        rhs_scale = std::max(rhs_scale,std::abs(c.f_total[i])/grid.ds_i(i));
+        worst_continuity = std::max(worst_continuity,
+            std::abs(from_faces-produced)/std::max(rhs_scale,1e-30));
+    }
+    EXPECT_TRUE(worst_continuity < 1e-5);
+
+    // One real Gamma-mode Euler step must remain projectable onto the equilibrium
+    // manifold; this catches invalid total energy or carrier-lifting mistakes.
+    grid.capture_face_flux = false;
+    const Vec after = advance_Euler_state(grid,state,dt);
+    EXPECT_TRUE(!after.has_nan());
+    const DecodedMixtureField decoded_after = decode_mixture_field(grid,after);
+    EXPECT_TRUE(decoded_after.cells.size() == ns);
+    for (const MixtureThermo& th : decoded_after.cells)
+        EXPECT_TRUE(th.rho > 0.0 && th.T > 0.0 && std::isfinite(th.T));
 
     clear_decoupling_env();
 }
@@ -4693,6 +4769,7 @@ int main() {
     RUN(test_stage8_gamma_model_column_saha_hse_and_ghosts);
     RUN(test_upper_bc_hydro_conduction_temperature_decoupling);
     RUN(test_face_flux_capture_matches_production_continuity);
+    RUN(test_roe_local_face_flux_and_projection);
     RUN(test_outer_conduction_capture_matches_solver_face);
     RUN(test_outer_conduction_physical_face_is_mesh_independent);
     RUN(test_model_column_gamma_ic_uses_cell_average_temperature);

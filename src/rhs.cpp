@@ -183,6 +183,7 @@ struct MixtureFaceBundle {
     Vec& conserved;
     Vec& flux;
     Vec& spectral_radius;
+    Vec& dp_deint_rho;
 };
 
 using MixtureVec = arma::Col<double>;
@@ -317,6 +318,7 @@ void prepare_mixture_face(const Grid& grid, MixtureFaceBundle out) {
     out.conserved.set_size(grid.n_state);
     out.flux.set_size(grid.n_state);
     out.spectral_radius.set_size(grid.n_state);
+    out.dp_deint_rho.set_size(grid.ns);
 }
 
 void build_mixture_face_cell(const Grid& grid, const MixtureVec& mixture,
@@ -336,6 +338,7 @@ void build_mixture_face_cell(const Grid& grid, const MixtureVec& mixture,
     const double values[7] = {u.rho_i, u.rho_n, u.momentum_i, u.momentum_n,
                               u.energy_i, u.energy_n, u.energy_e};
     const float a = static_cast<float>(std::abs(velocity) + face.sound_speed);
+    out.dp_deint_rho(i) = static_cast<float>(face.dp_deint_rho);
     for (arma::uword k = 0; k < num_of_eq; ++k) {
         out.conserved(arma::sub2ind(sz, i, k)) = static_cast<float>(values[k]);
         out.flux(arma::sub2ind(sz, i, k)) = static_cast<float>(flux[k]);
@@ -373,6 +376,126 @@ void build_mixture_face_batch4(
         build_mixture_face_cell(grid, mixture2, phi2, out2, i);
         build_mixture_face_cell(grid, mixture3, phi3, out3, i);
     });
+}
+
+// Roe-local corrector flux for the three authoritative equilibrium-manifold
+// totals (rho, rho*v, E_i+E_n). This is deliberately a local characteristic
+// average, not a claim of exact general-EOS Roe Property U. The seven carrier
+// rows are only a storage representation: after the explicit update the active
+// integrator projects the three totals back to the Saha equilibrium manifold.
+// Any invalid characteristic state falls back face-locally to the validated
+// Rusanov flux.
+void build_roe_local_mixture_flux(const Grid& grid,
+                                  const MixtureFaceBundle& left,
+                                  const MixtureFaceBundle& right,
+                                  const Vec& a_face, Vec& output) {
+    output.set_size(grid.n_state);
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        auto P = [&](const Vec& v, arma::uword row) -> double {
+            return static_cast<double>(v(arma::sub2ind(sz, i, row)));
+        };
+        auto rusanov_face = [&]() {
+            const double a = P(a_face, cons::RHO_I);
+            for (arma::uword row = 0; row < num_of_eq; ++row) {
+                output(arma::sub2ind(sz, i, row)) = static_cast<float>(
+                    0.5 * (P(left.flux, row) + P(right.flux, row)
+                           - a * (P(right.conserved, row) - P(left.conserved, row))));
+            }
+        };
+
+        const double rho_l = P(left.conserved, cons::RHO_I)
+                           + P(left.conserved, cons::RHO_N);
+        const double rho_r = P(right.conserved, cons::RHO_I)
+                           + P(right.conserved, cons::RHO_N);
+        const double mom_l = P(left.conserved, cons::MOM_I)
+                           + P(left.conserved, cons::MOM_N);
+        const double mom_r = P(right.conserved, cons::MOM_I)
+                           + P(right.conserved, cons::MOM_N);
+        const double energy_l = P(left.conserved, cons::E_I)
+                              + P(left.conserved, cons::E_N);
+        const double energy_r = P(right.conserved, cons::E_I)
+                              + P(right.conserved, cons::E_N);
+        if (!(rho_l > 0.0) || !(rho_r > 0.0)
+            || !std::isfinite(energy_l) || !std::isfinite(energy_r)) {
+            rusanov_face();
+            continue;
+        }
+
+        const double v_l = mom_l / rho_l;
+        const double v_r = mom_r / rho_r;
+        const double p_l = P(left.flux, cons::MOM_I) + P(left.flux, cons::MOM_N)
+                         - rho_l * v_l * v_l;
+        const double p_r = P(right.flux, cons::MOM_I) + P(right.flux, cons::MOM_N)
+                         - rho_r * v_r * v_r;
+        const double h_l = (energy_l + p_l) / rho_l;
+        const double h_r = (energy_r + p_r) / rho_r;
+        const double c_l = P(left.spectral_radius, cons::RHO_I) - std::abs(v_l);
+        const double c_r = P(right.spectral_radius, cons::RHO_I) - std::abs(v_r);
+        const double b_l = static_cast<double>(left.dp_deint_rho(i));
+        const double b_r = static_cast<double>(right.dp_deint_rho(i));
+        if (!(p_l > 0.0) || !(p_r > 0.0) || !(c_l > 0.0) || !(c_r > 0.0)
+            || !(b_l > 0.0) || !(b_r > 0.0)
+            || !std::isfinite(h_l) || !std::isfinite(h_r)) {
+            rusanov_face();
+            continue;
+        }
+
+        const double sr_l = std::sqrt(rho_l);
+        const double sr_r = std::sqrt(rho_r);
+        const double denom = sr_l + sr_r;
+        const double velocity = (sr_l * v_l + sr_r * v_r) / denom;
+        const double enthalpy = (sr_l * h_l + sr_r * h_r) / denom;
+        const double b = (sr_l * b_l + sr_r * b_r) / denom;
+        const double c2 = (sr_l * c_l * c_l + sr_r * c_r * c_r) / denom;
+        if (!(b > 0.0) || !(c2 > 0.0) || !std::isfinite(enthalpy)) {
+            rusanov_face();
+            continue;
+        }
+        const double c = std::sqrt(c2);
+
+        const double d_rho = rho_r - rho_l;
+        const double d_mom = mom_r - mom_l;
+        const double d_energy = energy_r - energy_l;
+        const double theta = b / c2 * (d_energy - velocity * d_mom
+            + (velocity * velocity - enthalpy) * d_rho);
+        const double acoustic_momentum = (d_mom - velocity * d_rho) / c;
+        const double alpha_minus = 0.5 * (d_rho + theta - acoustic_momentum);
+        const double alpha_zero = -theta;
+        const double alpha_plus = 0.5 * (d_rho + theta + acoustic_momentum);
+        const double lambda_minus = std::abs(velocity - c);
+        const double lambda_zero = std::abs(velocity);
+        const double lambda_plus = std::abs(velocity + c);
+
+        const double d0 = lambda_minus * alpha_minus
+                        + lambda_zero * alpha_zero
+                        + lambda_plus * alpha_plus;
+        const double d1 = lambda_minus * alpha_minus * (velocity - c)
+                        + lambda_zero * alpha_zero * velocity
+                        + lambda_plus * alpha_plus * (velocity + c);
+        const double d2 = lambda_minus * alpha_minus * (enthalpy - velocity * c)
+                        + lambda_zero * alpha_zero * (enthalpy - c2 / b)
+                        + lambda_plus * alpha_plus * (enthalpy + velocity * c);
+        if (!std::isfinite(d0) || !std::isfinite(d1) || !std::isfinite(d2)) {
+            rusanov_face();
+            continue;
+        }
+
+        const double x_l = P(left.conserved, cons::RHO_I) / rho_l;
+        const double x_r = P(right.conserved, cons::RHO_I) / rho_r;
+        const double x = std::max(0.0, std::min(1.0,
+            (sr_l * x_l + sr_r * x_r) / denom));
+        const double dissipation[7] = {
+            x * d0, (1.0 - x) * d0,
+            x * d1, (1.0 - x) * d1,
+            x * d2, (1.0 - x) * d2,
+            0.0
+        };
+        for (arma::uword row = 0; row < num_of_eq; ++row) {
+            output(arma::sub2ind(sz, i, row)) = static_cast<float>(
+                0.5 * (P(left.flux, row) + P(right.flux, row) - dissipation[row]));
+        }
+    }
 }
 
 void mixture_source(const Grid& grid, const Vec& state,
@@ -437,8 +560,10 @@ void capture_gamma_face_flux(const Grid& grid, const MixtureVec& w,
         const double rho_cons_L  = P(fl.conserved, cons::RHO_I) + P(fl.conserved, cons::RHO_N);
         const double rho_cons_R  = P(fr.conserved, cons::RHO_I) + P(fr.conserved, cons::RHO_N);
         c.f_central[i] = 0.5 * (mass_flux_L + mass_flux_R);
-        c.f_diff[i]    = -0.5 * c.a_face[i] * (rho_cons_R - rho_cons_L);
         c.f_total[i]   = P(flux, cons::RHO_I) + P(flux, cons::RHO_N);
+        c.f_diff[i]    = grid.roe_characteristic_flux
+            ? c.f_total[i] - c.f_central[i]
+            : -0.5 * c.a_face[i] * (rho_cons_R - rho_cons_L);
         c.eq_residual_mass[i] = has_eq
             ? P(grid.eq_residual, cons::RHO_I) + P(grid.eq_residual, cons::RHO_N)
             : 0.0;
@@ -535,17 +660,17 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
     }
 
     auto& p=grid.gamma_rhs_scratch.packed;
-    MixtureFaceBundle fr_iph{p[0],p[1],p[2]};
-    MixtureFaceBundle fl_iph{p[3],p[4],p[5]};
-    MixtureFaceBundle fr_imh{p[6],p[7],p[8]};
-    MixtureFaceBundle fl_imh{p[9],p[10],p[11]};
+    MixtureFaceBundle fr_iph{p[0],p[1],p[2],p[3]};
+    MixtureFaceBundle fl_iph{p[4],p[5],p[6],p[7]};
+    MixtureFaceBundle fr_imh{p[8],p[9],p[10],p[11]};
+    MixtureFaceBundle fl_imh{p[12],p[13],p[14],p[15]};
     build_mixture_face_batch2(grid,
         wl_iph, grid.phi_g_iph, fl_iph,
         wr_imh, grid.phi_g_imh, fr_imh);
 
     // Internal MUSCL predictor: update conservatively, then independently invert
     // the caloric EOS. This path intentionally never calls legacy cons2prim.
-    Vec& predicted=p[12];
+    Vec& predicted=p[16];
     predicted=xn_state-grid.dt_state/grid.ds_state%(fl_iph.flux-fr_imh.flux);
     DecodedMixtureField& decoded_predicted=grid.gamma_rhs_scratch.predicted;
     decode_predicted_caloric_primitives_into(
@@ -571,15 +696,20 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
         wl_iph, grid.phi_g_iph, fl_iph,
         wr_imh, grid.phi_g_imh, fr_imh,
         wl_imh, grid.phi_g_imh, fl_imh);
-    Vec& a_imh=p[13]; Vec& a_iph=p[14];
-    Vec& flux_imh=p[15]; Vec& flux_iph=p[16]; Vec& rhs=p[17];
+    Vec& a_imh=p[17]; Vec& a_iph=p[18];
+    Vec& flux_imh=p[19]; Vec& flux_iph=p[20]; Vec& rhs=p[21];
     a_imh=arma::max(fl_imh.spectral_radius,fr_imh.spectral_radius);
     a_iph=arma::max(fl_iph.spectral_radius,fr_iph.spectral_radius);
-    flux_imh=0.5f*(fl_imh.flux+fr_imh.flux
-        -a_imh%(fr_imh.conserved-fl_imh.conserved));
-    flux_iph=0.5f*(fl_iph.flux+fr_iph.flux
-        -a_iph%(fr_iph.conserved-fl_iph.conserved));
-    Vec& source=p[18];
+    if (grid.roe_characteristic_flux) {
+        build_roe_local_mixture_flux(grid,fl_imh,fr_imh,a_imh,flux_imh);
+        build_roe_local_mixture_flux(grid,fl_iph,fr_iph,a_iph,flux_iph);
+    } else {
+        flux_imh=0.5f*(fl_imh.flux+fr_imh.flux
+            -a_imh%(fr_imh.conserved-fl_imh.conserved));
+        flux_iph=0.5f*(fl_iph.flux+fr_iph.flux
+            -a_iph%(fr_iph.conserved-fl_iph.conserved));
+    }
+    Vec& source=p[22];
     mixture_source(grid,xn_state,decoded,source);
     rhs=-grid.B_state%(flux_iph/grid.B_state_iph
         -flux_imh/grid.B_state_imh)/grid.ds_state

@@ -461,6 +461,23 @@ Vec model_column_ic(Grid& grid) {
                   << choice << " mc3=" << grid.mc3_limiter
                   << " beta=" << grid.limiter_beta << std::endl;
     }
+    // DIAGNOSTIC-ONLY Riemann-solver override. The validated release remains
+    // Rusanov. roe-local is intentionally restricted to the Gamma/Saha
+    // equilibrium-manifold path; it changes only the corrector dissipation.
+    if (const char* riemann = std::getenv("ISO_RIEMANN")) {
+        const std::string choice(riemann);
+        if (choice == "rusanov") {
+            grid.roe_characteristic_flux = false;
+        } else if (choice == "roe-local") {
+            if (!gamma_mode)
+                throw std::invalid_argument("ISO_RIEMANN=roe-local requires Gamma/Saha mode");
+            grid.roe_characteristic_flux = true;
+        } else {
+            throw std::invalid_argument("ISO_RIEMANN must be rusanov or roe-local");
+        }
+        std::cerr << "[model_column] DIAGNOSTIC Riemann override: ISO_RIEMANN="
+                  << choice << std::endl;
+    }
 
     // --- runtime physics toggles ------------------------------------------
     grid.single_fluid             = gamma_mode || !two_fluid_on;

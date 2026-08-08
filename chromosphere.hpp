@@ -116,7 +116,7 @@ struct DecodedMixtureField {
 struct GammaRhsScratch {
     DecodedMixtureField predicted;
     std::array<arma::Col<double>, 24> mixture;
-    std::array<Vec, 20> packed;
+    std::array<Vec, 24> packed;
 
     // Non-uniform MUSCL reconstruction weights and slope-ratio metrics. They are
     // functions of the STATIC mesh alone (ds_i via ds_iph_i/ds_imh_i), so they are
@@ -128,7 +128,7 @@ struct GammaRhsScratch {
     bool weights_valid = false;
 };
 
-/// READ-ONLY capture of the production gamma-table reconstruction and Rusanov
+/// READ-ONLY capture of the production gamma-table reconstruction and numerical
 /// TOTAL-mass face flux for ONE explicit RHS evaluation. Filled by
 /// rhs_explicit_mixture (the active gamma path) only when Grid::capture_face_flux
 /// is true, and never read back by any solver stage — so enabling it cannot
@@ -145,7 +145,8 @@ struct GammaFaceFluxCapture {
     std::vector<double> eq_residual_mass;
     // one-sided reconstructed face states at i+1/2 (L = from cell i, R = cell i+1)
     std::vector<double> rho_L, rho_R, v_L, v_R, T_L, T_R, cs_L, cs_R;
-    // Rusanov spectral radius a = max(|V_L|+c_L, |V_R|+c_R) and the mass-flux split
+    // Acoustic spectral radius a = max(|V_L|+c_L, |V_R|+c_R), retained as a
+    // diagnostic/fallback value in Roe-local mode, plus the central/dissipative split.
     std::vector<double> a_face, f_central, f_diff, f_total;
     // limiter inputs/outputs actually used for this face, per reconstruction slot:
     // r/phi_plus build the L state from cell i, r_ip1/phi_minus the R state from i+1
@@ -370,6 +371,13 @@ struct Grid {
     // changes how the same differences are limited).
     bool  mc3_limiter = false;
     float limiter_beta = 2.0f;
+
+    // Diagnostic-only alternative numerical flux for the active Gamma/Saha
+    // equilibrium-manifold path. False keeps the validated Rusanov/LLF release
+    // behavior. True replaces only the corrector dissipation by a 3x3 mixture
+    // Roe-type characteristic decomposition; reconstruction, predictor,
+    // projection, boundaries and source/conduction stages are unchanged.
+    bool roe_characteristic_flux = false;
 
     // Equilibrium-reference ("δ-form") well-balancing. The φ_g correction
     // (well_balanced) fixes the gravity-potential bookkeeping and log_reconstruct

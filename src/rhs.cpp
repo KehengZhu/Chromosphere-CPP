@@ -114,6 +114,7 @@ void decode_mixture_field_into(
     out.cells.resize(grid.ns);
     const arma::uword ext_n = grid.ns+4;
     out.extended_primitive.set_size(ext_n*3);
+    out.extended_temperature.set_size(ext_n);
     const auto state_size = arma::size(grid.ns, num_of_eq);
     const auto ext_size = arma::size(ext_n, 3);
     // Slot 2 carries the THERMAL reconstruction variable: log(T) by default, or
@@ -127,6 +128,7 @@ void decode_mixture_field_into(
         out.extended_primitive(arma::sub2ind(ext_size, ext_i, 1)) = momentum/th.rho;
         out.extended_primitive(arma::sub2ind(ext_size, ext_i, 2)) =
             log_p ? std::log(th.p_i + th.p_n) : std::log(th.T);
+        out.extended_temperature(ext_i) = th.T;
     };
     const bool has_guesses = previous && previous->source_grid == &grid
         && previous->cells.size() == grid.ns;
@@ -161,6 +163,10 @@ void decode_mixture_field_into(
             out.extended_primitive(arma::sub2ind(ext_size, grid.ns+3, slot)) =
                 out.extended_primitive(arma::sub2ind(ext_size, grid.ns+1, slot));
         }
+        out.extended_temperature(0) = out.extended_temperature(2);
+        out.extended_temperature(1) = out.extended_temperature(2);
+        out.extended_temperature(grid.ns+2) = out.extended_temperature(grid.ns+1);
+        out.extended_temperature(grid.ns+3) = out.extended_temperature(grid.ns+1);
     } else {
         auto decode_ghost = [&](const Vec& ghost, double phi,
                                 arma::uword ext_i) {
@@ -229,6 +235,19 @@ void mixture_stencil_view(const Grid& grid,
     }
 }
 
+// Parent-cell temperature hints, shifted by exactly the same stencil offset the
+// reconstruction of the corresponding one-sided face state used. This is solver
+// scratch, not a reconstructed variable: it never enters the limiter, the
+// extrapolation, or any flux.
+void temperature_stencil_view(const Grid& grid,
+                              const DecodedMixtureField& decoded,
+                              int offset, arma::Col<double>& result) {
+    result.set_size(grid.ns);
+    for (arma::uword i = 0; i < grid.ns; ++i)
+        result(i) = decoded.extended_temperature(
+            static_cast<arma::uword>(static_cast<int>(i)+2+offset));
+}
+
 void decode_predicted_caloric_primitives_into(
     const Grid& grid, const Vec& state, const DecodedMixtureField& previous,
     DecodedMixtureField& output) {
@@ -237,6 +256,7 @@ void decode_predicted_caloric_primitives_into(
     output.cells.clear();
     const arma::uword ext_n = grid.ns+4;
     output.extended_primitive.set_size(ext_n*MIX_ROWS);
+    output.extended_temperature.set_size(ext_n);
     const auto state_size = arma::size(grid.ns, num_of_eq);
     const auto ext_size = arma::size(ext_n, MIX_ROWS);
     // Same thermal-slot convention as decode_mixture_field_into: the predictor
@@ -250,6 +270,7 @@ void decode_predicted_caloric_primitives_into(
             momentum/th.rho;
         output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_THERMAL)) =
             log_p ? std::log(th.p_i + th.p_n) : std::log(th.T);
+        output.extended_temperature(ext_i) = th.T;
     };
     parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
         const arma::uword i = static_cast<arma::uword>(raw_i);
@@ -277,6 +298,10 @@ void decode_predicted_caloric_primitives_into(
             output.extended_primitive(arma::sub2ind(ext_size,grid.ns+3,slot)) =
                 output.extended_primitive(arma::sub2ind(ext_size,grid.ns+1,slot));
         }
+        output.extended_temperature(0) = output.extended_temperature(2);
+        output.extended_temperature(1) = output.extended_temperature(2);
+        output.extended_temperature(grid.ns+2) = output.extended_temperature(grid.ns+1);
+        output.extended_temperature(grid.ns+3) = output.extended_temperature(grid.ns+1);
     } else {
         auto decode_ghost = [&](const Vec& ghost, double phi, arma::uword ext_i) {
             const CaloricMixtureThermo th = decode_equilibrium_caloric_mixture(
@@ -337,7 +362,8 @@ void prepare_mixture_face(const Grid& grid, MixtureFaceBundle out) {
 
 void build_mixture_face_cell(const Grid& grid, const MixtureVec& mixture,
                              const Vec& phi_face, MixtureFaceBundle out,
-                             arma::uword i) {
+                             arma::uword i,
+                             const arma::Col<double>* temperature_hint) {
     const auto sz = arma::size(grid.ns, num_of_eq);
     const auto msz = mixture_size(grid);
     const double log_rho = mixture(arma::sub2ind(msz, i, MIX_LOG_RHO));
@@ -347,7 +373,9 @@ void build_mixture_face_cell(const Grid& grid, const MixtureVec& mixture,
         ? equilibrium_mixture_face_state_from_log_pressure(
               grid.eos_gamma_table, log_rho, velocity, thermal,
               static_cast<double>(phi_face(i)), grid.eos_trace_fraction_floor,
-              grid.eos_gamma_debug_clamp)
+              grid.eos_gamma_debug_clamp,
+              temperature_hint ? (*temperature_hint)(i)
+                               : std::numeric_limits<double>::quiet_NaN())
         : equilibrium_mixture_face_state_from_logs(
               grid.eos_gamma_table, log_rho, velocity, thermal,
               static_cast<double>(phi_face(i)), grid.eos_trace_fraction_floor,
@@ -368,32 +396,38 @@ void build_mixture_face_cell(const Grid& grid, const MixtureVec& mixture,
 void build_mixture_face_batch2(
     const Grid& grid,
     const MixtureVec& mixture0, const Vec& phi0, MixtureFaceBundle out0,
-    const MixtureVec& mixture1, const Vec& phi1, MixtureFaceBundle out1) {
+    const arma::Col<double>* hint0,
+    const MixtureVec& mixture1, const Vec& phi1, MixtureFaceBundle out1,
+    const arma::Col<double>* hint1) {
     prepare_mixture_face(grid, out0);
     prepare_mixture_face(grid, out1);
     parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
         const arma::uword i = static_cast<arma::uword>(raw_i);
-        build_mixture_face_cell(grid, mixture0, phi0, out0, i);
-        build_mixture_face_cell(grid, mixture1, phi1, out1, i);
+        build_mixture_face_cell(grid, mixture0, phi0, out0, i, hint0);
+        build_mixture_face_cell(grid, mixture1, phi1, out1, i, hint1);
     });
 }
 
 void build_mixture_face_batch4(
     const Grid& grid,
     const MixtureVec& mixture0, const Vec& phi0, MixtureFaceBundle out0,
+    const arma::Col<double>* hint0,
     const MixtureVec& mixture1, const Vec& phi1, MixtureFaceBundle out1,
+    const arma::Col<double>* hint1,
     const MixtureVec& mixture2, const Vec& phi2, MixtureFaceBundle out2,
-    const MixtureVec& mixture3, const Vec& phi3, MixtureFaceBundle out3) {
+    const arma::Col<double>* hint2,
+    const MixtureVec& mixture3, const Vec& phi3, MixtureFaceBundle out3,
+    const arma::Col<double>* hint3) {
     prepare_mixture_face(grid, out0);
     prepare_mixture_face(grid, out1);
     prepare_mixture_face(grid, out2);
     prepare_mixture_face(grid, out3);
     parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
         const arma::uword i = static_cast<arma::uword>(raw_i);
-        build_mixture_face_cell(grid, mixture0, phi0, out0, i);
-        build_mixture_face_cell(grid, mixture1, phi1, out1, i);
-        build_mixture_face_cell(grid, mixture2, phi2, out2, i);
-        build_mixture_face_cell(grid, mixture3, phi3, out3, i);
+        build_mixture_face_cell(grid, mixture0, phi0, out0, i, hint0);
+        build_mixture_face_cell(grid, mixture1, phi1, out1, i, hint1);
+        build_mixture_face_cell(grid, mixture2, phi2, out2, i, hint2);
+        build_mixture_face_cell(grid, mixture3, phi3, out3, i, hint3);
     });
 }
 
@@ -630,6 +664,21 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
     MixtureVec& wt=m[17]; MixtureVec& wt_ip1=m[18]; MixtureVec& wt_im1=m[19];
     MixtureVec& lp_r=m[20]; MixtureVec& lm_r=m[21];
     MixtureVec& lm_rip1=m[22]; MixtureVec& lp_rim1=m[23];
+    // Parent-cell temperature hints for the (rho,p)->T face inversion. Built only
+    // when the pressure reconstruction is active; the log(T) path never inverts.
+    // t_hint_0/_ip1/_im1 hold T of cell i / i+1 / i-1 respectively, taken from the
+    // SAME extended array (ghosts included) the stencil views read.
+    MixtureVec& t_hint_0=m[10]; MixtureVec& t_hint_ip1=m[11];
+    MixtureVec& t_hint_im1=m[12];
+    const arma::Col<double>* h0 = nullptr;
+    const arma::Col<double>* h_ip1 = nullptr;
+    const arma::Col<double>* h_im1 = nullptr;
+    if (grid.pressure_reconstruct) {
+        temperature_stencil_view(grid,decoded, 0,t_hint_0);
+        temperature_stencil_view(grid,decoded, 1,t_hint_ip1);
+        temperature_stencil_view(grid,decoded,-1,t_hint_im1);
+        h0 = &t_hint_0; h_ip1 = &t_hint_ip1; h_im1 = &t_hint_im1;
+    }
     mixture_stencil_view(grid,decoded,0,w);
     mixture_stencil_view(grid,decoded,1,w_ip1);
     mixture_stencil_view(grid,decoded,-1,w_im1);
@@ -700,9 +749,11 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
     MixtureFaceBundle fl_iph{p[4],p[5],p[6],p[7]};
     MixtureFaceBundle fr_imh{p[8],p[9],p[10],p[11]};
     MixtureFaceBundle fl_imh{p[12],p[13],p[14],p[15]};
+    // Both predictor faces are extrapolated from cell i, so cell i's temperature
+    // is the natural Newton seed for both.
     build_mixture_face_batch2(grid,
-        wl_iph, grid.phi_g_iph, fl_iph,
-        wr_imh, grid.phi_g_imh, fr_imh);
+        wl_iph, grid.phi_g_iph, fl_iph, h0,
+        wr_imh, grid.phi_g_imh, fr_imh, h0);
 
     // Internal MUSCL predictor: update conservatively, then independently invert
     // the caloric EOS. This path intentionally never calls legacy cons2prim.
@@ -727,11 +778,14 @@ Vec rhs_explicit_mixture(const Grid& grid, const Vec& xn_state,
         wl_imh=0.5*(w_im1+wt_im1)+W4%lp_rim1%(w-w_im1);
     }
 
+    // Corrector parentage, matching the four reconstructions just above:
+    //   wr_iph[i] from cell i+1, wl_iph[i] and wr_imh[i] from cell i,
+    //   wl_imh[i] from cell i-1.
     build_mixture_face_batch4(grid,
-        wr_iph, grid.phi_g_iph, fr_iph,
-        wl_iph, grid.phi_g_iph, fl_iph,
-        wr_imh, grid.phi_g_imh, fr_imh,
-        wl_imh, grid.phi_g_imh, fl_imh);
+        wr_iph, grid.phi_g_iph, fr_iph, h_ip1,
+        wl_iph, grid.phi_g_iph, fl_iph, h0,
+        wr_imh, grid.phi_g_imh, fr_imh, h0,
+        wl_imh, grid.phi_g_imh, fl_imh, h_im1);
     Vec& a_imh=p[17]; Vec& a_iph=p[18];
     Vec& flux_imh=p[19]; Vec& flux_iph=p[20]; Vec& rhs=p[21];
     a_imh=arma::max(fl_imh.spectral_radius,fr_imh.spectral_radius);

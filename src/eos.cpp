@@ -320,29 +320,48 @@ PressureInversion invert_pressure_eval(double rho_total, double pressure,
         throw std::domain_error("equilibrium temperature inversion: unusable bracket");
 
     double temperature = temperature_guess;
-    if (!std::isfinite(temperature) || !(temperature > lower)
-        || !(temperature < upper))
-        temperature = 0.75 * t_neutral;
+    // A hint taken from a neighbouring cell can land marginally above T_neutral
+    // of THIS face: in the near-neutral limit x -> 0 the root sits at the upper
+    // bracket end, so any reconstruction perturbation of (rho,p) moves it across.
+    // Clamping is still a valid starting point inside the bracket, whereas
+    // discarding the hint would throw away the best available estimate exactly
+    // where it is most accurate.
+    if (std::isfinite(temperature)) {
+        if (temperature > upper) temperature = upper;
+        else if (temperature <= lower) temperature = lower * (1.0 + 1.0e-9);
+    }
+    const bool hinted = std::isfinite(temperature) && temperature > lower
+                        && temperature <= upper;
+    if (!hinted) temperature = 0.75 * t_neutral;
 
     const double tolerance = 4.0 * std::numeric_limits<double>::epsilon() * pressure;
+    std::uint64_t bisections = 0;
     for (int iteration = 0; iteration < 128; ++iteration) {
         const CaloricEval ev = caloric_eval_with_log_n(
             rho_total, temperature, n_h, log_n_h);
         const double residual = ev.pressure - pressure;
-        if (std::abs(residual) <= tolerance)
+        if (std::abs(residual) <= tolerance) {
+            profile_note_pressure_inversion(
+                static_cast<std::uint64_t>(iteration)+1, hinted, bisections);
             return PressureInversion{temperature, ev};
+        }
         if (residual > 0.0) upper = temperature;
         else                lower = temperature;
-        if (upper - lower <= 4.0 * std::numeric_limits<double>::epsilon() * upper)
+        if (upper - lower <= 4.0 * std::numeric_limits<double>::epsilon() * upper) {
+            profile_note_pressure_inversion(
+                static_cast<std::uint64_t>(iteration)+1, hinted, bisections);
             return PressureInversion{temperature, ev};
+        }
 
         // dp/dT|_rho = n_H k_B (1 + x + T dx/dT); strictly positive, so a Newton
         // step is always well defined. Reject it only if it leaves the bracket.
         const double dp_dt = n_h * eos_constants::k_b
             * (1.0 + ev.x + temperature * saha_dx_d_temperature(ev.x, temperature));
         double candidate = temperature - residual / dp_dt;
-        if (!std::isfinite(candidate) || !(candidate > lower) || !(candidate < upper))
+        if (!std::isfinite(candidate) || !(candidate > lower) || !(candidate < upper)) {
             candidate = 0.5 * (lower + upper);
+            ++bisections;
+        }
         temperature = candidate;
     }
     std::ostringstream message;
@@ -1015,7 +1034,7 @@ MixtureFaceState equilibrium_mixture_face_state_from_logs(
 MixtureFaceState equilibrium_mixture_face_state_from_log_pressure(
     const EosGammaTable& table, double log_rho_total, double velocity,
     double log_pressure, double phi_of_face, double trace_fraction_floor,
-    bool debug_clamp) {
+    bool debug_clamp, double temperature_guess) {
     if (!std::isfinite(log_rho_total) || !std::isfinite(log_pressure))
         throw std::domain_error("mixture face logarithms must be finite");
     const double rho_total = std::exp(log_rho_total);
@@ -1026,11 +1045,13 @@ MixtureFaceState equilibrium_mixture_face_state_from_log_pressure(
     const double log_n_h = n_h_log(n_h);
     table.require_n_h_in_bounds_from_log(n_h, log_n_h, debug_clamp);
     // The inversion returns the caloric evaluation AT the recovered temperature,
-    // so the face is built from exactly one Saha solve — the same count the
-    // temperature-based builder pays.
+    // so no Saha solve is repeated after convergence — but every Newton step
+    // inside it costs one. `temperature_guess` is a pure solver hint: any value
+    // outside the exact bracket (including NaN) falls back to 0.75*T_neutral, and
+    // the bracket remains the safety authority either way, so the converged root
+    // cannot depend on it.
     const PressureInversion inverted = invert_pressure_eval(
-        rho_total, pressure, n_h, log_n_h,
-        std::numeric_limits<double>::quiet_NaN());
+        rho_total, pressure, n_h, log_n_h, temperature_guess);
     validate_face_inputs(table, rho_total, velocity, inverted.temperature,
                          phi_of_face, trace_fraction_floor);
     return face_state_from_eval(

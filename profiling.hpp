@@ -27,6 +27,17 @@ enum class TimestepLimiter : unsigned {
     Count
 };
 
+/// Counters for the (rho,p) -> T face inversion of the pressure-based MUSCL
+/// reconstruction ONLY. Deliberately separate from EosInversionProfile, which
+/// counts the (rho,E) -> T energy inversion of the decode/projection stages.
+struct PressureInversionProfile {
+    std::uint64_t calls = 0;
+    std::uint64_t hinted_calls = 0;      // a caller-supplied guess was usable
+    std::uint64_t evaluations = 0;       // Saha/caloric evaluations consumed
+    std::uint64_t maximum_evaluations = 0;
+    std::uint64_t bisection_fallbacks = 0;
+};
+
 struct EosInversionProfile {
     std::uint64_t calls = 0;
     std::uint64_t initial_guess_accepts = 0;
@@ -51,6 +62,9 @@ void profile_note_inversion_bisection() noexcept;
 void profile_note_inversion_bracket_evaluations(std::uint64_t count) noexcept;
 void profile_note_conduction_iterations(std::uint64_t iterations) noexcept;
 EosInversionProfile eos_inversion_profile();
+void profile_note_pressure_inversion(std::uint64_t evaluations, bool hinted,
+                                     std::uint64_t bisections) noexcept;
+PressureInversionProfile pressure_inversion_profile();
 
 class ProfileScope {
 public:

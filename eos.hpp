@@ -333,10 +333,18 @@ MixtureFaceState equilibrium_mixture_face_state_from_logs(
 /// face quantity is then produced by the SAME authoritative closure the
 /// temperature-based builder uses, so the two differ only in which pair of
 /// reconstructed variables is authoritative.
+///
+/// `temperature_guess` is an OPTIONAL initial guess for that inversion and
+/// nothing else. It is accepted only if it lies strictly inside the exact
+/// physical bracket (T_neutral/2, T_neutral]; otherwise the generic
+/// 0.75*T_neutral start is used. The safeguarded Newton/bisection still
+/// converges to the same root to the same tolerance, so the returned face state
+/// is independent of the hint.
 MixtureFaceState equilibrium_mixture_face_state_from_log_pressure(
     const EosGammaTable& table, double log_rho_total, double velocity,
     double log_pressure, double phi_of_face,
-    double trace_fraction_floor = 1.0e-8, bool debug_clamp = false);
+    double trace_fraction_floor = 1.0e-8, bool debug_clamp = false,
+    double temperature_guess = std::numeric_limits<double>::quiet_NaN());
 
 /// Physical seven-row flux of a predecoded equilibrium face state.
 std::array<double, 7> equilibrium_mixture_flux(const MixtureFaceState& face);

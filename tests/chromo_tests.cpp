@@ -1094,6 +1094,95 @@ static void test_pressure_face_state_matches_temperature_face_state() {
             0.0, 1.0e-8); }));
 }
 
+// The temperature hint fed to the pressure face builder is a Newton STARTING
+// POINT and nothing else: the safeguarded bracket remains the authority, so no
+// hint — inside the bracket, outside it, non-finite, or adversarial — may move
+// the converged face state beyond inversion round-off. This is what makes the
+// parent-cell hint of the MUSCL face builder numerically free.
+static void test_pressure_face_hint_does_not_change_face_state() {
+    const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    double worst_t = 0.0, worst_flux = 0.0, worst_u = 0.0;
+    for (int it = 0; it <= 24; ++it) {
+        const double t = std::pow(10.0, 3.65 + 3.05*it/24.0);   // 4467 .. 2.2e6 K
+        for (int in = 0; in <= 12; ++in) {
+            const double rho = std::pow(10.0, -12.0 + 5.0*in/12.0);  // 1e-12..1e-7
+            const double p = saha_pressure_at(rho, t);
+            const double t_neutral = p*eos_constants::m_h
+                                   / (rho*eos_constants::k_b);
+            const MixtureFaceState reference =
+                equilibrium_mixture_face_state_from_log_pressure(
+                    table, std::log(rho), 250.0, std::log(p), 2.0e6, 1.0e-8,
+                    false, nan);
+            const std::array<double, 3> ref_flux = {{
+                equilibrium_mixture_flux(reference)[0],
+                equilibrium_mixture_flux(reference)[2],
+                equilibrium_mixture_flux(reference)[4]}};
+            // Legitimate parent-cell-like hints, then hints that a neighbouring
+            // cell can genuinely produce at the bracket ends, then nonsense.
+            const double hints[] = {
+                t, 0.97*t, 1.03*t, 0.5*t, 1.9*t,
+                t_neutral, 0.5*t_neutral, 0.4*t_neutral, 4.0*t_neutral,
+                1.0e-30, 1.0e30, 0.0, -t, nan, inf, -inf};
+            for (double hint : hints) {
+                const MixtureFaceState probe =
+                    equilibrium_mixture_face_state_from_log_pressure(
+                        table, std::log(rho), 250.0, std::log(p), 2.0e6, 1.0e-8,
+                        false, hint);
+                const std::array<double, 7> flux = equilibrium_mixture_flux(probe);
+                auto rel = [](double a, double b) {
+                    return b != 0.0 ? std::abs(a-b)/std::abs(b) : std::abs(a);
+                };
+                worst_t = std::max(worst_t, rel(probe.primitive.temperature,
+                                                reference.primitive.temperature));
+                worst_t = std::max(worst_t, rel(probe.conserved.thermo.x_eq,
+                                                reference.conserved.thermo.x_eq));
+                worst_t = std::max(worst_t, rel(probe.conserved.thermo.internal_energy,
+                                                reference.conserved.thermo.internal_energy));
+                worst_t = std::max(worst_t, rel(probe.p_total, reference.p_total));
+                worst_t = std::max(worst_t, rel(probe.sound_speed,
+                                                reference.sound_speed));
+                worst_t = std::max(worst_t, rel(probe.conserved.thermo.gamma1,
+                                                reference.conserved.thermo.gamma1));
+                worst_u = std::max(worst_u, rel(probe.conserved.rho_i,
+                                                reference.conserved.rho_i));
+                worst_u = std::max(worst_u, rel(probe.conserved.energy_i
+                                                + probe.conserved.energy_n,
+                                                reference.conserved.energy_i
+                                                + reference.conserved.energy_n));
+                worst_flux = std::max(worst_flux, rel(flux[0], ref_flux[0]));
+                worst_flux = std::max(worst_flux, rel(flux[2], ref_flux[1]));
+                worst_flux = std::max(worst_flux, rel(flux[4], ref_flux[2]));
+            }
+        }
+    }
+    EXPECT_TRUE(worst_t < 1.0e-13);
+    EXPECT_TRUE(worst_u < 1.0e-13);
+    EXPECT_TRUE(worst_flux < 1.0e-13);
+
+    // The same invariance at the scalar-inversion level, over the full Saha
+    // transition and with hints straddling both ends of the exact bracket.
+    double worst_scalar = 0.0;
+    for (int it = 0; it <= 30; ++it) {
+        const double t = std::pow(10.0, 3.5 + 3.5*it/30.0);
+        for (int in = 0; in <= 20; ++in) {
+            const double rho = std::pow(10.0, 12.0 + 14.0*in/20.0)
+                             * eos_constants::m_h;
+            const double p = saha_pressure_at(rho, t);
+            const double reference =
+                equilibrium_temperature_from_density_pressure(rho, p);
+            const double hints[] = {t, 0.6*t, 1.7*t, 1.0e-30, 1.0e30, -1.0,
+                                    nan, inf};
+            for (double hint : hints)
+                worst_scalar = std::max(worst_scalar,
+                    std::abs(equilibrium_temperature_from_density_pressure(
+                                 rho, p, hint) - reference)/reference);
+        }
+    }
+    EXPECT_TRUE(worst_scalar < 1.0e-13);
+}
+
 
 static void clear_model_column_release_defaults_env() {
     const char* keys[] = {
@@ -4985,6 +5074,7 @@ int main() {
     RUN(test_equilibrium_density_from_pressure_matches_bisection);
     RUN(test_equilibrium_temperature_from_density_pressure);
     RUN(test_pressure_face_state_matches_temperature_face_state);
+    RUN(test_pressure_face_hint_does_not_change_face_state);
     RUN(test_reconstruction_preserves_constant_pressure);
     RUN(test_smooth_saha_gradient_reduces_pressure_mismatch);
     RUN(test_eos_gamma_table_loader_and_interpolation);

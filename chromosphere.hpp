@@ -106,6 +106,12 @@ struct DecodedMixtureField {
     std::array<float, 4*num_of_eq> boundary_signature{};
     std::vector<MixtureThermo> cells;
     arma::Col<double> extended_primitive;
+    /// Decoded temperature of every extended cell (ns+4, ghosts included), in the
+    /// same indexing as extended_primitive. It is NOT a reconstruction variable:
+    /// it exists only so the pressure-based face builder can seed its (rho,p)->T
+    /// Newton iteration with the temperature of the cell each one-sided face
+    /// state was extrapolated from.
+    arma::Col<double> extended_temperature;
 
     void require_matches(const Grid& grid, const Vec& state) const;
 };

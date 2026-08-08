@@ -15,6 +15,7 @@ struct alignas(64) ThreadProfileSlot {
     std::array<double, static_cast<unsigned>(ProfileRegion::Count)> seconds{};
     std::array<std::uint64_t, static_cast<unsigned>(TimestepLimiter::Count)> limiters{};
     EosInversionProfile inversions;
+    PressureInversionProfile pressure_inversions;
     std::uint64_t conduction_calls = 0;
     std::uint64_t conduction_total_iterations = 0;
     std::uint64_t conduction_maximum_iterations = 0;
@@ -42,6 +43,14 @@ ThreadProfileSlot merged_profile() {
             merged.inversions.maximum_iterations, slot.inversions.maximum_iterations);
         merged.inversions.bisection_fallbacks += slot.inversions.bisection_fallbacks;
         merged.inversions.bracket_evaluations += slot.inversions.bracket_evaluations;
+        merged.pressure_inversions.calls += slot.pressure_inversions.calls;
+        merged.pressure_inversions.hinted_calls += slot.pressure_inversions.hinted_calls;
+        merged.pressure_inversions.evaluations += slot.pressure_inversions.evaluations;
+        merged.pressure_inversions.maximum_evaluations = std::max(
+            merged.pressure_inversions.maximum_evaluations,
+            slot.pressure_inversions.maximum_evaluations);
+        merged.pressure_inversions.bisection_fallbacks +=
+            slot.pressure_inversions.bisection_fallbacks;
         merged.conduction_calls += slot.conduction_calls;
         merged.conduction_total_iterations += slot.conduction_total_iterations;
         merged.conduction_maximum_iterations = std::max(
@@ -121,6 +130,21 @@ void profile_note_inversion_bracket_evaluations(std::uint64_t count) noexcept {
 
 EosInversionProfile eos_inversion_profile() { return merged_profile().inversions; }
 
+void profile_note_pressure_inversion(std::uint64_t evaluations, bool hinted,
+                                     std::uint64_t bisections) noexcept {
+    if (!enabled) return;
+    PressureInversionProfile& p = current_slot().pressure_inversions;
+    ++p.calls;
+    if (hinted) ++p.hinted_calls;
+    p.evaluations += evaluations;
+    p.maximum_evaluations = std::max(p.maximum_evaluations, evaluations);
+    p.bisection_fallbacks += bisections;
+}
+
+PressureInversionProfile pressure_inversion_profile() {
+    return merged_profile().pressure_inversions;
+}
+
 void profile_note_conduction_iterations(std::uint64_t count) noexcept {
     if (!enabled) return;
     ThreadProfileSlot& slot = current_slot();
@@ -152,6 +176,7 @@ void print_runtime_profile(std::ostream& out) {
         out << "limiter." << limiter_name(static_cast<TimestepLimiter>(i)) << '='
             << merged.limiters[i] << '\n';
     const EosInversionProfile& inversions = merged.inversions;
+    const PressureInversionProfile& pressure = merged.pressure_inversions;
     const double average = inversions.calls
         ? static_cast<double>(inversions.total_iterations)/inversions.calls : 0.0;
     out << "inversion.calls=" << inversions.calls << '\n'
@@ -161,6 +186,13 @@ void print_runtime_profile(std::ostream& out) {
         << "inversion.maximum_iterations=" << inversions.maximum_iterations << '\n'
         << "inversion.bisection_fallbacks=" << inversions.bisection_fallbacks << '\n'
         << "inversion.bracket_evaluations=" << inversions.bracket_evaluations << '\n'
+        << "pressure_inversion.calls=" << pressure.calls << '\n'
+        << "pressure_inversion.hinted_calls=" << pressure.hinted_calls << '\n'
+        << "pressure_inversion.average_evaluations="
+        << (pressure.calls
+            ? static_cast<double>(pressure.evaluations)/pressure.calls : 0.0) << '\n'
+        << "pressure_inversion.maximum_evaluations=" << pressure.maximum_evaluations << '\n'
+        << "pressure_inversion.bisection_fallbacks=" << pressure.bisection_fallbacks << '\n'
         << "conduction.calls=" << merged.conduction_calls << '\n'
         << "conduction.average_newton_updates="
         << (merged.conduction_calls

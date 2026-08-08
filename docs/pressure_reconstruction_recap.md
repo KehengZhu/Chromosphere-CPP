@@ -1,5 +1,11 @@
 # Pressure-based primitive reconstruction for the Gamma/Saha `model_column` path
 
+> **Superseded by the model_column release-numerics promotion.** Roe (`roe-local`) and
+> `(ln rho, V, ln p)` are now the `model_column` release defaults and need no environment
+> override; `ISO_RIEMANN=rusanov` and `ISO_RECONSTRUCTION=lnrho-v-lnt` are reference-only.
+> Statements below describe the configuration in force **when this study was run** and are
+> kept for chronology. Current release description: `docs/model_column_release_numerics_recap.md`.
+
 **Status: GO** as a diagnostic option, with a recommendation to promote. Release defaults unchanged.
 
 ## Question

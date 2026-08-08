@@ -16,6 +16,8 @@ visualization/
 scenarios/data/*.dat
 outputs/
 /tmp/Chromosphere-CPP/
+# scratch run directory used by scripts/release_validation.sh
+/tmp/release_validation/
 
 # Generated simulation outputs and per-run logs (if written to root).
 out_*.txt

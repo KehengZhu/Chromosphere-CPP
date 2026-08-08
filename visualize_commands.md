@@ -1700,3 +1700,64 @@ ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
   outputs/model_column/model_column_release_N1000_4000s.txt \
   visualization/model_column/model_column_release_N1000_4000s_evolution.mp4 25
 ```
+
+### `acc_lnp_N500_rho_v_p.mp4` — (ρ, V, p) evolution, lnP reconstruction acceptance run
+
+Three-field (density, velocity, total gas pressure) 0–4000 s animation of the
+`(ln rho, V, ln p)` reconstruction acceptance run at N=500 (661 actual cells),
+**Rusanov** reference solver (the release solver is Roe), Gamma/Saha EOS, R4 outer refinement, 22,000 K physical-face
+conductive boundary, physical conduction only, CFL=0.50. Fields are read from the
+`.gamma_diag` sidecar, so they are the EOS-consistent `x_eq`-derived quantities.
+Left column is the full 1600–2153 km column; right column zooms the refined
+2100–2153 km evaporation region, with the 2130–2150 km release analysis window
+shaded in both. Velocity is shaded blue for upflow and red for downflow — it stays
+strictly positive for the whole run, corroborating the `n(V<0)=0` acceptance result.
+
+```bash
+.venv/bin/python util/animate_column_rvp.py \
+  outputs/model_column/acc_lnp_N500.txt \
+  visualization/model_column/acc_lnp_N500_rho_v_p.mp4 20
+```
+
+### `acc_lnp_rusanov_N500_4000s_evolution.mp4` — lnP reconstruction under the Rusanov reference solver
+
+Standard 2×3 `animate_isentropic.py` panels (T, V, q∥, ρ, p, ρV) for the
+`(ln rho, V, ln p)` reconstruction acceptance run at N=500 (661 actual cells),
+**Rusanov** reference solver, Gamma/Saha EOS, R4 outer refinement, 22,000 K
+physical-face conductive boundary, physical conduction only, CFL=0.50, 0–4000 s.
+Deliberately the same script, panels, frame cap, and fps as
+`lnp_roe_N500_4000s_evolution.mp4`, so the Rusanov-reference and release-Roe versions
+of the *same* reconstruction are directly comparable.
+
+```bash
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/acc_lnp_N500.txt \
+  visualization/model_column/acc_lnp_rusanov_N500_4000s_evolution.mp4 25
+```
+
+### Backfilled entries — Roe-local evolution movies
+
+These three were produced during the Roe/reconstruction study but were never entered
+here. Commands below are **reconstructed** from the run files and the standard
+release-movie invocation, and reproduce the figures; they were not recorded at creation.
+All were run with an explicit `ISO_RIEMANN=roe-local`, which was still a diagnostic
+override at the time; Roe is now the release default and needs no override.
+
+`lnp_roe_N500_4000s_evolution.mp4` — `(ln rho,V,ln p)` reconstruction + Roe-local, N500, 4000 s.
+`roe_N500_4000s_evolution.mp4` / `roe_N1000_4000s_evolution.mp4` — `(ln rho,V,ln T)` + Roe-local.
+
+```bash
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/lnp_roe_N500_4000s.txt \
+  visualization/model_column/lnp_roe_N500_4000s_evolution.mp4 25
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/roe_N500_4000s.txt \
+  visualization/model_column/roe_N500_4000s_evolution.mp4 25
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/roe_N1000_4000s.txt \
+  visualization/model_column/roe_N1000_4000s_evolution.mp4 25
+```

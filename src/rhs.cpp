@@ -571,8 +571,9 @@ void mixture_source(const Grid& grid, const Vec& state,
     }
 }
 
-// Diagnostic-only copy-out of the production face reconstruction and Rusanov
-// TOTAL-mass flux at the i+1/2 faces (chromosphere.hpp::GammaFaceFluxCapture).
+// Read-only copy-out of the production face reconstruction and the TOTAL-mass
+// numerical flux actually used at the i+1/2 faces — Roe on the release path,
+// Rusanov under ISO_RIEMANN=rusanov (chromosphere.hpp::GammaFaceFluxCapture).
 // Reads the same arrays the continuity row is differenced from; writes nothing
 // the solver consumes.
 void capture_gamma_face_flux(const Grid& grid, const MixtureVec& w,

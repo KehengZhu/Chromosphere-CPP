@@ -129,6 +129,14 @@ Exceptions:
 - Do not assume 12 threads is optimal on different hardware; rerun thread scaling after changing machines.
 - Do not hard-code the thread count in C++, CMake, or the numerical algorithm.
 
+## `model_column` release numerical method
+
+A normal `model_column` run uses 1D field-aligned hydrodynamics with Gamma/Saha equilibrium thermodynamics (ionization energy included, production `Gamma1` table), MUSCL reconstruction of **`(ln ρ, V, ln p)`** with the MC3/Koren limiter (β = 2), the **mixture Roe characteristic numerical flux**, equilibrium-reference well balancing, physical conduction only, and a 22,000 K external conductive reservoir at the physical outer face, on the coarse-equivalent N = 500 / R4 mesh (661 actual cells) at CFL 0.50.
+
+**No environment variable is required to select the release solver or reconstruction.** `ISO_RIEMANN=rusanov` and `ISO_RECONSTRUCTION=lnrho-v-lnt` are reference-only overrides kept for regression and controlled numerical comparison; never use them in production. Full description and evidence: `docs/model_column_release_numerics_recap.md`. Release checks: `scripts/release_validation.sh`.
+
+Known limitation to preserve in any writeup: **N500 long-duration evaporation mass flux is not established as < 10 % grid-converged.** Distinguish the release numerical method from the resolution required for a particular quantitative scientific claim.
+
 ## Validated production CFL and long-run controls
 
 `CHROMO_CFL=0.50` is the **validated production runtime default for the reduced `model_column` release configuration: coarse-equivalent N=500, R4 outer refinement, 661 actual cells, physical-face 22,000 K conductive boundary, and physical conduction only**. Evidence: `docs/coarse_model_column_physical_conduction_recap.md`.

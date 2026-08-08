@@ -1845,14 +1845,20 @@ static void test_stage9_evaporation_vs_fixed_gamma() {
     EXPECT_TRUE(fixed.max_temperature > 0.0 && gamma.max_temperature > 0.0);
     EXPECT_TRUE(fixed.top_pressure > 0.0 && gamma.top_pressure > 0.0);
     EXPECT_TRUE(fixed.upward_mass_flux > 0.0 && gamma.upward_mass_flux > 0.0);
+    // The `fixed` (non-gamma) leg keeps the legacy Rusanov + (ln rho,V,ln T)
+    // scheme and its original pins. The `gamma` leg is re-pinned to the release
+    // numerics (Roe + (ln rho,V,ln p)): the much smaller Roe dissipation lowers
+    // the transient mass flux on this 32-cell, 8-step artificial-conduction
+    // configuration, but the qualitative Stage-9 result — ionization-energy
+    // storage drives a stronger evaporative flux than a fixed gamma — is intact.
     EXPECT_REL(fixed.upward_mass_flux,1.10074e-3,0.1);
-    EXPECT_REL(gamma.upward_mass_flux,3.58416e-3,0.1);
+    EXPECT_REL(gamma.upward_mass_flux,1.87885e-3,0.1);
     EXPECT_REL(fixed.max_temperature,6813.14,0.03);
-    EXPECT_REL(gamma.max_temperature,6937.23,0.03);
+    EXPECT_REL(gamma.max_temperature,7104.40,0.03);
     EXPECT_REL(fixed.top_pressure,3.43710,0.05);
-    EXPECT_REL(gamma.top_pressure,3.62956,0.05);
+    EXPECT_REL(gamma.top_pressure,3.51937,0.05);
     const double mass_flux_ratio = gamma.upward_mass_flux/fixed.upward_mass_flux;
-    EXPECT_TRUE(mass_flux_ratio > 2.0 && mass_flux_ratio < 5.0);
+    EXPECT_TRUE(mass_flux_ratio > 1.3 && mass_flux_ratio < 3.0);
     std::cout << "  Stage-9 evaporation regression (fixed,gamma): maximum_upward_mass_flux=("
               << fixed.upward_mass_flux << ',' << gamma.upward_mass_flux << ") T_max=("
               << fixed.max_temperature << ',' << gamma.max_temperature << ") p_top=("
@@ -2125,8 +2131,12 @@ static void test_gamma_phase1_3_cache_and_known_temperature_pack() {
             EXPECT_NEAR(decoded.extended_primitive(
                 arma::sub2ind(ext_size,ext_i,1)),
                 (at(cons::MOM_I)+at(cons::MOM_N))/direct.rho,1e-13);
+            // Slot 2 is the thermal reconstruction variable: log(p_total) on the
+            // release (ln rho,V,ln p) path, log(T) with the lnT reference set.
             EXPECT_NEAR(decoded.extended_primitive(
-                arma::sub2ind(ext_size,ext_i,2)),std::log(direct.T),1e-13);
+                arma::sub2ind(ext_size,ext_i,2)),
+                grid.pressure_reconstruct ? std::log(direct.p_i+direct.p_n)
+                                          : std::log(direct.T),1e-13);
         }
     }
 
@@ -2549,6 +2559,69 @@ static void test_face_flux_capture_matches_production_continuity() {
     EXPECT_TRUE(std::abs(c.f_total[ns-1] - before) > 0.0);
 
     clear_decoupling_env();
+}
+
+// Release policy: a normal Gamma/Saha model_column run must select the Roe
+// characteristic flux and the (ln rho,V,ln p) primitive set with NO environment
+// override. The lnT / Rusanov reference configurations must remain reachable
+// explicitly, invalid choices must fail loudly, and the non-gamma path must be
+// untouched by the promotion.
+static void test_model_column_release_numerics_defaults() {
+    auto build = [](bool gamma_mode) {
+        unsetenv("ISO_GAMMA");
+        setenv("ISO_TWO_FLUID","0",1); setenv("ISO_IONIZATION","0",1);
+        setenv("ISO_COOLING","0",1);   setenv("ISO_CORONA","0",1);
+        setenv("ISO_TRAC","0",1);      setenv("ISO_HEAT_FLUX","0",1);
+        auto grid = std::make_unique<Grid>();
+        grid->init(24,0.25f);
+        if (gamma_mode)
+            grid->eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
+        (void)model_column_ic(*grid);
+        return grid;
+    };
+    auto clear = [] {
+        unsetenv("ISO_TWO_FLUID"); unsetenv("ISO_IONIZATION");
+        unsetenv("ISO_COOLING");   unsetenv("ISO_CORONA");
+        unsetenv("ISO_TRAC");      unsetenv("ISO_HEAT_FLUX");
+        unsetenv("ISO_RIEMANN");   unsetenv("ISO_RECONSTRUCTION");
+    };
+
+    unsetenv("ISO_RIEMANN"); unsetenv("ISO_RECONSTRUCTION");
+    {   // 1+2: release defaults, no environment variables set.
+        const auto grid = build(true);
+        EXPECT_TRUE(grid->roe_characteristic_flux);
+        EXPECT_TRUE(grid->pressure_reconstruct);
+    }
+    {   // 6: the non-gamma path keeps Rusanov + (ln rho,V,ln T).
+        const auto grid = build(false);
+        EXPECT_TRUE(!grid->roe_characteristic_flux);
+        EXPECT_TRUE(!grid->pressure_reconstruct);
+    }
+    {   // 3+4: the reference solver / reference primitive set stay reachable.
+        setenv("ISO_RIEMANN","rusanov",1);
+        setenv("ISO_RECONSTRUCTION","lnrho-v-lnt",1);
+        const auto grid = build(true);
+        EXPECT_TRUE(!grid->roe_characteristic_flux);
+        EXPECT_TRUE(!grid->pressure_reconstruct);
+    }
+    {   // Explicitly requesting the release pair is a no-op.
+        setenv("ISO_RIEMANN","roe-local",1);
+        setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
+        const auto grid = build(true);
+        EXPECT_TRUE(grid->roe_characteristic_flux);
+        EXPECT_TRUE(grid->pressure_reconstruct);
+    }
+    {   // 5: invalid choices, and Gamma-only choices off the Gamma path, throw.
+        setenv("ISO_RIEMANN","hll",1);
+        setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
+        EXPECT_TRUE(throws_any([&] { (void)build(true); }));
+        setenv("ISO_RIEMANN","roe-local",1);
+        setenv("ISO_RECONSTRUCTION","lnrho-v-lnrho",1);
+        EXPECT_TRUE(throws_any([&] { (void)build(true); }));
+        setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
+        EXPECT_TRUE(throws_any([&] { (void)build(false); }));
+    }
+    clear();
 }
 
 static void test_roe_local_face_flux_and_projection() {
@@ -5095,7 +5168,8 @@ int main() {
     RUN(test_stage8_gamma_model_column_saha_hse_and_ghosts);
     RUN(test_upper_bc_hydro_conduction_temperature_decoupling);
     RUN(test_face_flux_capture_matches_production_continuity);
-    RUN(test_roe_local_face_flux_and_projection);
+    RUN(test_model_column_release_numerics_defaults);
+RUN(test_roe_local_face_flux_and_projection);
     RUN(test_outer_conduction_capture_matches_solver_face);
     RUN(test_outer_conduction_physical_face_is_mesh_independent);
     RUN(test_model_column_gamma_ic_uses_cell_average_temperature);

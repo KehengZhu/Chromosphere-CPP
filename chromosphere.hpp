@@ -384,26 +384,32 @@ struct Grid {
     bool  mc3_limiter = false;
     float limiter_beta = 2.0f;
 
-    // Diagnostic-only alternative numerical flux for the active Gamma/Saha
-    // equilibrium-manifold path. False keeps the validated Rusanov/LLF release
-    // behavior. True replaces only the corrector dissipation by a 3x3 mixture
-    // Roe-type characteristic decomposition; reconstruction, predictor,
-    // projection, boundaries and source/conduction stages are unchanged.
+    // Numerical flux of the Gamma/Saha equilibrium-manifold path. True (the
+    // model_column release setting) computes the corrector dissipation from a 3x3
+    // mixture Roe characteristic decomposition; reconstruction, predictor,
+    // projection, boundaries and source/conduction stages are unchanged. False is
+    // the Rusanov/LLF reference solver, kept for regression and controlled
+    // comparison — its acoustic-scale dissipation −½a·ΔU is far too large for this
+    // very-low-Mach evaporation problem and leaves persistent TR velocity ripple.
+    // The struct default stays false so non-gamma scenarios are untouched;
+    // model_column_ic sets it from gamma_mode.
     bool roe_characteristic_flux = false;
 
-    // Diagnostic-only choice of the THERMAL reconstruction variable of the active
-    // Gamma/Saha MUSCL path. False (default, validated release) limits
+    // THERMAL reconstruction variable of the Gamma/Saha MUSCL path. True (the
+    // model_column release setting) limits
+    //   (log rho, V, log p)
+    // and recovers the face temperature by inverting the same authoritative
+    // closure (equilibrium_temperature_from_density_pressure). False limits
     //   (log rho, V, log T)
     // and obtains the face pressure afterwards from the nonlinear Saha mapping
     // p(rho,T) — so two independently limited variables set one mechanical
     // quantity, and a mechanically smooth (constant-p) state is NOT reproduced
-    // across the partial-ionization transition. True limits
-    //   (log rho, V, log p)
-    // instead and recovers the face temperature by inverting the same
-    // authoritative closure (equilibrium_temperature_from_density_pressure). Both
-    // keep density and pressure positive by construction; both feed the identical
-    // equilibrium face builder, flux, projection and source stages, so this flag
-    // changes ONLY which pair of variables is authoritative at a face.
+    // across the partial-ionization transition; it is retained as a reference
+    // configuration only. Both keep density and pressure positive by construction
+    // and feed the identical equilibrium face builder, flux, projection and source
+    // stages, so this flag changes ONLY which pair of variables is authoritative
+    // at a face. The struct default stays false so non-gamma scenarios are
+    // untouched; model_column_ic sets it from gamma_mode.
     bool pressure_reconstruct = false;
 
     // Equilibrium-reference ("δ-form") well-balancing. The φ_g correction

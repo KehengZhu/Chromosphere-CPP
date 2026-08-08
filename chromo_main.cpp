@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
     const bool write_output         = env_enabled("CHROMO_OUTPUT", true);
     const bool write_gamma_diag     = env_enabled("CHROMO_GAMMA_DIAG", true);
     // Read-only face-flux diagnostic (default OFF). CHROMO_FACE_FLUX_DIAG=1 writes
-    // a <out>.faceflux sidecar holding the PRODUCTION Rusanov total-mass face flux
+    // a <out>.faceflux sidecar holding the PRODUCTION total-mass face flux
     // and its central/diffusive split, taken straight out of rhs_explicit_mixture.
     // CHROMO_FACE_FLUX_TOP limits each record to the top N cells (0 = all cells);
     // CHROMO_FACE_FLUX_STRIDE sets the capture cadence in steps (default: the

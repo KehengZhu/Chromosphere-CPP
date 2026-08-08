@@ -23,9 +23,11 @@ Electrons are folded into the ion equations via quasi-neutrality (`n_e = n_i`,
 `T_e = T_i`), so ion pressure carries an extra factor of 2: `p_i = 2 n_i k_b T_i`
 (writeup eq 38).
 
-**Numerical scheme:** TVD-MUSCL with minmod limiter, Rusanov / local
-Lax–Friedrichs flux, 2nd-order time accuracy via a predictor-corrector
-reconstruction (writeup §2.6–2.8). Semi-implicit Euler driver
+**Numerical scheme:** TVD-MUSCL, 2nd-order time accuracy via a predictor-corrector
+reconstruction (writeup §2.6–2.8). The released Gamma/Saha `model_column` path
+limits `(ln ρ, V, ln p)` with the MC3/Koren limiter (β = 2) and uses the mixture
+Roe characteristic flux; the legacy fixed-γ / two-fluid scenarios keep minmod
+reconstruction and the Rusanov / local Lax–Friedrichs flux. Semi-implicit Euler driver
 ([src/integrators.cpp:38](src/integrators.cpp#L38)); the implicit branch is
 currently disabled at [src/integrators.cpp:57](src/integrators.cpp#L57). RK4 is
 also available ([advance_RK4](src/integrators.cpp#L67)) for the explicit-only path.
@@ -183,6 +185,26 @@ and `sub2ind`, none of which require LAPACK/BLAS.
 
 ## Run
 
+### The `model_column` release run
+
+One command, no numerical-method environment variables:
+
+```sh
+CHROMO_T_END=<seconds> scripts/run_chromo_realtime.sh \
+    outputs/model_column/<run>.txt \
+    full no-ionization model_column - 20.0 no-cooling
+```
+
+Add `CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=<seconds>` for snapshots on a
+physical-time cadence. This runs 1D field-aligned hydrodynamics with Gamma/Saha equilibrium
+thermodynamics, `(ln ρ, V, ln p)` MUSCL reconstruction, the mixture Roe characteristic flux,
+equilibrium-reference well balancing, physical conduction only, and the 22,000 K conductive
+face on the N = 500 / R4 mesh (661 cells) at CFL 0.50 — all selected by the scenario itself.
+See `docs/model_column_release_numerics_recap.md`; validate with
+`scripts/release_validation.sh`.
+
+### Defaults
+
 `chromo_main` defaults: `CFL = 0.25` and the `model_column` scenario (the unified
 field-aligned chromosphere→corona column — real Model C7 IC with the validated
 well-balanced numerics always on; `ns = 600`). Runs until `t = 10·L/Cs` or 10000
@@ -313,11 +335,21 @@ Saha-HSE density integration. It preserves all C7 knot values and makes
 profile. The fixed-gamma path deliberately retains the historical linear
 interpolation.
 
-- **Numerics (always on, no toggles):** the validated "bestwb" configuration —
+- **Release numerics (default, no environment variables needed):**
   well-balanced explicit reconstruction, log-space MUSCL, the MC3/Koren limiter
   (β = 2), equilibrium-reference δ-form well-balancing, and an inner discrete-HSE
   reservoir well-balanced through both ghosts (pressure and density). These hold a
-  hydrostatic column at V ≈ 0 to round-off, so any flow is physical.
+  hydrostatic column at V ≈ 0 to round-off, so any flow is physical. On the
+  Gamma/Saha path (`GAMMA_TABLE` set) the scenario additionally selects the
+  **mixture Roe characteristic flux** and the **`(ln ρ, V, ln p)` primitive
+  reconstruction**, which closes the face temperature by inverting the same
+  authoritative Saha closure. Two reference configurations remain reachable for
+  regression and controlled numerical comparison and are never used in production:
+  `ISO_RIEMANN=rusanov` (local Lax–Friedrichs; excessively dissipative at the very
+  low Mach numbers of this problem, leaving persistent TR velocity ripple) and
+  `ISO_RECONSTRUCTION=lnrho-v-lnt` (limits `(ln ρ, V, ln T)` and closes pressure
+  through the nonlinear EOS, which manufactures face-pressure mismatch across the
+  partial-ionization transition). See `docs/pressure_reconstruction_recap.md`.
 - **Modes / drivers (env-selected physics):** resolved corona (`ISO_CORONA`);
   conduction via a top ghost-T jump (`ISO_TJUMP_A/_B`, `ISO_T_TOP`), an imposed
   Neumann coronal flux with a ramp (`ISO_QFLUX*`), ambient volumetric coronal

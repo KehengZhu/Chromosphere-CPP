@@ -461,9 +461,18 @@ Vec model_column_ic(Grid& grid) {
                   << choice << " mc3=" << grid.mc3_limiter
                   << " beta=" << grid.limiter_beta << std::endl;
     }
-    // DIAGNOSTIC-ONLY Riemann-solver override. The validated release remains
-    // Rusanov. roe-local is intentionally restricted to the Gamma/Saha
-    // equilibrium-manifold path; it changes only the corrector dissipation.
+    // --- release numerical flux and MUSCL primitive set (Gamma/Saha path) ---
+    // The released Gamma/Saha model_column advances the corrector with the 3x3
+    // mixture Roe characteristic flux and limits (log rho, V, log p), recovering
+    // the face temperature by inverting the same authoritative Saha closure. Both
+    // require the equilibrium-manifold face builder, so they are enabled only in
+    // gamma_mode; the legacy non-gamma path keeps Rusanov + (log rho, V, log T).
+    grid.roe_characteristic_flux = gamma_mode;
+    grid.pressure_reconstruct    = gamma_mode;
+    // Reference/debug overrides. ISO_RIEMANN=rusanov restores the local
+    // Lax-Friedrichs flux and ISO_RECONSTRUCTION=lnrho-v-lnt the temperature-based
+    // primitive set; both are retained for regression and controlled numerical
+    // comparison only. Neither is needed for a production run.
     if (const char* riemann = std::getenv("ISO_RIEMANN")) {
         const std::string choice(riemann);
         if (choice == "rusanov") {
@@ -475,13 +484,9 @@ Vec model_column_ic(Grid& grid) {
         } else {
             throw std::invalid_argument("ISO_RIEMANN must be rusanov or roe-local");
         }
-        std::cerr << "[model_column] DIAGNOSTIC Riemann override: ISO_RIEMANN="
-                  << choice << std::endl;
+        std::cerr << "[model_column] Riemann override: ISO_RIEMANN=" << choice
+                  << " (release default: roe-local)" << std::endl;
     }
-    // DIAGNOSTIC-ONLY choice of the MUSCL primitive set. The validated release
-    // reconstructs (log rho, V, log T); lnrho-v-lnp reconstructs (log rho, V,
-    // log p) and recovers the face temperature from the same Saha closure. Only
-    // meaningful on the Gamma/Saha path, whose face builder owns both variants.
     if (const char* recon = std::getenv("ISO_RECONSTRUCTION")) {
         const std::string choice(recon);
         if (choice == "lnrho-v-lnt") {
@@ -495,9 +500,17 @@ Vec model_column_ic(Grid& grid) {
             throw std::invalid_argument(
                 "ISO_RECONSTRUCTION must be lnrho-v-lnt or lnrho-v-lnp");
         }
-        std::cerr << "[model_column] DIAGNOSTIC reconstruction override: "
-                     "ISO_RECONSTRUCTION=" << choice << std::endl;
+        std::cerr << "[model_column] reconstruction override: ISO_RECONSTRUCTION="
+                  << choice << " (release default: lnrho-v-lnp)" << std::endl;
     }
+    // One line naming the numerical method actually in force, so a run log always
+    // records it without having to enable the face-flux sidecar.
+    std::cerr << "[model_column] numerics: flux="
+              << (grid.roe_characteristic_flux ? "roe-local" : "rusanov")
+              << " reconstruction="
+              << (grid.pressure_reconstruct ? "lnrho-v-lnp" : "lnrho-v-lnt")
+              << " limiter=" << (grid.mc3_limiter ? "mc3" : "minmod")
+              << " beta=" << grid.limiter_beta << std::endl;
 
     // --- runtime physics toggles ------------------------------------------
     grid.single_fluid             = gamma_mode || !two_fluid_on;

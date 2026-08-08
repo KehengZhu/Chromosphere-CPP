@@ -1,5 +1,11 @@
 # Optimizing the Saha pressure-face temperature inversion
 
+> **Superseded by the model_column release-numerics promotion.** Roe (`roe-local`) and
+> `(ln rho, V, ln p)` are now the `model_column` release defaults and need no environment
+> override; `ISO_RIEMANN=rusanov` and `ISO_RECONSTRUCTION=lnrho-v-lnt` are reference-only.
+> Statements below describe the configuration in force **when this study was run** and are
+> kept for chronology. Current release description: `docs/model_column_release_numerics_recap.md`.
+
 **Status: GO.** Pure Newton initial-guess optimization. No physics, no reconstruction variables, no tolerance and no release default changed.
 
 ## Problem

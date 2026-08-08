@@ -404,6 +404,203 @@ static void test_equilibrium_density_from_pressure_matches_bisection() {
             std::numeric_limits<double>::quiet_NaN(), 1.0e4); }));
 }
 
+// ---------------------------------------------------------------------------
+// (log rho, V, log p) reconstruction: EOS inversion and face-state behaviour.
+// ---------------------------------------------------------------------------
+
+static double saha_pressure_at(double rho, double t) {
+    return equilibrium_caloric_state(rho, t).pressure;
+}
+
+// Round-trip T -> p(rho,T) -> T over the neutral, partial-ionization and
+// near-fully-ionized regimes, including the actual model_column state range.
+static void test_equilibrium_temperature_from_density_pressure() {
+    double worst_t_rel = 0.0, worst_p_rel = 0.0, worst_x_span_t_rel = 0.0;
+    for (int it = 0; it <= 40; ++it) {
+        const double t = std::pow(10.0, 3.5 + 3.5*it/40.0);          // 3162 .. 1e7 K
+        for (int in = 0; in <= 28; ++in) {
+            const double n_h = std::pow(10.0, 12.0 + 14.0*in/28.0);   // 1e12 .. 1e26
+            const double rho = n_h*eos_constants::m_h;
+            const double p = saha_pressure_at(rho, t);
+            const double t_back = equilibrium_temperature_from_density_pressure(rho, p);
+            const double rel = std::abs(t_back - t)/t;
+            worst_t_rel = std::max(worst_t_rel, rel);
+            worst_p_rel = std::max(worst_p_rel,
+                std::abs(saha_pressure_at(rho, t_back) - p)/p);
+            EXPECT_TRUE(t_back > 0.0 && std::isfinite(t_back));
+            // The steepest part of the Saha transition (the regime the ripple
+            // lives in) must not be worse than anywhere else.
+            const double x = saha_ionization_fraction(rho, t);
+            if (x > 0.05 && x < 0.95)
+                worst_x_span_t_rel = std::max(worst_x_span_t_rel, rel);
+        }
+    }
+    EXPECT_TRUE(worst_t_rel < 1e-12);
+    EXPECT_TRUE(worst_p_rel < 1e-13);
+    EXPECT_TRUE(worst_x_span_t_rel < 1e-12);
+
+    // Actual model_column upper-chromosphere states (rho ~ 9e-11 kg/m^3 through
+    // the 2141 km ionization transition, T ~ 7000-9500 K) and the coronal top.
+    const std::pair<double,double> column_states[] = {
+        {9.10046e-11, 7091.0}, {9.12040e-11, 7262.0}, {9.05e-11, 7400.0},
+        {8.9e-11,     7821.0}, {8.6e-11,     8532.0}, {8.2e-11,  9334.0},
+        {1.0e-12,    22000.0}, {3.0e-9,       4500.0}, {1.0e-7,   4200.0}};
+    for (const auto& s : column_states) {
+        const double p = saha_pressure_at(s.first, s.second);
+        const double t_back = equilibrium_temperature_from_density_pressure(
+            s.first, p);
+        EXPECT_REL(t_back, s.second, 1e-12);
+        // A supplied guess must not change the answer, only the iteration count.
+        EXPECT_REL(equilibrium_temperature_from_density_pressure(
+                       s.first, p, 0.7*s.second), s.second, 1e-12);
+        EXPECT_REL(equilibrium_temperature_from_density_pressure(
+                       s.first, p, 1.3*s.second), s.second, 1e-12);
+        // p(rho,.) is strictly monotone in T, which is what makes the bracket
+        // and the Newton safeguard valid.
+        EXPECT_TRUE(saha_pressure_at(s.first, 1.01*s.second)
+                    > saha_pressure_at(s.first, s.second));
+        EXPECT_TRUE(saha_pressure_at(s.first, 0.99*s.second)
+                    < saha_pressure_at(s.first, s.second));
+    }
+
+    // Invalid inputs fail loudly rather than producing invalid thermodynamics.
+    EXPECT_TRUE(throws_any([] {
+        equilibrium_temperature_from_density_pressure(0.0, 1.0); }));
+    EXPECT_TRUE(throws_any([] {
+        equilibrium_temperature_from_density_pressure(1.0e-10, 0.0); }));
+    EXPECT_TRUE(throws_any([] {
+        equilibrium_temperature_from_density_pressure(-1.0e-10, 1.0); }));
+    EXPECT_TRUE(throws_any([] {
+        equilibrium_temperature_from_density_pressure(
+            std::numeric_limits<double>::quiet_NaN(), 1.0); }));
+    EXPECT_TRUE(throws_any([] {
+        equilibrium_temperature_from_density_pressure(
+            1.0e-10, std::numeric_limits<double>::infinity()); }));
+}
+
+// THE hypothesis test. Component-wise MUSCL of (log rho, log T) through the
+// nonlinear Saha map cannot preserve a mechanically smooth constant-pressure
+// state; (log rho, log p) does so exactly. Both are exercised on the same
+// cell-centre data with the same MC3(beta=2) limiter arithmetic.
+static void test_reconstruction_preserves_constant_pressure() {
+    // Symmetric-difference MUSCL face pair at cell i, exactly the corrector form
+    // used by rhs_explicit_mixture on a uniform mesh (predictor term dropped —
+    // it is common to both variants and irrelevant to the mismatch question).
+    auto mc3 = [](double r, double beta, bool plus) {
+        if (!std::isfinite(r)) return 0.0;
+        const double third = plus ? (2.0*r + 1.0)/3.0 : (r + 2.0)/3.0;
+        return std::max(0.0, std::min(std::min(beta*r, beta), third));
+    };
+    // Faces of a 1-D cell-centred field q: returns L at i+1/2 and R at i+1/2.
+    auto faces = [&](const std::vector<double>& q, std::size_t i,
+                     double& left, double& right) {
+        const double d_iph = q[i+1] - q[i];
+        const double r_i   = (q[i]   - q[i-1]) / d_iph;
+        const double r_ip1 = d_iph / (q[i+2] - q[i+1]);
+        left  = q[i]   + 0.5*mc3(r_i,   2.0, true )*d_iph;
+        right = q[i+1] - 0.5*mc3(r_ip1, 2.0, false)*(q[i+2] - q[i+1]);
+    };
+
+    const double p_constant = 0.0102878;   // model_column p_top [Pa]
+    const std::size_t n = 24;
+    std::vector<double> log_rho(n), log_t(n), log_p(n, std::log(p_constant));
+    // Density sweeps across the partial-ionization transition at constant p, so
+    // T (and x_eq) vary strongly while the mechanical state is uniform.
+    for (std::size_t i = 0; i < n; ++i) {
+        const double rho = 4.0e-11*std::pow(10.0, 1.2*double(i)/double(n-1));
+        const double t = equilibrium_temperature_from_density_pressure(
+            rho, p_constant);
+        log_rho[i] = std::log(rho);
+        log_t[i]   = std::log(t);
+    }
+    // Sanity: the sweep really does traverse the Saha transition.
+    double x_lo = saha_ionization_fraction(std::exp(log_rho[0]),
+                                           std::exp(log_t[0]));
+    double x_hi = saha_ionization_fraction(std::exp(log_rho[n-1]),
+                                           std::exp(log_t[n-1]));
+    EXPECT_TRUE(x_hi < 0.2 && x_lo > 0.8);
+
+    double worst_t_variant = 0.0, worst_p_variant = 0.0;
+    for (std::size_t i = 1; i + 2 < n; ++i) {
+        double lr_l, lr_r, lt_l, lt_r, lp_l, lp_r;
+        faces(log_rho, i, lr_l, lr_r);
+        faces(log_t,   i, lt_l, lt_r);
+        faces(log_p,   i, lp_l, lp_r);
+        // Old variant: p from two independently limited variables.
+        const double p_l_old = saha_pressure_at(std::exp(lr_l), std::exp(lt_l));
+        const double p_r_old = saha_pressure_at(std::exp(lr_r), std::exp(lt_r));
+        worst_t_variant = std::max(worst_t_variant,
+            std::abs(p_r_old - p_l_old)/(0.5*(p_r_old + p_l_old)));
+        // New variant: p is reconstructed directly.
+        const double p_l_new = std::exp(lp_l), p_r_new = std::exp(lp_r);
+        worst_p_variant = std::max(worst_p_variant,
+            std::abs(p_r_new - p_l_new)/(0.5*(p_r_new + p_l_new)));
+        // ... and the recovered temperatures stay positive and finite.
+        const double t_l = equilibrium_temperature_from_density_pressure(
+            std::exp(lr_l), p_l_new);
+        const double t_r = equilibrium_temperature_from_density_pressure(
+            std::exp(lr_r), p_r_new);
+        EXPECT_TRUE(t_l > 0.0 && t_r > 0.0
+                    && std::isfinite(t_l) && std::isfinite(t_r));
+    }
+    // Constant pressure is reproduced to round-off by the pressure variant, and
+    // is materially violated by the temperature variant.
+    EXPECT_TRUE(worst_p_variant < 1e-14);
+    EXPECT_TRUE(worst_t_variant > 1e-3);
+}
+
+// Smooth upper-chromosphere/TR profile: the pressure variant must reduce the
+// artificial face-pressure mismatch relative to the temperature variant when the
+// cell-centred pressure field is mechanically smooth.
+static void test_smooth_saha_gradient_reduces_pressure_mismatch() {
+    auto mc3 = [](double r, double beta, bool plus) {
+        if (!std::isfinite(r)) return 0.0;
+        const double third = plus ? (2.0*r + 1.0)/3.0 : (r + 2.0)/3.0;
+        return std::max(0.0, std::min(std::min(beta*r, beta), third));
+    };
+    auto faces = [&](const std::vector<double>& q, std::size_t i,
+                     double& left, double& right) {
+        const double d_iph = q[i+1] - q[i];
+        const double r_i   = (q[i]   - q[i-1]) / d_iph;
+        const double r_ip1 = d_iph / (q[i+2] - q[i+1]);
+        left  = q[i]   + 0.5*mc3(r_i,   2.0, true )*d_iph;
+        right = q[i+1] - 0.5*mc3(r_ip1, 2.0, false)*(q[i+2] - q[i+1]);
+    };
+
+    // Smooth hydrostatic-like column through the transition: log-linear pressure,
+    // smooth tanh temperature rise 7000 -> 12000 K, density from the EOS. Both
+    // p(s) and T(s) are smooth; only x_eq(s) turns over sharply.
+    const std::size_t n = 40;
+    std::vector<double> log_rho(n), log_t(n), log_p(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const double u = double(i)/double(n-1);
+        const double p = 0.012*std::exp(-1.4*u);
+        const double t = 7000.0 + 5000.0*0.5*(1.0 + std::tanh(8.0*(u - 0.55)));
+        log_p[i] = std::log(p);
+        log_t[i] = std::log(t);
+        log_rho[i] = std::log(equilibrium_density_from_pressure(p, t));
+    }
+
+    double worst_t_variant = 0.0, worst_p_variant = 0.0;
+    for (std::size_t i = 1; i + 2 < n; ++i) {
+        double lr_l, lr_r, lt_l, lt_r, lp_l, lp_r;
+        faces(log_rho, i, lr_l, lr_r);
+        faces(log_t,   i, lt_l, lt_r);
+        faces(log_p,   i, lp_l, lp_r);
+        const double p_l_old = saha_pressure_at(std::exp(lr_l), std::exp(lt_l));
+        const double p_r_old = saha_pressure_at(std::exp(lr_r), std::exp(lt_r));
+        worst_t_variant = std::max(worst_t_variant,
+            std::abs(p_r_old - p_l_old)/(0.5*(p_r_old + p_l_old)));
+        const double p_l_new = std::exp(lp_l), p_r_new = std::exp(lp_r);
+        worst_p_variant = std::max(worst_p_variant,
+            std::abs(p_r_new - p_l_new)/(0.5*(p_r_new + p_l_new)));
+    }
+    // The pressure variant's residual mismatch is only the limiter's own
+    // second-order truncation on a smooth log-linear field; the temperature
+    // variant additionally carries the nonlinear-EOS mixing error.
+    EXPECT_TRUE(worst_p_variant < 0.2*worst_t_variant);
+}
+
 static void test_eos_gamma_table_loader_and_interpolation() {
     EosGammaTable empty;
     EXPECT_TRUE(empty.empty());
@@ -862,6 +1059,41 @@ static std::string production_gamma_table_path() {
     }
     throw std::runtime_error("production Gamma1 table not found from test working directory");
 }
+
+// The pressure-based face builder must agree with the temperature-based one to
+// EOS-inversion accuracy when both are handed the same physical state.
+static void test_pressure_face_state_matches_temperature_face_state() {
+    const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
+    const std::pair<double,double> states[] = {
+        {9.10046e-11, 7091.0}, {9.05e-11, 7400.0}, {8.6e-11, 8532.0},
+        {1.0e-12, 22000.0},    {3.0e-9,   4500.0}};
+    for (const auto& s : states) {
+        const double rho = s.first, t = s.second;
+        const double p = saha_pressure_at(rho, t);
+        const MixtureFaceState by_t = equilibrium_mixture_face_state_from_logs(
+            table, std::log(rho), 250.0, std::log(t), 2.0e6, 1.0e-8);
+        const MixtureFaceState by_p =
+            equilibrium_mixture_face_state_from_log_pressure(
+                table, std::log(rho), 250.0, std::log(p), 2.0e6, 1.0e-8);
+        EXPECT_REL(by_p.primitive.temperature, by_t.primitive.temperature, 1e-11);
+        EXPECT_REL(by_p.p_total, by_t.p_total, 1e-11);
+        EXPECT_REL(by_p.sound_speed, by_t.sound_speed, 1e-11);
+        EXPECT_REL(by_p.dp_deint_rho, by_t.dp_deint_rho, 1e-10);
+        EXPECT_REL(by_p.conserved.rho_i, by_t.conserved.rho_i, 1e-10);
+        EXPECT_REL(by_p.conserved.energy_i, by_t.conserved.energy_i, 1e-10);
+        EXPECT_REL(by_p.conserved.thermo.gamma1, by_t.conserved.thermo.gamma1, 1e-11);
+        // The face pressure is exactly the reconstructed one, by construction.
+        EXPECT_REL(by_p.p_total, p, 1e-12);
+        EXPECT_TRUE(by_p.primitive.rho > 0.0 && by_p.p_total > 0.0
+                    && by_p.primitive.temperature > 0.0);
+    }
+    EXPECT_TRUE(throws_any([&] {
+        equilibrium_mixture_face_state_from_log_pressure(
+            table, std::log(1.0e-10),
+            std::numeric_limits<double>::quiet_NaN(), std::log(1.0),
+            0.0, 1.0e-8); }));
+}
+
 
 static void clear_model_column_release_defaults_env() {
     const char* keys[] = {
@@ -4751,6 +4983,10 @@ int main() {
     RUN(test_saha_ionization_fraction_log_domain);
     RUN(test_broadcast_static_metric_cache);
     RUN(test_equilibrium_density_from_pressure_matches_bisection);
+    RUN(test_equilibrium_temperature_from_density_pressure);
+    RUN(test_pressure_face_state_matches_temperature_face_state);
+    RUN(test_reconstruction_preserves_constant_pressure);
+    RUN(test_smooth_saha_gradient_reduces_pressure_mismatch);
     RUN(test_eos_gamma_table_loader_and_interpolation);
     RUN(test_model_column_release_scenario_defaults_and_overrides);
     RUN(test_final_serial_log_aware_eos_and_gamma1_contracts);

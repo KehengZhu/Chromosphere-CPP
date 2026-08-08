@@ -478,6 +478,26 @@ Vec model_column_ic(Grid& grid) {
         std::cerr << "[model_column] DIAGNOSTIC Riemann override: ISO_RIEMANN="
                   << choice << std::endl;
     }
+    // DIAGNOSTIC-ONLY choice of the MUSCL primitive set. The validated release
+    // reconstructs (log rho, V, log T); lnrho-v-lnp reconstructs (log rho, V,
+    // log p) and recovers the face temperature from the same Saha closure. Only
+    // meaningful on the Gamma/Saha path, whose face builder owns both variants.
+    if (const char* recon = std::getenv("ISO_RECONSTRUCTION")) {
+        const std::string choice(recon);
+        if (choice == "lnrho-v-lnt") {
+            grid.pressure_reconstruct = false;
+        } else if (choice == "lnrho-v-lnp") {
+            if (!gamma_mode)
+                throw std::invalid_argument(
+                    "ISO_RECONSTRUCTION=lnrho-v-lnp requires Gamma/Saha mode");
+            grid.pressure_reconstruct = true;
+        } else {
+            throw std::invalid_argument(
+                "ISO_RECONSTRUCTION must be lnrho-v-lnt or lnrho-v-lnp");
+        }
+        std::cerr << "[model_column] DIAGNOSTIC reconstruction override: "
+                     "ISO_RECONSTRUCTION=" << choice << std::endl;
+    }
 
     // --- runtime physics toggles ------------------------------------------
     grid.single_fluid             = gamma_mode || !two_fluid_on;

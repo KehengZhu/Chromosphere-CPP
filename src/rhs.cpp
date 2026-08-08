@@ -116,11 +116,17 @@ void decode_mixture_field_into(
     out.extended_primitive.set_size(ext_n*3);
     const auto state_size = arma::size(grid.ns, num_of_eq);
     const auto ext_size = arma::size(ext_n, 3);
+    // Slot 2 carries the THERMAL reconstruction variable: log(T) by default, or
+    // log(p_total) when grid.pressure_reconstruct selects the pressure-based
+    // primitive set. p_total = p_i + p_n is the same total the face builder and
+    // the momentum flux use (the electron pressure is already inside p_i).
+    const bool log_p = grid.pressure_reconstruct;
     auto put = [&](arma::uword ext_i, const MixtureThermo& th,
                    double momentum) {
         out.extended_primitive(arma::sub2ind(ext_size, ext_i, 0)) = std::log(th.rho);
         out.extended_primitive(arma::sub2ind(ext_size, ext_i, 1)) = momentum/th.rho;
-        out.extended_primitive(arma::sub2ind(ext_size, ext_i, 2)) = std::log(th.T);
+        out.extended_primitive(arma::sub2ind(ext_size, ext_i, 2)) =
+            log_p ? std::log(th.p_i + th.p_n) : std::log(th.T);
     };
     const bool has_guesses = previous && previous->source_grid == &grid
         && previous->cells.size() == grid.ns;
@@ -177,7 +183,12 @@ void decode_mixture_field_into(
 
 namespace {
 
-enum MixtureSlot : arma::uword { MIX_LOG_RHO = 0, MIX_V = 1, MIX_LOG_T = 2 };
+// Slot 2 is the thermal reconstruction variable: log(T) with the default
+// reconstruction, log(p_total) when Grid::pressure_reconstruct is set. The
+// packing, limiter arithmetic and extrapolation are identical either way; only
+// decode (which quantity is written) and build_mixture_face_cell (how the face
+// state is closed) branch on the flag.
+enum MixtureSlot : arma::uword { MIX_LOG_RHO = 0, MIX_V = 1, MIX_THERMAL = 2 };
 
 struct MixtureFaceBundle {
     Vec& conserved;
@@ -228,14 +239,17 @@ void decode_predicted_caloric_primitives_into(
     output.extended_primitive.set_size(ext_n*MIX_ROWS);
     const auto state_size = arma::size(grid.ns, num_of_eq);
     const auto ext_size = arma::size(ext_n, MIX_ROWS);
+    // Same thermal-slot convention as decode_mixture_field_into: the predictor
+    // must carry the SAME variable the corrector reconstructs.
+    const bool log_p = grid.pressure_reconstruct;
     auto put = [&](arma::uword ext_i, const CaloricMixtureThermo& th,
                    double momentum) {
         output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_LOG_RHO)) =
             std::log(th.rho);
         output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_V)) =
             momentum/th.rho;
-        output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_LOG_T)) =
-            std::log(th.T);
+        output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_THERMAL)) =
+            log_p ? std::log(th.p_i + th.p_n) : std::log(th.T);
     };
     parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
         const arma::uword i = static_cast<arma::uword>(raw_i);
@@ -328,11 +342,16 @@ void build_mixture_face_cell(const Grid& grid, const MixtureVec& mixture,
     const auto msz = mixture_size(grid);
     const double log_rho = mixture(arma::sub2ind(msz, i, MIX_LOG_RHO));
     const double velocity = mixture(arma::sub2ind(msz, i, MIX_V));
-    const double log_temperature = mixture(arma::sub2ind(msz, i, MIX_LOG_T));
-    const MixtureFaceState face = equilibrium_mixture_face_state_from_logs(
-        grid.eos_gamma_table, log_rho, velocity, log_temperature,
-        static_cast<double>(phi_face(i)), grid.eos_trace_fraction_floor,
-        grid.eos_gamma_debug_clamp);
+    const double thermal = mixture(arma::sub2ind(msz, i, MIX_THERMAL));
+    const MixtureFaceState face = grid.pressure_reconstruct
+        ? equilibrium_mixture_face_state_from_log_pressure(
+              grid.eos_gamma_table, log_rho, velocity, thermal,
+              static_cast<double>(phi_face(i)), grid.eos_trace_fraction_floor,
+              grid.eos_gamma_debug_clamp)
+        : equilibrium_mixture_face_state_from_logs(
+              grid.eos_gamma_table, log_rho, velocity, thermal,
+              static_cast<double>(phi_face(i)), grid.eos_trace_fraction_floor,
+              grid.eos_gamma_debug_clamp);
     const ProjectedMixture& u = face.conserved;
     const std::array<double, 7> flux = equilibrium_mixture_flux(face);
     const double values[7] = {u.rho_i, u.rho_n, u.momentum_i, u.momentum_n,
@@ -543,13 +562,29 @@ void capture_gamma_face_flux(const Grid& grid, const MixtureVec& w,
         };
         c.rho_cell[i] = std::exp(W(w, MIX_LOG_RHO));
         c.v_cell[i]   = W(w, MIX_V);
-        c.T_cell[i]   = std::exp(W(w, MIX_LOG_T));
         c.rho_L[i]    = std::exp(W(wl, MIX_LOG_RHO));
         c.rho_R[i]    = std::exp(W(wr, MIX_LOG_RHO));
         c.v_L[i]      = W(wl, MIX_V);
         c.v_R[i]      = W(wr, MIX_V);
-        c.T_L[i]      = std::exp(W(wl, MIX_LOG_T));
-        c.T_R[i]      = std::exp(W(wr, MIX_LOG_T));
+        // Both (T, p_total) pairs, whichever slot 2 actually carried. The missing
+        // member of the pair comes from the SAME authoritative closure the solver
+        // used for this face, so the mismatch diagnostic is directly comparable
+        // between the two reconstructions. Capture steps only.
+        auto thermal_pair = [&](const MixtureVec& v, double rho,
+                                double& temperature, double& pressure) {
+            const double slot = W(v, MIX_THERMAL);
+            if (grid.pressure_reconstruct) {
+                pressure = std::exp(slot);
+                temperature = equilibrium_temperature_from_density_pressure(
+                    rho, pressure);
+            } else {
+                temperature = std::exp(slot);
+                pressure = equilibrium_caloric_state(rho, temperature).pressure;
+            }
+        };
+        thermal_pair(w,  c.rho_cell[i], c.T_cell[i], c.p_cell[i]);
+        thermal_pair(wl, c.rho_L[i],    c.T_L[i],    c.p_L[i]);
+        thermal_pair(wr, c.rho_R[i],    c.T_R[i],    c.p_R[i]);
         // Every spectral_radius row of a one-sided bundle carries |V|+c_s of that
         // state (build_mixture_face), so the sound speed is recoverable exactly.
         c.cs_L[i]     = P(fl.spectral_radius, cons::RHO_I) - std::abs(c.v_L[i]);
@@ -573,8 +608,9 @@ void capture_gamma_face_flux(const Grid& grid, const MixtureVec& w,
         c.phi_minus_rho[i] = W(lm_rip1,  MIX_LOG_RHO);
         c.r_v[i]           = W(r,        MIX_V);
         c.phi_plus_v[i]    = W(lp_r,     MIX_V);
-        c.r_T[i]           = W(r,        MIX_LOG_T);
-        c.phi_plus_T[i]    = W(lp_r,     MIX_LOG_T);
+        // Slot-2 limiter inputs/outputs: log(T) by default, log(p) in pressure mode.
+        c.r_T[i]           = W(r,        MIX_THERMAL);
+        c.phi_plus_T[i]    = W(lp_r,     MIX_THERMAL);
     }
     c.valid = true;
 }

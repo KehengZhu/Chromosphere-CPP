@@ -228,6 +228,22 @@ CaloricState equilibrium_caloric_state_from_logs(
 GammaState gamma_state(const EosGammaTable& table, double rho_total,
                        double temperature, bool debug_clamp = false);
 
+/// Invert the equilibrium pressure closure p(rho,T) = (1+x(rho,T)) n_H k_B T for
+/// the temperature at a KNOWN total density. This is the counterpart of
+/// equilibrium_density_from_pressure and uses exactly the same authoritative
+/// pressure as MixtureFaceState::p_total (= p_i + p_n).
+///
+/// The closure supplies its own exact bracket: with T1 = p m_H/(rho k_B) the
+/// fully-neutral temperature, x in (0,1) gives T in (T1/2, T1] for every physical
+/// state, and dp/dT|_rho = n_H k_B (1 + x + T dx/dT) > 0 makes p(T) strictly
+/// monotone there. The solver is therefore a safeguarded Newton iteration that can
+/// never leave a valid factor-of-two bracket and falls back to bisection on any
+/// rejected step. Throws std::domain_error unless rho and p are positive/finite,
+/// and std::runtime_error if the iteration fails to converge.
+double equilibrium_temperature_from_density_pressure(
+    double rho_total, double pressure,
+    double temperature_guess = std::numeric_limits<double>::quiet_NaN());
+
 /// Invert the analytic caloric EOS on the table's temperature bracket. The
 /// optional guess accelerates convergence but is never required for correctness.
 double temperature_from_rho_eint(
@@ -309,6 +325,17 @@ MixtureFaceState equilibrium_mixture_face_state(
 MixtureFaceState equilibrium_mixture_face_state_from_logs(
     const EosGammaTable& table, double log_rho_total, double velocity,
     double log_temperature, double phi_of_face,
+    double trace_fraction_floor = 1.0e-8, bool debug_clamp = false);
+
+/// Pressure-based counterpart of equilibrium_mixture_face_state_from_logs, used
+/// by the (log rho, V, log p) MUSCL reconstruction. The face temperature is
+/// recovered by equilibrium_temperature_from_density_pressure and every remaining
+/// face quantity is then produced by the SAME authoritative closure the
+/// temperature-based builder uses, so the two differ only in which pair of
+/// reconstructed variables is authoritative.
+MixtureFaceState equilibrium_mixture_face_state_from_log_pressure(
+    const EosGammaTable& table, double log_rho_total, double velocity,
+    double log_pressure, double phi_of_face,
     double trace_fraction_floor = 1.0e-8, bool debug_clamp = false);
 
 /// Physical seven-row flux of a predecoded equilibrium face state.

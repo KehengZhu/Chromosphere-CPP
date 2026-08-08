@@ -145,6 +145,11 @@ struct GammaFaceFluxCapture {
     std::vector<double> eq_residual_mass;
     // one-sided reconstructed face states at i+1/2 (L = from cell i, R = cell i+1)
     std::vector<double> rho_L, rho_R, v_L, v_R, T_L, T_R, cs_L, cs_R;
+    // Authoritative TOTAL pressure (p_i + p_n) of the same corrector face states,
+    // rebuilt through the production face builder on capture steps only. p_L vs
+    // p_R is the reconstruction-induced pressure mismatch the (log rho, V, log p)
+    // experiment targets; p_cell is the decoded cell-centre value.
+    std::vector<double> p_cell, p_L, p_R;
     // Acoustic spectral radius a = max(|V_L|+c_L, |V_R|+c_R), retained as a
     // diagnostic/fallback value in Roe-local mode, plus the central/dissipative split.
     std::vector<double> a_face, f_central, f_diff, f_total;
@@ -158,6 +163,7 @@ struct GammaFaceFluxCapture {
         std::vector<double>* all[] = {
             &rho_cell,&v_cell,&T_cell,&eq_residual_mass,
             &rho_L,&rho_R,&v_L,&v_R,&T_L,&T_R,&cs_L,&cs_R,
+            &p_cell,&p_L,&p_R,
             &a_face,&f_central,&f_diff,&f_total,
             &r_rho,&phi_plus_rho,&r_ip1_rho,&phi_minus_rho,
             &r_v,&phi_plus_v,&r_T,&phi_plus_T};
@@ -378,6 +384,21 @@ struct Grid {
     // Roe-type characteristic decomposition; reconstruction, predictor,
     // projection, boundaries and source/conduction stages are unchanged.
     bool roe_characteristic_flux = false;
+
+    // Diagnostic-only choice of the THERMAL reconstruction variable of the active
+    // Gamma/Saha MUSCL path. False (default, validated release) limits
+    //   (log rho, V, log T)
+    // and obtains the face pressure afterwards from the nonlinear Saha mapping
+    // p(rho,T) — so two independently limited variables set one mechanical
+    // quantity, and a mechanically smooth (constant-p) state is NOT reproduced
+    // across the partial-ionization transition. True limits
+    //   (log rho, V, log p)
+    // instead and recovers the face temperature by inverting the same
+    // authoritative closure (equilibrium_temperature_from_density_pressure). Both
+    // keep density and pressure positive by construction; both feed the identical
+    // equilibrium face builder, flux, projection and source stages, so this flag
+    // changes ONLY which pair of variables is authoritative at a face.
+    bool pressure_reconstruct = false;
 
     // Equilibrium-reference ("δ-form") well-balancing. The φ_g correction
     // (well_balanced) fixes the gravity-potential bookkeeping and log_reconstruct

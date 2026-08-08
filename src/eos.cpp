@@ -299,6 +299,71 @@ double equilibrium_density_from_pressure(double pressure, double temperature) {
     return n_h * eos_constants::m_h;
 }
 
+namespace {
+
+struct PressureInversion {
+    double temperature;
+    CaloricEval eval;   // valid AT `temperature`
+};
+
+/// Safeguarded Newton/bisection inversion of p(rho,T) at fixed rho, returning the
+/// caloric evaluation AT the converged temperature so the caller never repeats the
+/// Saha solve. `n_h`/`log_n_h` must already describe the validated rho.
+PressureInversion invert_pressure_eval(double rho_total, double pressure,
+                                       double n_h, double log_n_h,
+                                       double temperature_guess) {
+    // Exact bracket from 0 < x < 1 in p = (1+x) n_H k_B T (see eos.hpp).
+    const double t_neutral = pressure / (n_h * eos_constants::k_b);
+    double lower = 0.5 * t_neutral;
+    double upper = t_neutral;
+    if (!(lower > 0.0) || !std::isfinite(upper))
+        throw std::domain_error("equilibrium temperature inversion: unusable bracket");
+
+    double temperature = temperature_guess;
+    if (!std::isfinite(temperature) || !(temperature > lower)
+        || !(temperature < upper))
+        temperature = 0.75 * t_neutral;
+
+    const double tolerance = 4.0 * std::numeric_limits<double>::epsilon() * pressure;
+    for (int iteration = 0; iteration < 128; ++iteration) {
+        const CaloricEval ev = caloric_eval_with_log_n(
+            rho_total, temperature, n_h, log_n_h);
+        const double residual = ev.pressure - pressure;
+        if (std::abs(residual) <= tolerance)
+            return PressureInversion{temperature, ev};
+        if (residual > 0.0) upper = temperature;
+        else                lower = temperature;
+        if (upper - lower <= 4.0 * std::numeric_limits<double>::epsilon() * upper)
+            return PressureInversion{temperature, ev};
+
+        // dp/dT|_rho = n_H k_B (1 + x + T dx/dT); strictly positive, so a Newton
+        // step is always well defined. Reject it only if it leaves the bracket.
+        const double dp_dt = n_h * eos_constants::k_b
+            * (1.0 + ev.x + temperature * saha_dx_d_temperature(ev.x, temperature));
+        double candidate = temperature - residual / dp_dt;
+        if (!std::isfinite(candidate) || !(candidate > lower) || !(candidate < upper))
+            candidate = 0.5 * (lower + upper);
+        temperature = candidate;
+    }
+    std::ostringstream message;
+    message << "equilibrium temperature inversion failed to converge: rho="
+            << rho_total << " kg/m^3, p=" << pressure << " Pa, bracket=["
+            << lower << ',' << upper << "] K";
+    throw std::runtime_error(message.str());
+}
+
+} // namespace
+
+double equilibrium_temperature_from_density_pressure(
+    double rho_total, double pressure, double temperature_guess) {
+    require_finite_positive(rho_total, "rho_total");
+    require_finite_positive(pressure, "pressure");
+    const double n_h = rho_total / eos_constants::m_h;
+    require_finite_positive(n_h, "n_H");
+    return invert_pressure_eval(rho_total, pressure, n_h, n_h_log(n_h),
+                                temperature_guess).temperature;
+}
+
 double saha_ionization_fraction(double rho_total, double temperature) {
     require_finite_positive(rho_total, "rho_total");
     return saha_ionization_fraction_n_h(rho_total / eos_constants::m_h, temperature);
@@ -945,6 +1010,32 @@ MixtureFaceState equilibrium_mixture_face_state_from_logs(
         table, rho_total, velocity, temperature, phi_of_face,
         trace_fraction_floor, debug_clamp,
         caloric_eval_from_coordinates(coordinates));
+}
+
+MixtureFaceState equilibrium_mixture_face_state_from_log_pressure(
+    const EosGammaTable& table, double log_rho_total, double velocity,
+    double log_pressure, double phi_of_face, double trace_fraction_floor,
+    bool debug_clamp) {
+    if (!std::isfinite(log_rho_total) || !std::isfinite(log_pressure))
+        throw std::domain_error("mixture face logarithms must be finite");
+    const double rho_total = std::exp(log_rho_total);
+    const double pressure = std::exp(log_pressure);
+    require_finite_positive(rho_total, "rho_total");
+    require_finite_positive(pressure, "pressure");
+    const double n_h = rho_total / eos_constants::m_h;
+    const double log_n_h = n_h_log(n_h);
+    table.require_n_h_in_bounds_from_log(n_h, log_n_h, debug_clamp);
+    // The inversion returns the caloric evaluation AT the recovered temperature,
+    // so the face is built from exactly one Saha solve — the same count the
+    // temperature-based builder pays.
+    const PressureInversion inverted = invert_pressure_eval(
+        rho_total, pressure, n_h, log_n_h,
+        std::numeric_limits<double>::quiet_NaN());
+    validate_face_inputs(table, rho_total, velocity, inverted.temperature,
+                         phi_of_face, trace_fraction_floor);
+    return face_state_from_eval(
+        table, rho_total, velocity, inverted.temperature, phi_of_face,
+        trace_fraction_floor, debug_clamp, inverted.eval);
 }
 
 std::array<double, 7> equilibrium_mixture_flux(const MixtureFaceState& face) {

@@ -393,13 +393,16 @@ int main(int argc, char** argv) {
                   << "# ns=" << grid.ns << " first_cell=" << face_flux_lo
                   << " uniform_mesh=" << grid.uniform_mesh
                   << " mc3=" << grid.mc3_limiter << " beta=" << grid.limiter_beta
+                  << " roe=" << grid.roe_characteristic_flux
+                  << " pressure_reconstruct=" << grid.pressure_reconstruct
                   << " eq_wb=" << grid.eq_wb << " ds_km=" << (grid.ds_i(0)*1.0e-3f)
                   << "\n# mass flux = RHO_I row + RHO_N row (the conserved total)\n"
                   << "# columns=cell_km face_km rho_cell v_cell T_cell "
                      "rho_L rho_R v_L v_R T_L T_R cs_L cs_R a_face "
                      "f_central f_diff f_total eq_residual_mass "
                      "r_rho phi_plus_rho r_ip1_rho phi_minus_rho "
-                     "r_v phi_plus_v r_T phi_plus_T\n";
+                     "r_v phi_plus_v r_T phi_plus_T "
+                     "p_cell p_L p_R\n";
         face_flux.precision(10);
     }
 
@@ -461,7 +464,8 @@ int main(int argc, char** argv) {
                     << c.r_rho[i] << ' ' << c.phi_plus_rho[i] << ' '
                     << c.r_ip1_rho[i] << ' ' << c.phi_minus_rho[i] << ' '
                     << c.r_v[i] << ' ' << c.phi_plus_v[i] << ' '
-                    << c.r_T[i] << ' ' << c.phi_plus_T[i] << '\n';
+                    << c.r_T[i] << ' ' << c.phi_plus_T[i] << ' '
+                    << c.p_cell[i] << ' ' << c.p_L[i] << ' ' << c.p_R[i] << '\n';
             }
         }
     };

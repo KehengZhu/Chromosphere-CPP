@@ -69,10 +69,12 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
     //   (n ~ 1e23 ⇒ n² ≫ FLT_MAX). All are env defaults the user can still override.
     if (name == "model_column" || name == "model_isentropic" || name == "model_gentle") {
         if (name == "model_column" || name == "model_isentropic") {
-            // Canonical reduced release model. Keep these as override-preserving
-            // scenario defaults so selecting model_column means the validated
-            // Gamma/Saha N=500/R4 physical-conduction-only model without requiring
-            // a launcher-specific collection of ISO_* assignments.
+            // Canonical release model: the validated Saha/Gamma1 N=500/R4
+            // physical-conduction-only single-fluid column. These are
+            // override-preserving scenario defaults, so selecting model_column
+            // means the release configuration without a launcher-specific
+            // collection of ISO_* assignments. No two-fluid or finite-rate
+            // ionization knob appears here: the release solver has neither.
             if (!std::getenv("GAMMA_TABLE") && !std::getenv("ISO_GAMMA"))
                 set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
             set_env_default("ISO_H_BASE",                     "1600");
@@ -89,8 +91,6 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
             set_env_default("ISO_COOLING",                    "0");
             set_env_default("ISO_TRAC",                       "0");
             set_env_default("ISO_CORONA",                     "0");
-            set_env_default("ISO_TWO_FLUID",                  "0");
-            set_env_default("ISO_IONIZATION",                 "0");
         }
         if (name == "model_gentle") {
             set_env_default("ISO_CORONA",     "1");

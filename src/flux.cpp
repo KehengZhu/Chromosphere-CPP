@@ -6,34 +6,6 @@
 namespace chromosphere {
 
 Vec cal_flux_state(const Grid& grid, const Vec& xn_state) {
-    if (!grid.eos_gamma_table.empty()) {
-        Vec flux(arma::size(xn_state), arma::fill::zeros);
-        const auto sz = arma::size(grid.ns, num_of_eq);
-        for (arma::uword i = 0; i < grid.ns; ++i) {
-            auto at = [&](arma::uword k) -> double {
-                return static_cast<double>(xn_state(arma::sub2ind(sz, i, k)));
-            };
-            const double phi = 0.5 * static_cast<double>(grid.phi_g_imh(i)
-                                                       + grid.phi_g_iph(i));
-            const MixtureThermo th = decode_equilibrium_mixture(
-                grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
-                at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
-                phi, grid.eos_temperature_hint(i),
-                grid.eos_gamma_debug_clamp);
-            grid.store_eos_temperature_hint(i, th.T);
-            const double v = (at(cons::MOM_I) + at(cons::MOM_N)) / th.rho;
-            const double f[7] = {
-                at(cons::RHO_I)*v, at(cons::RHO_N)*v,
-                at(cons::RHO_I)*v*v + th.p_i,
-                at(cons::RHO_N)*v*v + th.p_n,
-                (at(cons::E_I)+th.p_i)*v,
-                (at(cons::E_N)+th.p_n)*v,
-                at(cons::E_E)*v};
-            for (arma::uword k = 0; k < num_of_eq; ++k)
-                flux(arma::sub2ind(sz, i, k)) = static_cast<float>(f[k]);
-        }
-        return flux;
-    }
     Vec F_state(arma::size(xn_state), arma::fill::zeros);
     const Vec rho_i  = get_scalar(grid, xn_state, cons::RHO_I);
     const Vec rho_n  = get_scalar(grid, xn_state, cons::RHO_N);
@@ -65,29 +37,6 @@ Vec cal_flux_state(const Grid& grid, const Vec& xn_state) {
 }
 
 Vec cal_spectral_radius_state(const Grid& grid, const Vec& xn_state) {
-    if (!grid.eos_gamma_table.empty()) {
-        Vec result(arma::size(xn_state), arma::fill::zeros);
-        const auto sz = arma::size(grid.ns, num_of_eq);
-        for (arma::uword i = 0; i < grid.ns; ++i) {
-            auto at = [&](arma::uword k) -> double {
-                return static_cast<double>(xn_state(arma::sub2ind(sz, i, k)));
-            };
-            const double phi = 0.5 * static_cast<double>(grid.phi_g_imh(i)
-                                                       + grid.phi_g_iph(i));
-            const MixtureThermo th = decode_equilibrium_mixture(
-                grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
-                at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
-                phi, grid.eos_temperature_hint(i),
-                grid.eos_gamma_debug_clamp);
-            grid.store_eos_temperature_hint(i, th.T);
-            const double v = (at(cons::MOM_I) + at(cons::MOM_N)) / th.rho;
-            const float a = static_cast<float>(std::abs(v) + std::sqrt(
-                th.gamma1 * (th.p_i + th.p_n) / th.rho));
-            for (arma::uword k = 0; k < num_of_eq; ++k)
-                result(arma::sub2ind(sz, i, k)) = a;
-        }
-        return result;
-    }
     Vec res_state(arma::size(xn_state), arma::fill::zeros);
     const Vec rho_i  = get_scalar(grid, xn_state, cons::RHO_I);
     const Vec rho_n  = get_scalar(grid, xn_state, cons::RHO_N);

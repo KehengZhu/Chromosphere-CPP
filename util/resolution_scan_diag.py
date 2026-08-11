@@ -6,7 +6,7 @@ vanish as Delta h -> 0, while the *effective* finite-volume face flux stays
 smooth and conservative?
 
 All face quantities come from the `<run>.faceflux` sidecar, i.e. a read-only
-copy-out of the PRODUCTION `rhs_explicit_mixture` arrays (see
+copy-out of the PRODUCTION `mixture_rhs_explicit` arrays (see
 `util/face_flux_diag.py` and `docs/top_ripple_face_flux_diagnosis.md`). Nothing
 here re-derives the reconstruction, the limiter or the Riemann solver.
 

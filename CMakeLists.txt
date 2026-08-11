@@ -27,6 +27,8 @@ add_library(chromosphere STATIC
     src/flux.cpp
     src/rhs.cpp
     src/integrators.cpp
+    src/mixture.cpp
+    src/mixture_integrator.cpp
     scenarios/scenario.cpp
     scenarios/mesh.cpp
     scenarios/model_c7.cpp
@@ -94,17 +96,17 @@ add_test(NAME eos_production_table_checksum
                  -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_eos_checksum.cmake)
 
-foreach(GAMMA_GUARD IN ITEMS enable_te single_fluid ionization)
-    add_test(NAME gamma_reject_${GAMMA_GUARD}
+foreach(RELEASE_GUARD IN ITEMS enable_te single_fluid two_fluid ionization)
+    add_test(NAME release_reject_${RELEASE_GUARD}
              COMMAND ${CMAKE_COMMAND}
                      -DEXE=$<TARGET_FILE:chromo_main>
                      -DTABLE=${EOS_PRODUCTION_TABLE}
-                     -DGUARD=${GAMMA_GUARD}
-                     -DOUT=${CMAKE_CURRENT_BINARY_DIR}/gamma_guard_unused.dat
-                     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_gamma_guard.cmake)
+                     -DGUARD=${RELEASE_GUARD}
+                     -DOUT=${CMAKE_CURRENT_BINARY_DIR}/release_guard_unused.dat
+                     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_release_guard.cmake)
 endforeach()
 
-add_test(NAME gamma_output_sidecar
+add_test(NAME release_output_sidecar
          COMMAND ${CMAKE_COMMAND}
                  -DEXE=$<TARGET_FILE:chromo_main>
                  -DTABLE=${EOS_PRODUCTION_TABLE}

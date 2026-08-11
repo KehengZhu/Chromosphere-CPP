@@ -10,7 +10,6 @@ enum class ProfileRegion : unsigned {
     Cfl,
     Decode,
     Rhs,
-    Projection,
     Conduction,
     Boundary,
     Output,

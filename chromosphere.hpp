@@ -1,5 +1,21 @@
 /*!
- * Chromosphere model — public API.
+ * Chromosphere model — shared solver infrastructure.
+ *
+ * The project carries TWO solvers over one shared field-aligned mesh:
+ *
+ *   * the RELEASE solver (`mixture.hpp`), a single-fluid equilibrium-mixture
+ *     model whose conserved state is the three-component vector
+ *     U = (rho, rho u, E). This is what the canonical `model_column`
+ *     production configuration advances;
+ *
+ *   * the HISTORICAL two-fluid / multi-temperature / finite-rate-ionization
+ *     research solver declared below, whose conserved state is the seven-row
+ *     ion/neutral/electron carrier vector. It is NOT the release path.
+ *
+ * The two solvers share only generic infrastructure: the Grid (mesh geometry,
+ * prescribed magnetic field, gravity, physical constants, runtime toggles) and
+ * the equilibrium EOS in `eos.hpp`. They do NOT share a conserved-state width,
+ * a packing convention, or a timestep path.
  *
  * All solver state lives in a Grid struct that the caller owns; functions
  * take `const Grid&` (or `Grid&` for those that mutate scratch buffers).
@@ -24,7 +40,29 @@ namespace chromosphere {
 typedef arma::Col<float> Vec;
 
 // ============================================================================
-// State indices
+// Release state indices — the single-fluid equilibrium-mixture solver
+// ============================================================================
+
+/// Conserved rows of the release state U = (rho, rho u, E).
+///
+///   RHO     total mass density                       [kg m^-3]
+///   MOM     field-aligned momentum density rho u     [kg m^-2 s^-1]
+///   ENERGY  total energy density
+///           E = e_int(rho,T) + 1/2 rho u^2 + rho phi_g   [J m^-3]
+///
+/// e_int is the equilibrium internal energy INCLUDING the hydrogen ionization
+/// energy, so the ionization fraction x, the electron density n_e and the
+/// neutral density n_HI are derived thermodynamic quantities of (rho, e_int),
+/// not independent conserved variables. See mixture.hpp.
+namespace mix {
+    const arma::uword RHO    = 0;
+    const arma::uword MOM    = 1;
+    const arma::uword ENERGY = 2;
+}
+const arma::uword num_of_mixture_eq = 3;
+
+// ============================================================================
+// Historical two-fluid state indices — NON-RELEASE research solver
 // ============================================================================
 
 const arma::uword num_of_eq = 7;
@@ -73,18 +111,15 @@ const arma::uword CUBE  = num_of_eq;
 // otherwise pull from the ghost buffers in Grid.
 const bool USE_NEUMANN_BC = false;
 
-/// Per-Grid reusable storage for the nonlinear gamma conduction solve. This is
+/// Per-Grid reusable storage for the release nonlinear conduction solve. This is
 /// scratch only, never a thermodynamic cache; keeping it on the owning Grid
 /// preserves reentrancy and avoids function-static state.
-struct GammaConductionScratch {
+struct MixtureConductionScratch {
     std::vector<double> rho, e_old, temperature, target;
     // `e_at_T` is e_int(rho, temperature) of the CURRENT Newton iterate. The
     // ionization fraction, the heat capacity, the conductivity inputs and this
     // residual energy all come from one fused Saha evaluation per cell per pass
     // (they used to be three independent Saha solves).
-    // On convergence these still describe the FINAL accepted temperature, so the
-    // known-temperature packing that closes the stage reuses them instead of
-    // re-solving Saha at the same (rho, T).
     std::vector<double> conductivity, capacity, n_e, n_hi, e_at_T, x, pressure;
     std::vector<double> g_left, g_right;
     std::vector<double> a, b, c, rhs, delta;
@@ -94,17 +129,18 @@ struct GammaConductionScratch {
 
 struct Grid;
 
-/// Thermodynamics decoded from one immutable packed conserved state. Physical
-/// cells and two explicitly decoded ghost layers share the same state-carried
-/// gravitational-potential convention as the uncached path.
-struct DecodedMixtureField {
+/// Equilibrium thermodynamics decoded from one immutable packed release state
+/// U = (rho, rho u, E). Physical cells and two explicitly decoded ghost layers
+/// share the same state-carried gravitational-potential convention.
+struct MixtureField {
     const Grid* source_grid = nullptr;
     const Vec* source_state = nullptr;
     const float* source_memory = nullptr;
     arma::uword source_elements = 0;
     std::uint64_t state_generation = 0;
-    std::array<float, 4*num_of_eq> boundary_signature{};
+    std::array<float, 4*num_of_mixture_eq> boundary_signature{};
     std::vector<MixtureThermo> cells;
+    /// (ns+4) x 3 reconstruction variables (log rho, u, log p | log T).
     arma::Col<double> extended_primitive;
     /// Decoded temperature of every extended cell (ns+4, ghosts included), in the
     /// same indexing as extended_primitive. It is NOT a reconstruction variable:
@@ -116,13 +152,28 @@ struct DecodedMixtureField {
     void require_matches(const Grid& grid, const Vec& state) const;
 };
 
-/// Reusable storage for the gamma MUSCL predictor/reconstruction. The numeric
+/// One side of every interface, as the release flux needs it. All three-row
+/// arrays use the (ns, num_of_mixture_eq) packing of the conserved state.
+struct MixtureFaceArrays {
+    arma::Col<double> conserved;    // ns*3, (rho, rho u, E)
+    arma::Col<double> flux;         // ns*3, (rho u, rho u^2 + p, (E+p) u)
+    arma::Col<double> velocity;     // ns
+    arma::Col<double> pressure;     // ns
+    arma::Col<double> sound_speed;  // ns
+    arma::Col<double> dp_deint;     // ns, (dp/de_int)_rho
+
+    void resize(arma::uword ns);
+};
+
+/// Reusable storage for the release MUSCL predictor/reconstruction. The numeric
 /// arrays are deliberately untyped scratch; thermodynamic validity remains in
-/// the state-bound DecodedMixtureField objects.
-struct GammaRhsScratch {
-    DecodedMixtureField predicted;
-    std::array<arma::Col<double>, 24> mixture;
-    std::array<Vec, 24> packed;
+/// the state-bound MixtureField objects.
+struct MixtureRhsScratch {
+    MixtureField predicted;
+    std::array<arma::Col<double>, 24> work;
+    std::array<MixtureFaceArrays, 4> faces;
+    arma::Col<double> flux_iph, flux_imh, source;
+    Vec predicted_state, rhs;
 
     // Non-uniform MUSCL reconstruction weights and slope-ratio metrics. They are
     // functions of the STATIC mesh alone (ds_i via ds_iph_i/ds_imh_i), so they are
@@ -134,27 +185,24 @@ struct GammaRhsScratch {
     bool weights_valid = false;
 };
 
-/// READ-ONLY capture of the production gamma-table reconstruction and numerical
-/// TOTAL-mass face flux for ONE explicit RHS evaluation. Filled by
-/// rhs_explicit_mixture (the active gamma path) only when Grid::capture_face_flux
-/// is true, and never read back by any solver stage — so enabling it cannot
-/// change a numerical result. Index i refers to the UPPER face i+1/2 of cell i,
-/// which is exactly the face the continuity row of rhs_explicit_mixture differences
+/// READ-ONLY capture of the release reconstruction and numerical mass flux for
+/// ONE explicit RHS evaluation. Filled by mixture_rhs_explicit only when
+/// Grid::capture_face_flux is true, and never read back by any solver stage — so
+/// enabling it cannot change a numerical result. Index i refers to the UPPER face
+/// i+1/2 of cell i, which is exactly the face the continuity row differences
 /// (flux_iph); the cell-centred slots are the reconstruction INPUTS w of the same
-/// evaluation, so a capture record is self-contained. The mass flux is the SUM of
-/// the RHO_I and RHO_N rows: the equilibrium projection redistributes the ionised /
-/// neutral carrier split every step, so only the total is a conserved density.
-struct GammaFaceFluxCapture {
+/// evaluation, so a capture record is self-contained.
+struct MixtureFaceFluxCapture {
     // cell-centred (length ns): the decoded state the reconstruction saw
     std::vector<double> rho_cell, v_cell, T_cell;
     // frozen equilibrium-reference residual, total-mass row (0 when eq_wb is off)
     std::vector<double> eq_residual_mass;
     // one-sided reconstructed face states at i+1/2 (L = from cell i, R = cell i+1)
     std::vector<double> rho_L, rho_R, v_L, v_R, T_L, T_R, cs_L, cs_R;
-    // Authoritative TOTAL pressure (p_i + p_n) of the same corrector face states,
-    // rebuilt through the production face builder on capture steps only. p_L vs
-    // p_R is the reconstruction-induced pressure mismatch the (log rho, V, log p)
-    // experiment targets; p_cell is the decoded cell-centre value.
+    // Authoritative total pressure of the same corrector face states, rebuilt
+    // through the production face builder on capture steps only. p_L vs p_R is
+    // the reconstruction-induced pressure mismatch the (log rho, V, log p)
+    // reconstruction targets; p_cell is the decoded cell-centre value.
     std::vector<double> p_cell, p_L, p_R;
     // Acoustic spectral radius a = max(|V_L|+c_L, |V_R|+c_R), retained as a
     // diagnostic/fallback value in Roe-local mode, plus the central/dissipative split.
@@ -179,7 +227,7 @@ struct GammaFaceFluxCapture {
 };
 
 /// READ-ONLY capture of the OUTER-face (i = ns-1, upper face) quantities of the
-/// FINAL CONVERGED Newton iteration of apply_gamma_conduction_stage — the ones
+/// FINAL CONVERGED Newton iteration of mixture_apply_conduction — the ones
 /// that actually built g_right[ns-1] for the accepted solve. Filled only when
 /// Grid::capture_outer_conduction is true and never read back by any solver
 /// stage, so enabling it cannot change a numerical result.
@@ -210,28 +258,28 @@ struct OuterConductionCapture {
 
 struct Grid {
     // --- sizes -------------------------------------------------------------
-    arma::uword ns      = 0;
-    arma::uword n_state = 0;            // ns * num_of_eq
-    float       CFL     = 0.25f;
+    arma::uword ns              = 0;
+    arma::uword n_mixture_state = 0;    // ns * num_of_mixture_eq  (release)
+    arma::uword n_state         = 0;    // ns * num_of_eq          (legacy two-fluid)
+    float       CFL             = 0.25f;
 
     // --- physical constants (SI) ------------------------------------------
+    // Fixed adiabatic index of the LEGACY two-fluid solver only. The release
+    // solver derives every thermodynamic index from the Saha/Gamma1 closure and
+    // never reads gamma_mono.
     float gamma_mono = 5.0f / 3.0f;
-    // Stage-2 CRASH Gamma1 input. An empty value is feature-off and leaves the
-    // fixed-gamma solver path untouched. Stages 5--6 consume it in the hydro RHS
-    // and projected Euler integrator; production scenario activation remains
-    // fail-closed until the Stage 7--8 source/IC/boundary lifecycle is complete.
+    // CRASH Gamma1 table. A non-empty table selects the RELEASE single-fluid
+    // equilibrium-mixture solver (mixture.hpp); an empty one selects the legacy
+    // fixed-gamma two-fluid solver.
     EosGammaTable eos_gamma_table;
     bool eos_gamma_debug_clamp = false;
-    // Carrier-row conditioning only; x_eq remains the unclamped Saha value for
-    // all physics. Stage 4 projection uses this to keep both float rows nonzero.
-    float eos_trace_fraction_floor = 1.0e-8f;
     // Per-cell temperature hint for the EOS inversion — the last T decoded in this
     // cell by ANY stage. Purely an accelerator: it seeds Newton, never changes the
     // converged root or the residual tolerance, and a stale or absent hint only
     // costs the ordinary safeguarded solve. Measured on the h1600 ns=1000 column:
     // a seeded call converges in 1.13 iterations with ZERO bisections, an unseeded
     // one takes 8.68 iterations and 4.05 bisections. Mutable so the const-Grid
-    // decode paths (flux, projection, conduction) can refresh it.
+    // decode paths (flux, conduction) can refresh it.
     mutable std::vector<double> eos_T_hint;
 
     /// Last decoded temperature in cell i, or NaN when none is recorded.
@@ -269,9 +317,9 @@ struct Grid {
     float chi_H_J    = static_cast<float>(eos_constants::chi_h); // 13.6 eV
 
     // --- runtime toggles ---------------------------------------------------
-    // Enable Stage E (hydrogen ionization / recombination) in advance_Euler_state.
-    // Default off so the existing test suite remains a clean regression baseline;
-    // flip to true to activate the writeup §5.3 ionization stage.
+    // LEGACY TWO-FLUID ONLY. Enable Stage E (hydrogen ionization / recombination)
+    // in advance_Euler_state. The release solver has no finite-rate ionization: its
+    // ionization state is the Saha equilibrium value of the EOS closure.
     bool enable_ionization = false;
 
     // Sub-options for the Stage E ionization network (only active when
@@ -306,7 +354,7 @@ struct Grid {
     // to true to activate.
     bool enable_radiative_cooling = false;
 
-    // Single-fluid limit ("neutrals off"). When true, the ion-neutral drag
+    // LEGACY TWO-FLUID ONLY. Single-fluid limit ("neutrals off"). When true, the ion-neutral drag
     // (Stage B) and T_i↔T_n equilibration (Stage C) rigidly slave the neutral
     // fluid to the ions each step: V→U→V_cm (mass-weighted bulk velocity) and
     // T_i→T_n→T_cm (heat-capacity-weighted bulk temperature). This is the exact
@@ -316,7 +364,9 @@ struct Grid {
     // two-fluid ("neutrals on"). Toggled at runtime by SINGLE_FLUID=1.
     bool single_fluid = false;
 
-    // Separate electron temperature T_e ≠ T_i (docs/electron_temperature_plan.md).
+    // LEGACY TWO-FLUID ONLY. Separate electron temperature T_e ≠ T_i
+    // (docs/electron_temperature_plan.md). The release solver is a common-temperature
+    // equilibrium mixture and never evolves a separate electron energy.
     // The 7th conserved variable E_E (electron internal energy) is ALWAYS carried;
     // this flag only decides whether the electrons evolve independently:
     //   * enable_Te = false (default): the single-temperature baseline. Every
@@ -334,7 +384,10 @@ struct Grid {
     //     (Bradshaw 2006; Manchester 2012). Toggled at runtime by ENABLE_TE=1.
     bool enable_Te = false;
 
-    // Well-balanced gravity in the explicit MUSCL reconstruction. The TVD-MUSCL
+    // LEGACY TWO-FLUID ONLY. Well-balanced gravity in the explicit MUSCL
+    // reconstruction. The release reconstruction decodes each cell with its own
+    // phi_g, so it has no shifted-potential bias to correct.
+    // The TVD-MUSCL
     // step limits PRIMITIVE variables, obtaining the neighbour pressures by
     // cons2prim of the spatially-shifted conserved states (ip1/im1/ip2/im2 in
     // rhs_explicit_state). But cons2prim subtracts the LOCAL-index φ_g, while the
@@ -353,7 +406,9 @@ struct Grid {
     // correct reconstruction and removes the spurious chromospheric downflow.)
     bool well_balanced = false;
 
-    // Log-space MUSCL reconstruction in rhs_explicit_state. In a gravitationally
+    // LEGACY TWO-FLUID ONLY. Log-space MUSCL reconstruction in rhs_explicit_state.
+    // The release reconstruction is always log-space by construction.
+    // In a gravitationally
     // stratified atmosphere ρ and p are EXPONENTIAL in height, so a linear TVD slope
     // misrepresents them and minmod clips the steep gradient to first order, injecting
     // Rusanov numerical diffusion that is worst at the dense lower boundary. When true,
@@ -384,52 +439,45 @@ struct Grid {
     bool  mc3_limiter = false;
     float limiter_beta = 2.0f;
 
-    // Numerical flux of the Gamma/Saha equilibrium-manifold path. True (the
-    // model_column release setting) computes the corrector dissipation from a 3x3
-    // mixture Roe characteristic decomposition; reconstruction, predictor,
-    // projection, boundaries and source/conduction stages are unchanged. False is
-    // the Rusanov/LLF reference solver, kept for regression and controlled
-    // comparison — its acoustic-scale dissipation −½a·ΔU is far too large for this
-    // very-low-Mach evaporation problem and leaves persistent TR velocity ripple.
-    // The struct default stays false so non-gamma scenarios are untouched;
-    // model_column_ic sets it from gamma_mode.
+    // RELEASE numerical flux. True (the model_column release setting) computes the
+    // corrector dissipation from the 3x3 mixture Roe characteristic decomposition
+    // of U = (rho, rho u, E); false is the face-local Rusanov/LLF reference solver,
+    // which is also the automatic per-face fallback whenever a Roe average is not
+    // admissible. Rusanov is kept for regression and controlled comparison only —
+    // its acoustic-scale dissipation -1/2 a Delta U is far too large for this
+    // very-low-Mach evaporation problem and leaves a persistent TR velocity ripple.
+    // model_column_ic sets it; the struct default keeps the legacy solver untouched.
     bool roe_characteristic_flux = false;
 
-    // THERMAL reconstruction variable of the Gamma/Saha MUSCL path. True (the
-    // model_column release setting) limits
-    //   (log rho, V, log p)
+    // RELEASE thermal reconstruction variable. True (the model_column release
+    // setting) limits
+    //   (log rho, u, log p)
     // and recovers the face temperature by inverting the same authoritative
     // closure (equilibrium_temperature_from_density_pressure). False limits
-    //   (log rho, V, log T)
+    //   (log rho, u, log T)
     // and obtains the face pressure afterwards from the nonlinear Saha mapping
     // p(rho,T) — so two independently limited variables set one mechanical
     // quantity, and a mechanically smooth (constant-p) state is NOT reproduced
     // across the partial-ionization transition; it is retained as a reference
     // configuration only. Both keep density and pressure positive by construction
-    // and feed the identical equilibrium face builder, flux, projection and source
-    // stages, so this flag changes ONLY which pair of variables is authoritative
-    // at a face. The struct default stays false so non-gamma scenarios are
-    // untouched; model_column_ic sets it from gamma_mode.
+    // and feed the identical equilibrium face builder, flux and source stages, so
+    // this flag changes ONLY which pair of variables is authoritative at a face.
     bool pressure_reconstruct = false;
 
-    // Equilibrium-reference ("δ-form") well-balancing. The φ_g correction
-    // (well_balanced) fixes the gravity-potential bookkeeping and log_reconstruct
-    // makes the reconstruction EXACT for an isothermal (log-linear) column — but a
-    // general NON-isothermal hydrostatic atmosphere (e.g. Model C7, with a
-    // temperature minimum) is only reproduced to O(Δs), so the explicit MUSCL step
-    // applies a small spurious force even at rest ⇒ a residual O(Δs) base drainage
+    // Equilibrium-reference ("δ-form") well-balancing. A general NON-isothermal
+    // hydrostatic atmosphere (e.g. Model C7, with a temperature minimum) is only
+    // reproduced to O(Δs) by the reconstruction, so the explicit MUSCL step applies
+    // a small spurious force even at rest ⇒ a residual O(Δs) base drainage
     // (docs/boundary_conditions_plan.md). This device removes it for ANY
     // stratification: capture the scheme's explicit-RHS residual at a frozen
-    // reference equilibrium once, R_eq = rhs_explicit_state(eq_state), and subtract
-    // it every step. Then rhs_explicit_state(eq_state) − R_eq ≡ 0, so eq_state is an
-    // EXACT discrete steady state (V=0 held to round-off, resolution-independent),
-    // while real deviations from equilibrium (conduction-driven evaporation) evolve
-    // normally minus that fixed O(Δs) correction. eq_state is the (V=0, HSE) IC set
-    // by the scenario; eq_residual is computed lazily on the first step (integrators)
-    // with subtraction disabled via the empty() guard. Default off (eq_residual
-    // empty ⇒ no subtraction ⇒ byte-identical baseline); always on in model_column.
-    // Complements well_balanced / log_reconstruct; supersedes the isothermal-only
-    // exactness of log_reconstruct for non-isothermal columns.
+    // reference equilibrium once, R_eq = RHS(eq_state), and subtract it every step.
+    // Then RHS(eq_state) − R_eq ≡ 0, so eq_state is an EXACT discrete steady state
+    // (u = 0 held to round-off, resolution-independent), while real deviations from
+    // equilibrium (conduction-driven evaporation) evolve normally minus that fixed
+    // O(Δs) correction. eq_state is the (u = 0, HSE) IC set by the scenario;
+    // eq_residual is computed lazily on the first step with subtraction disabled via
+    // the empty() guard. Always on in model_column; both solvers support it, each in
+    // its own conserved-state width.
     bool eq_wb = false;
     Vec  eq_state;      // frozen reference equilibrium (conserved), set by scenario IC
     Vec  eq_residual;   // cached explicit-RHS residual at eq_state (empty until computed)
@@ -688,18 +736,18 @@ struct Grid {
     // read it. Not used by steady scenarios.
     float sim_time                = 0.0f;
 
-    mutable GammaConductionScratch gamma_conduction_scratch;
-    mutable GammaRhsScratch gamma_rhs_scratch;
+    mutable MixtureConductionScratch mixture_conduction_scratch;
+    mutable MixtureRhsScratch mixture_rhs_scratch;
 
-    // Diagnostic-only: when true, the NEXT rhs_explicit_mixture evaluation copies
-    // its final reconstructed face states, limiter values and Rusanov total-mass
+    // Diagnostic-only: when true, the NEXT mixture_rhs_explicit evaluation copies
+    // its final reconstructed face states, limiter values and numerical mass
     // flux into face_flux_capture. Pure output — no solver stage ever reads the
     // capture back, so the flag cannot change the numerical result. Default false.
     // The driver (chromo_main, CHROMO_FACE_FLUX_DIAG) sets it per step.
     bool capture_face_flux = false;
-    mutable GammaFaceFluxCapture face_flux_capture;
+    mutable MixtureFaceFluxCapture face_flux_capture;
 
-    // Diagnostic-only: when true, every apply_gamma_conduction_stage solve copies
+    // Diagnostic-only: when true, every mixture_apply_conduction solve copies
     // its FINAL CONVERGED outer-face conduction quantities into
     // outer_conduction_capture. Pure output; no stage reads it back. Default false.
     // The driver (chromo_main, CHROMO_OUTER_COND_DIAG) sets it once per run.
@@ -712,7 +760,15 @@ struct Grid {
     Vec dinvB_ds_i;
     Vec phi_g_imh, phi_g_iph;
 
-    // --- ghost buffers (length num_of_eq) ---------------------------------
+    // --- release ghost buffers (length num_of_mixture_eq) -----------------
+    // The two hydrodynamic ghost layers of the release solver, in the same
+    // (rho, rho u, E) rows as the interior state. The conductive physical-face
+    // temperature boundary is a SEPARATE datum (outer_conduction_temperature);
+    // ghost states and thermal boundary data are never conflated.
+    Vec mix_outer_boundary0, mix_outer_boundary1;
+    Vec mix_inner_boundary0, mix_inner_boundary1;
+
+    // --- legacy two-fluid ghost buffers (length num_of_eq) ----------------
     Vec outer_boundary0_i, outer_boundary1_i;
     Vec inner_boundary0_i, inner_boundary1_i;
 
@@ -779,7 +835,7 @@ struct Grid {
     void force_rebuild_metrics();
 
     /// Bumped by every force_rebuild_metrics(). Downstream caches derived from
-    /// the static mesh (e.g. GammaRhsScratch's reconstruction weights) compare
+    /// the static mesh (e.g. MixtureRhsScratch's reconstruction weights) compare
     /// against it to know when they must be rebuilt.
     std::uint64_t metrics_generation() const { return metrics_generation_; }
 
@@ -795,8 +851,18 @@ private:
 
 
 // ============================================================================
-// Packed-state helpers
+// LEGACY TWO-FLUID SOLVER (non-release)
+//
+// Everything below advances the seven-row ion/neutral/electron carrier state.
+// It is the historical research path (two-fluid drift, three-temperature
+// electrons, finite-rate ionization) and is NOT used by the canonical
+// `model_column` release, which runs the single-fluid solver in `mixture.hpp`.
+// These entry points reject a Grid that carries a Gamma1 table.
 // ============================================================================
+
+// ----------------------------------------------------------------------------
+// Packed-state helpers
+// ----------------------------------------------------------------------------
 
 /// Extract one scalar field (length ns) from a packed state.
 Vec get_scalar(const Grid& grid, const Vec& xn_state, arma::uword index);
@@ -818,21 +884,6 @@ Vec im2(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
 
 Vec cons2prim(const Grid& grid, const Vec& cons_state);
 Vec prim2cons(const Grid& grid, const Vec& prim_state);
-
-/// Conservative equilibrium projection of every packed cell. Gamma-table Euler
-/// calls this after its explicit mixture-space hydro predictor.
-Vec project_equilibrium_single_fluid(const Grid& grid, const Vec& cons_state);
-
-/// Decode one immutable gamma-table state plus its two existing ghost layers.
-/// An optional previous field supplies same-cell temperature guesses and ghost
-/// values; failed guesses always fall back to the full bracketed inversion.
-DecodedMixtureField decode_mixture_field(
-    const Grid& grid, const Vec& state, std::uint64_t state_generation = 0,
-    const DecodedMixtureField* previous = nullptr);
-void decode_mixture_field_into(
-    const Grid& grid, const Vec& state, DecodedMixtureField& output,
-    std::uint64_t state_generation = 0,
-    const DecodedMixtureField* previous = nullptr);
 
 // ============================================================================
 // Numerics: flux, source, spectral radius, MUSCL limiter
@@ -866,8 +917,6 @@ Vec cal_source_state(const Grid& grid, const Vec& xn_state);
 
 /// Explicit RHS: TVD-MUSCL + Rusanov flux differencing + cal_source_state.
 Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state);
-Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state,
-                       const DecodedMixtureField& decoded);
 
 /// Implicit RHS: ion-neutral drag, collisional + frictional heating, and
 /// field-aligned heat conduction (writeup §4.3–4.4).
@@ -882,13 +931,6 @@ Vec cal_max_v_i(const Grid& grid, const Vec& xn_state);
 
 /// Uniform CFL-limited timestep.
 Vec cal_dt_i(const Grid& grid, const Vec& xn_state);
-Vec cal_dt_i(const Grid& grid, const Vec& xn_state,
-             const DecodedMixtureField& decoded);
-
-/// Maximum cellwise normalized residual of the gamma-mode backward-Euler
-/// mixture-conduction equation, for diagnostics and regression tests.
-double gamma_conduction_residual_max(const Grid& grid, const Vec& before,
-                                     const Vec& after, double dt);
 
 /// Semi-implicit (backward-Euler) integrator. Explicit MUSCL+Rusanov step
 /// for R_E, then point-implicit drag + frictional heating, point-implicit
@@ -896,8 +938,6 @@ double gamma_conduction_residual_max(const Grid& grid, const Vec& before,
 /// solve per species, and (if grid.enable_ionization) the point-implicit
 /// ionization Stage E (writeup §3.7, §5.3). Mutates grid.dt_state.
 Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
-Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i,
-                        const DecodedMixtureField& decoded);
 
 /// Stage E: backward-Euler ionization / recombination on a single cell, scalar
 /// quadratic solve in ionization fraction f = ρ_i / (ρ_i + ρ_n). Operates on

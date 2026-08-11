@@ -104,23 +104,17 @@ inversion uses the table temperature bounds as a bracket and safeguarded
 Newton/bisection, with any supplied previous temperature treated only as an
 optional initial guess.
 
-`decode_equilibrium_mixture` subtracts the two stored rows' original kinetic
-energies and the gravitational potential carried by that state. It does not
-project or mutate the rows. Conservative center-of-mass projection is Stage 4;
-Stages 5--8 connect the closure to reconstruction, fluxes, source/conduction
-splitting, and Model C7 initial/boundary states.
-
-Stage 4 adds `project_equilibrium_single_fluid`. Unlike the read-only decoder,
-the projection subtracts center-of-mass kinetic energy, so relative drift is
-thermalized while total mass, momentum, and `E_I+E_N` remain conserved. It
-rebuilds both carrier rows with the approved pressure/chemical-energy mapping
-and keeps `E_E=3p_e/2`. The packed-float wrapper is used by the restricted
-gamma-table Euler path and remains separate from read-only decode.
+`decode_equilibrium_mixture` takes the release conserved state `(rho, rho u, E)`
+directly: it subtracts the kinetic energy and the gravitational potential carried
+by that state, inverts the caloric EOS for `T`, and reports the derived carrier
+quantities. It does not mutate the state. The equilibrium ionization fraction `x`,
+`n_e = x n_H`, `n_HI = (1-x) n_H` and the electron partial pressure `p_e` are
+diagnostic outputs of that decode, never independently advanced variables, so the
+historical conservative carrier-row projection no longer exists.
 
 The production density range is enforced before caloric root-finding, even
 though the analytic energy formula itself can be evaluated outside the table.
-This prevents a future projection from completing where no production Γ₁
-exists. An explicit debug flag bypasses the density gate and pairs with the
+This prevents a decode from completing where no production Γ₁ exists. An explicit debug flag bypasses the density gate and pairs with the
 table's debug-only Γ₁ edge clamp; production code must leave it disabled.
 
 Checksum verification uses `cmake/check_eos_checksum.cmake` and CMake's built-in

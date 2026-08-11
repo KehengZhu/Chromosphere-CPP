@@ -4,18 +4,11 @@
 
 namespace chromosphere {
 
-void GammaConductionScratch::resize(std::size_t n) {
-    rho.resize(n); e_old.resize(n); temperature.resize(n); target.resize(n);
-    conductivity.resize(n); capacity.resize(n); n_e.resize(n); n_hi.resize(n);
-    e_at_T.resize(n); x.resize(n); pressure.resize(n);
-    g_left.resize(n); g_right.resize(n);
-    a.resize(n); b.resize(n); c.resize(n); rhs.resize(n); delta.resize(n);
-}
-
 void Grid::init(arma::uword ns_in, float CFL_in) {
-    ns      = ns_in;
-    n_state = ns * num_of_eq;
-    CFL     = CFL_in;
+    ns              = ns_in;
+    n_mixture_state = ns * num_of_mixture_eq;
+    n_state         = ns * num_of_eq;
+    CFL             = CFL_in;
 
     // Physical constants are already set by the default member initializers
     // in the header. (Re-stated here for clarity.)
@@ -42,6 +35,11 @@ void Grid::init(arma::uword ns_in, float CFL_in) {
     uniform_mesh = true;
     metrics_valid = false;
 
+    mix_outer_boundary0.zeros(num_of_mixture_eq);
+    mix_outer_boundary1.zeros(num_of_mixture_eq);
+    mix_inner_boundary0.zeros(num_of_mixture_eq);
+    mix_inner_boundary1.zeros(num_of_mixture_eq);
+
     outer_boundary0_i.zeros(num_of_eq);
     outer_boundary1_i.zeros(num_of_eq);
     inner_boundary0_i.zeros(num_of_eq);
@@ -60,8 +58,9 @@ void Grid::init(arma::uword ns_in, float CFL_in) {
 
 void Grid::resize(arma::uword ns_new) {
     if (ns_new == ns) return;
-    ns      = ns_new;
-    n_state = ns * num_of_eq;
+    ns              = ns_new;
+    n_mixture_state = ns * num_of_mixture_eq;
+    n_state         = ns * num_of_eq;
 
     ds_i.zeros(ns);
     B_imh.zeros(ns); B_iph.zeros(ns); B_i.zeros(ns);
@@ -75,7 +74,7 @@ void Grid::resize(arma::uword ns_new) {
     ds_imh_i.zeros(ns);
     metrics_valid = false;
 
-    // Ghost buffers stay length num_of_eq — untouched. Physical constants, γ,
+    // Ghost buffers keep their own solver's width — untouched. Physical constants, γ,
     // CFL and every runtime toggle are deliberately preserved (this is a pure
     // reallocation of the ns-sized fields), so a scenario can size the coarse
     // grid, set its flags, then resize to the refined count.

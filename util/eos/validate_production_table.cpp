@@ -117,43 +117,29 @@ int main(int argc, char** argv) {
         const double n_h = 1.0e20;
         const double rho = n_h * chromosphere::eos_constants::m_h;
         const double temperature = 1.0e4;
-        const double x_eq = chromosphere::saha_ionization_fraction_n_h(n_h, temperature);
-        const double rho_i = 0.25*rho, rho_n = 0.75*rho;
-        const double velocity_i = 1.5e4, velocity_n = -4.0e3;
-        const double momentum_i = rho_i*velocity_i;
-        const double momentum_n = rho_n*velocity_n;
+        // Conserved-state round trip of the release representation: pack
+        // (rho, rho u, E) from (rho, u, T) and decode it back.
+        const double velocity = 1.5e4;
         const double phi = 3.0e6;
-        const double p_e = x_eq*n_h*chromosphere::eos_constants::k_b*temperature;
-        const double p_i = 2.0*p_e;
-        const double p_n = (1.0-x_eq)*n_h*chromosphere::eos_constants::k_b*temperature;
-        const double energy_i = 1.5*p_i
-            + x_eq*n_h*chromosphere::eos_constants::chi_h
-            + 0.5*rho_i*velocity_i*velocity_i + rho_i*phi;
-        const double energy_n = 1.5*p_n
-            + 0.5*rho_n*velocity_n*velocity_n + rho_n*phi;
-        const chromosphere::ProjectedMixture projected =
-            chromosphere::project_equilibrium_single_fluid(
-                table, rho_i, rho_n, momentum_i, momentum_n,
-                energy_i, energy_n, phi);
-        const double total_momentum = momentum_i + momentum_n;
-        const double total_energy = energy_i + energy_n;
-        const double reduced_mass = rho_i*rho_n/rho;
-        const double drift_heat = 0.5*reduced_mass
-            *(velocity_i-velocity_n)*(velocity_i-velocity_n);
-        const double initial_internal =
+        const double e_int =
             chromosphere::equilibrium_internal_energy(rho, temperature);
-        require_close((projected.rho_i+projected.rho_n)/rho, 1.0, 2e-14,
-                      "production projection mass conservation");
-        require_close((projected.momentum_i+projected.momentum_n)/total_momentum,
-                      1.0, 2e-14, "production projection momentum conservation");
-        require_close((projected.energy_i+projected.energy_n)/total_energy,
-                      1.0, 2e-14, "production projection energy conservation");
-        require_close(projected.thermo.internal_energy/(initial_internal+drift_heat),
-                      1.0, 2e-12, "production projection drift thermalization");
-        require_close(projected.energy_e/(1.5*projected.thermo.p_e),
-                      1.0, 2e-14, "production electron energy mapping");
+        const double energy = chromosphere::mixture_total_energy(
+            rho, rho*velocity, e_int, phi);
+        const chromosphere::MixtureThermo decoded =
+            chromosphere::decode_equilibrium_mixture(
+                table, rho, rho*velocity, energy, phi);
+        require_close(decoded.rho/rho, 1.0, 2e-14,
+                      "production mixture density round trip");
+        require_close(decoded.T/temperature, 1.0, 2e-12,
+                      "production mixture temperature round trip");
+        require_close(decoded.internal_energy/e_int, 1.0, 2e-14,
+                      "production mixture internal-energy round trip");
+        require_close(decoded.n_e/(decoded.x*n_h), 1.0, 2e-14,
+                      "production derived electron density");
+        require_close((decoded.n_e+decoded.n_HI)/n_h, 1.0, 2e-14,
+                      "production derived carrier closure");
         std::cout << "PASS: tracked Gamma1 table dimensions, limits, all-grid-line continuity,\n"
-                  << "      node/interpolation, 24 caloric round trips, and projection"
+                  << "      node/interpolation, 24 caloric round trips, and the mixture state round trip"
                   << " (max continuity jump=" << max_continuity_jump << ")\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

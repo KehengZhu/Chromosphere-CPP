@@ -13,7 +13,7 @@ Every metric definition is IMPORTED, not re-typed:
   * ripple / flux metrics (A_M, Q_M, mean(F_eff), A_eff, Q_eff, A_diff, A_mismatch)
     come from `resolution_scan_diag.face_metrics` over the fixed PHYSICAL window
     (default 2130-2150 km) of the `.faceflux` sidecar -- a read-only copy-out of the
-    production `rhs_explicit_mixture` arrays;
+    production `mixture_rhs_explicit` arrays;
   * the outer conductive-flux split (q_phys / q_num / q_total) comes from
     `numerical_conduction_diag.read_outercond` (the `.outercond` sidecar).
 

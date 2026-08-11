@@ -1,7 +1,4 @@
 #include "chromosphere.hpp"
-#include "profiling.hpp"
-#include "parallel.hpp"
-
 #include <limits>
 #include <stdexcept>
 
@@ -151,38 +148,6 @@ Vec prim2cons(const Grid& grid, const Vec& prim_state) {
     cons_state += scalar_to(grid, e_n,    cons::E_N);
     cons_state += scalar_to(grid, e_e,    cons::E_E);
     return cons_state;
-}
-
-Vec project_equilibrium_single_fluid(const Grid& grid, const Vec& cons_state) {
-    ProfileScope timer(ProfileRegion::Projection);
-    if (cons_state.n_elem != grid.n_state)
-        throw std::invalid_argument("equilibrium projection: packed state size mismatch");
-    if (grid.phi_g_imh.n_elem != grid.ns || grid.phi_g_iph.n_elem != grid.ns)
-        throw std::invalid_argument("equilibrium projection: gravitational arrays are not sized");
-    Vec projected(arma::size(cons_state), arma::fill::zeros);
-    const auto size = arma::size(grid.ns, num_of_eq);
-    parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
-        const arma::uword i = static_cast<arma::uword>(raw_i);
-        const auto at = [&](arma::uword row) {
-            return static_cast<double>(cons_state(arma::sub2ind(size, i, row)));
-        };
-        const double phi = 0.5 * (static_cast<double>(grid.phi_g_imh(i))
-                                + static_cast<double>(grid.phi_g_iph(i)));
-        const ProjectedMixtureRows cell = project_equilibrium_rows(
-            grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
-            at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
-            phi, static_cast<double>(grid.eos_trace_fraction_floor),
-            grid.eos_temperature_hint(i), grid.eos_gamma_debug_clamp);
-        grid.store_eos_temperature_hint(i, cell.temperature);
-        projected(arma::sub2ind(size, i, cons::RHO_I)) = static_cast<float>(cell.rho_i);
-        projected(arma::sub2ind(size, i, cons::RHO_N)) = static_cast<float>(cell.rho_n);
-        projected(arma::sub2ind(size, i, cons::MOM_I)) = static_cast<float>(cell.momentum_i);
-        projected(arma::sub2ind(size, i, cons::MOM_N)) = static_cast<float>(cell.momentum_n);
-        projected(arma::sub2ind(size, i, cons::E_I)) = static_cast<float>(cell.energy_i);
-        projected(arma::sub2ind(size, i, cons::E_N)) = static_cast<float>(cell.energy_n);
-        projected(arma::sub2ind(size, i, cons::E_E)) = static_cast<float>(cell.energy_e);
-    });
-    return projected;
 }
 
 // ============================================================================

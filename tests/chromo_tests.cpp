@@ -15,6 +15,7 @@
 //   - Uniform, motionless, gravity-free state is a fixed point of advance_Euler_state
 
 #include "../chromosphere.hpp"
+#include "../mixture.hpp"
 #include "../physics.hpp"
 #include "../profiling.hpp"
 #include "../parallel.hpp"
@@ -484,7 +485,7 @@ static void test_equilibrium_temperature_from_density_pressure() {
 // cell-centre data with the same MC3(beta=2) limiter arithmetic.
 static void test_reconstruction_preserves_constant_pressure() {
     // Symmetric-difference MUSCL face pair at cell i, exactly the corrector form
-    // used by rhs_explicit_mixture on a uniform mesh (predictor term dropped —
+    // used by mixture_rhs_explicit on a uniform mesh (predictor term dropped —
     // it is common to both variants and irrelevant to the mismatch question).
     auto mc3 = [](double r, double beta, bool plus) {
         if (!std::isfinite(r)) return 0.0;
@@ -659,11 +660,11 @@ static void test_stage3_equilibrium_mixture_closure() {
 
     const double temperature = 1.0e4;
     const double x = saha_ionization_fraction_n_h(n_h, temperature);
-    const double pressure = (1.0 + x) * n_h * eos_constants::k_b * temperature;
+    const double p_eq = (1.0 + x) * n_h * eos_constants::k_b * temperature;
     const double energy = equilibrium_internal_energy(rho, temperature);
     const GammaState gamma = gamma_state(table, rho, temperature);
     EXPECT_NEAR(gamma.x_eq, x, 2e-15);
-    EXPECT_NEAR(gamma.gamma_energy, 1.0 + pressure/energy, 2e-15);
+    EXPECT_NEAR(gamma.gamma_energy, 1.0 + p_eq/energy, 2e-15);
     EXPECT_NEAR(gamma.gamma_sound, 1.13, 2e-14);
 
     for (double bad_guess : {
@@ -683,33 +684,24 @@ static void test_stage3_equilibrium_mixture_closure() {
     EXPECT_REL(equilibrium_internal_energy(trapped_rho, trapped_temperature),
                trapped_energy, 2e-12);
 
-    const double x_row = 0.3;
-    const double rho_i = x_row * rho;
-    const double rho_n = (1.0 - x_row) * rho;
-    const double velocity_i = 120.0;
-    const double velocity_n = -45.0;
-    const double momentum_i = rho_i * velocity_i;
-    const double momentum_n = rho_n * velocity_n;
+    // Conserved-state round trip of the release representation. The carrier
+    // quantities below are DERIVED from (rho, rho u, E) — nothing in the state
+    // stores them.
+    const double velocity = 120.0;
     const double phi = 2.5e6;
     const double p_e = x * n_h * eos_constants::k_b * temperature;
-    const double p_i = 2.0 * p_e;
-    const double p_n = (1.0 - x) * n_h * eos_constants::k_b * temperature;
-    const double energy_i = 1.5*p_i + x*n_h*eos_constants::chi_h
-                          + 0.5*rho_i*velocity_i*velocity_i + rho_i*phi;
-    const double energy_n = 1.5*p_n
-                          + 0.5*rho_n*velocity_n*velocity_n + rho_n*phi;
+    const double pressure = (1.0 + x) * n_h * eos_constants::k_b * temperature;
+    const double total_energy = mixture_total_energy(
+        rho, rho*velocity, energy, phi);
     const MixtureThermo decoded = decode_equilibrium_mixture(
-        table, rho_i, rho_n, momentum_i, momentum_n,
-        energy_i, energy_n, phi);
+        table, rho, rho*velocity, total_energy, phi);
     EXPECT_REL(decoded.rho, rho, 2e-15);
     EXPECT_REL(decoded.T, temperature, 2e-12);
-    EXPECT_NEAR(decoded.x_eq, x, 2e-15);
-    EXPECT_NEAR(decoded.x_row, x_row, 2e-15);
+    EXPECT_NEAR(decoded.x, x, 2e-15);
     EXPECT_REL(decoded.n_H, n_h, 2e-15);
     EXPECT_REL(decoded.n_e, x*n_h, 2e-15);
     EXPECT_REL(decoded.n_HI, (1.0-x)*n_h, 2e-15);
-    EXPECT_REL(decoded.p_i, p_i, 2e-12);
-    EXPECT_REL(decoded.p_n, p_n, 2e-12);
+    EXPECT_REL(decoded.p, pressure, 2e-12);
     EXPECT_REL(decoded.p_e, p_e, 2e-12);
     EXPECT_NEAR(decoded.gamma1, 1.13, 2e-14);
     EXPECT_REL(decoded.internal_energy, energy, 2e-12);
@@ -746,260 +738,78 @@ static void test_stage3_equilibrium_mixture_closure() {
                    std::numeric_limits<double>::quiet_NaN(), true),
                temperature, 2e-12);
     EXPECT_TRUE(throws_any([&] {
-        decode_equilibrium_mixture(table, 0.0, rho_n, 0.0, momentum_n,
-                                   energy_i, energy_n, phi);
+        decode_equilibrium_mixture(table, 0.0, 0.0, total_energy, phi);
     }));
     std::remove(path.c_str());
 }
 
-static void test_stage4_conservative_equilibrium_projection() {
-    const std::string path = write_gamma_table_fixture("gamma_stage4_fixture.dat");
+// The release conserved state IS the physical state: packing (rho, u, T) and
+// decoding it back must reproduce every derived carrier quantity, and the packed
+// float representation must round-trip through the solver's own helpers.
+static void test_mixture_state_round_trip_and_carrier_derivation() {
+    const std::string path = write_gamma_table_fixture("gamma_mixture_fixture.dat");
     const EosGammaTable table = EosGammaTable::load(path);
     const double n_h = 1.0e18;
     const double rho = n_h * eos_constants::m_h;
     const double temperature = 1.0e4;
-    const double x_eq = saha_ionization_fraction_n_h(n_h, temperature);
-    const double x_row_initial = 0.3;
-    const double rho_i = x_row_initial * rho;
-    const double rho_n = (1.0 - x_row_initial) * rho;
-    const double velocity_i = 2.0e4;
-    const double velocity_n = -8.0e3;
-    const double momentum_i = rho_i * velocity_i;
-    const double momentum_n = rho_n * velocity_n;
+    const double velocity = 2.0e4;
     const double phi = 2.5e6;
-    const double p_e = x_eq * n_h * eos_constants::k_b * temperature;
-    const double p_i = 2.0 * p_e;
-    const double p_n = (1.0 - x_eq) * n_h * eos_constants::k_b * temperature;
-    const double energy_i = 1.5*p_i + x_eq*n_h*eos_constants::chi_h
-                          + 0.5*rho_i*velocity_i*velocity_i + rho_i*phi;
-    const double energy_n = 1.5*p_n
-                          + 0.5*rho_n*velocity_n*velocity_n + rho_n*phi;
-    const double mass_before = rho_i + rho_n;
-    const double momentum_before = momentum_i + momentum_n;
-    const double energy_before = energy_i + energy_n;
-    const double velocity_cm = momentum_before / mass_before;
-    const double reduced_mass = rho_i * rho_n / mass_before;
-    const double internal_before = equilibrium_internal_energy(rho, temperature);
-    const double drift_heat = 0.5 * reduced_mass
-                            * (velocity_i-velocity_n)*(velocity_i-velocity_n);
+    const double x = saha_ionization_fraction_n_h(n_h, temperature);
+    const double e_int = equilibrium_internal_energy(rho, temperature);
+    const double energy = mixture_total_energy(rho, rho*velocity, e_int, phi);
 
-    const ProjectedMixture projected = project_equilibrium_single_fluid(
-        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n, phi,
-        1.0e-8);
-    EXPECT_REL(projected.rho_i + projected.rho_n, mass_before, 2e-15);
-    EXPECT_REL(projected.momentum_i + projected.momentum_n, momentum_before, 2e-15);
-    EXPECT_REL(projected.energy_i + projected.energy_n, energy_before, 2e-15);
-    EXPECT_REL(projected.momentum_i/projected.rho_i, velocity_cm, 2e-15);
-    EXPECT_REL(projected.momentum_n/projected.rho_n, velocity_cm, 2e-15);
-    EXPECT_REL(projected.thermo.internal_energy,
-               internal_before + drift_heat, 2e-13);
-    EXPECT_TRUE(projected.thermo.T > temperature);
-    EXPECT_REL(equilibrium_internal_energy(rho, projected.thermo.T),
-               projected.thermo.internal_energy, 2e-13);
-    EXPECT_NEAR(projected.thermo.x_row, projected.thermo.x_eq, 2e-15);
+    // Exact-arithmetic decode.
+    const MixtureThermo th = decode_equilibrium_mixture(
+        table, rho, rho*velocity, energy, phi);
+    EXPECT_REL(th.rho, rho, 2e-15);
+    EXPECT_REL(th.T, temperature, 2e-12);
+    EXPECT_REL(th.internal_energy, e_int, 2e-14);
+    EXPECT_NEAR(th.x, x, 2e-15);
+    // Carrier quantities are DERIVED: rho_i = x rho, rho_n = (1-x) rho.
+    EXPECT_REL(th.n_e*eos_constants::m_h, x*rho, 2e-15);
+    EXPECT_REL(th.n_HI*eos_constants::m_h, (1.0-x)*rho, 2e-14);
+    EXPECT_REL(th.n_e + th.n_HI, n_h, 2e-15);
+    EXPECT_REL(th.p, (1.0+x)*n_h*eos_constants::k_b*temperature, 2e-13);
+    EXPECT_REL(th.p_e, x*n_h*eos_constants::k_b*temperature, 2e-13);
+    // Ionization energy is inside e_int.
+    EXPECT_REL(th.internal_energy - 1.5*th.p, x*n_h*eos_constants::chi_h, 2e-12);
 
-    const double common_specific = 0.5*velocity_cm*velocity_cm + phi;
-    const double mapped_e_i = 1.5*projected.thermo.p_i
-                            + projected.thermo.x_eq*projected.thermo.n_H
-                              * eos_constants::chi_h
-                            + projected.rho_i*common_specific;
-    const double mapped_e_n = 1.5*projected.thermo.p_n
-                            + projected.rho_n*common_specific;
-    EXPECT_REL(projected.energy_i, mapped_e_i, 2e-13);
-    EXPECT_NEAR(projected.energy_n, mapped_e_n, 2e-13*energy_before);
-    EXPECT_REL(projected.energy_e, 1.5*projected.thermo.p_e, 2e-15);
-
-    const MixtureThermo decoded = decode_equilibrium_mixture(
-        table, projected.rho_i, projected.rho_n,
-        projected.momentum_i, projected.momentum_n,
-        projected.energy_i, projected.energy_n, phi);
-    EXPECT_REL(decoded.T, projected.thermo.T, 2e-12);
-    EXPECT_NEAR(decoded.x_eq, projected.thermo.x_eq, 2e-14);
-    EXPECT_NEAR(decoded.x_row, projected.thermo.x_row, 2e-14);
-
-    const ProjectedMixture projected_twice = project_equilibrium_single_fluid(
-        table, projected.rho_i, projected.rho_n,
-        projected.momentum_i, projected.momentum_n,
-        projected.energy_i, projected.energy_n, phi, 1.0e-8);
-    EXPECT_REL(projected_twice.thermo.T, projected.thermo.T, 2e-12);
-    EXPECT_REL(projected_twice.rho_i, projected.rho_i, 2e-13);
-    EXPECT_REL(projected_twice.rho_n, projected.rho_n, 2e-13);
-    EXPECT_REL(projected_twice.energy_i + projected_twice.energy_n,
-               energy_before, 2e-15);
-
-    EXPECT_TRUE(throws_any([&] {
-        project_equilibrium_single_fluid(table, rho_i, rho_n, momentum_i,
-            momentum_n, energy_i, energy_n, phi, 0.0);
-    }));
-    EXPECT_TRUE(throws_any([&] {
-        project_equilibrium_single_fluid(table, rho_i, rho_n, momentum_i,
-            momentum_n, energy_i, energy_n, phi, 0.5);
-    }));
-
-    const auto projection_density_oob = [&](double bad_n_h) {
-        const double bad_rho = bad_n_h*eos_constants::m_h;
-        const double bad_x = saha_ionization_fraction_n_h(bad_n_h, temperature);
-        const double bad_p_e = bad_x*bad_n_h*eos_constants::k_b*temperature;
-        const double bad_p_i = 2.0*bad_p_e;
-        const double bad_p_n = (1.0-bad_x)*bad_n_h*eos_constants::k_b*temperature;
-        const double bad_e_i = 1.5*bad_p_i + bad_x*bad_n_h*eos_constants::chi_h;
-        const double bad_e_n = 1.5*bad_p_n;
-        return throws_any([&] {
-            project_equilibrium_single_fluid(
-                table, 0.4*bad_rho, 0.6*bad_rho, 0.0, 0.0,
-                bad_e_i, bad_e_n, 0.0);
-        });
-    };
-    EXPECT_TRUE(projection_density_oob(1.0e14));
-    EXPECT_TRUE(projection_density_oob(1.0e21));
-
-    // At a nearly neutral state, changing the storage floor changes only the
-    // carrier masses. All x_eq-driven thermodynamics remain identical.
-    const double n_cool = 1.0e20;
-    const double rho_cool = n_cool * eos_constants::m_h;
-    const double t_cool = 1.0e3;
-    const double x_cool = saha_ionization_fraction_n_h(n_cool, t_cool);
-    const double p_e_cool = x_cool*n_cool*eos_constants::k_b*t_cool;
-    const double p_i_cool = 2.0*p_e_cool;
-    const double p_n_cool = (1.0-x_cool)*n_cool*eos_constants::k_b*t_cool;
-    const double e_i_cool = 1.5*p_i_cool + x_cool*n_cool*eos_constants::chi_h;
-    const double e_n_cool = 1.5*p_n_cool;
-    const ProjectedMixture floor6 = project_equilibrium_single_fluid(
-        table, 0.4*rho_cool, 0.6*rho_cool, 0.0, 0.0,
-        e_i_cool, e_n_cool, 0.0, 1.0e-6);
-    const ProjectedMixture floor10 = project_equilibrium_single_fluid(
-        table, 0.4*rho_cool, 0.6*rho_cool, 0.0, 0.0,
-        e_i_cool, e_n_cool, 0.0, 1.0e-10);
-    EXPECT_NEAR(floor6.thermo.x_row, 1.0e-6, 1e-18);
-    EXPECT_NEAR(floor10.thermo.x_row, 1.0e-10, 1e-22);
-    EXPECT_NEAR(floor6.thermo.x_eq, floor10.thermo.x_eq, 0.0);
-    EXPECT_NEAR(floor6.thermo.T, floor10.thermo.T, 0.0);
-    EXPECT_NEAR(floor6.thermo.p_i, floor10.thermo.p_i, 0.0);
-    EXPECT_NEAR(floor6.thermo.p_n, floor10.thermo.p_n, 0.0);
-    EXPECT_NEAR(floor6.thermo.n_e, floor10.thermo.n_e, 0.0);
-    EXPECT_TRUE(floor6.rho_i > floor10.rho_i);
-    EXPECT_REL(floor6.energy_i + floor6.energy_n,
-               floor10.energy_i + floor10.energy_n, 2e-15);
-
-    // Fully ionized upper clamp: only the neutral carrier floor changes.
-    const double n_hot = 1.0e15;
-    const double rho_hot = n_hot*eos_constants::m_h;
-    const double t_hot = 1.0e5;
-    const double x_hot = saha_ionization_fraction_n_h(n_hot, t_hot);
-    const double p_e_hot = x_hot*n_hot*eos_constants::k_b*t_hot;
-    const double p_i_hot = 2.0*p_e_hot;
-    const double p_n_hot = (1.0-x_hot)*n_hot*eos_constants::k_b*t_hot;
-    const double e_i_hot = 1.5*p_i_hot + x_hot*n_hot*eos_constants::chi_h;
-    const double e_n_hot = 1.5*p_n_hot;
-    const ProjectedMixture hot6 = project_equilibrium_single_fluid(
-        table, 0.4*rho_hot, 0.6*rho_hot, 0.0, 0.0,
-        e_i_hot, e_n_hot, 0.0, 1.0e-6);
-    const ProjectedMixture hot10 = project_equilibrium_single_fluid(
-        table, 0.4*rho_hot, 0.6*rho_hot, 0.0, 0.0,
-        e_i_hot, e_n_hot, 0.0, 1.0e-10);
-    EXPECT_NEAR(hot6.thermo.x_row, 1.0-1.0e-6, 1e-15);
-    EXPECT_NEAR(hot10.thermo.x_row, 1.0-1.0e-10, 1e-15);
-    EXPECT_NEAR(hot6.thermo.x_eq, hot10.thermo.x_eq, 0.0);
-    EXPECT_NEAR(hot6.thermo.T, hot10.thermo.T, 0.0);
-    EXPECT_NEAR(hot6.thermo.p_i, hot10.thermo.p_i, 0.0);
-    EXPECT_NEAR(hot6.thermo.p_n, hot10.thermo.p_n, 0.0);
-    EXPECT_NEAR(hot6.thermo.p_e, hot10.thermo.p_e, 0.0);
-    EXPECT_NEAR(hot6.thermo.n_e, hot10.thermo.n_e, 0.0);
-    EXPECT_NEAR(hot6.thermo.n_HI, hot10.thermo.n_HI, 0.0);
-    EXPECT_REL(hot6.energy_i + hot6.energy_n,
-               hot10.energy_i + hot10.energy_n, 2e-15);
-    EXPECT_TRUE(hot6.rho_n > hot10.rho_n);
-    const MixtureThermo hot_decoded = decode_equilibrium_mixture(
-        table, hot10.rho_i, hot10.rho_n, hot10.momentum_i, hot10.momentum_n,
-        hot10.energy_i, hot10.energy_n, 0.0);
-    EXPECT_REL(hot_decoded.T, hot10.thermo.T, 2e-12);
-
-    // Zero total momentum with nonzero relative drift: both projected momenta
-    // vanish and all original kinetic energy becomes mixture internal energy.
-    const double zero_mom_i = rho_i*1.0e4;
-    const double zero_mom_n = -zero_mom_i;
-    const double zero_vi = zero_mom_i/rho_i;
-    const double zero_vn = zero_mom_n/rho_n;
-    const double zero_e_i = 1.5*p_i + x_eq*n_h*eos_constants::chi_h
-                          + 0.5*rho_i*zero_vi*zero_vi;
-    const double zero_e_n = 1.5*p_n + 0.5*rho_n*zero_vn*zero_vn;
-    const ProjectedMixture zero_momentum = project_equilibrium_single_fluid(
-        table, rho_i, rho_n, zero_mom_i, zero_mom_n,
-        zero_e_i, zero_e_n, 0.0);
-    const double zero_drift_heat = 0.5*rho_i*zero_vi*zero_vi
-                                 + 0.5*rho_n*zero_vn*zero_vn;
-    EXPECT_NEAR(zero_momentum.momentum_i, 0.0, 0.0);
-    EXPECT_NEAR(zero_momentum.momentum_n, 0.0, 0.0);
-    EXPECT_REL(zero_momentum.thermo.internal_energy,
-               internal_before + zero_drift_heat, 2e-13);
-    EXPECT_REL(zero_momentum.energy_i + zero_momentum.energy_n,
-               zero_e_i + zero_e_n, 2e-15);
-
-    // Packed float wrapper: conservation survives the row rewrite to float
-    // tolerance, and both carrier velocities become the center-of-mass value.
+    // Packed float round trip through the solver's own pack helper.
     Grid grid;
     grid.init(1, 0.25f);
     grid.eos_gamma_table = table;
-    grid.eos_trace_fraction_floor = 1.0e-8f;
     grid.phi_g_imh.fill(static_cast<float>(phi));
     grid.phi_g_iph.fill(static_cast<float>(phi));
-    Vec state(grid.n_state, arma::fill::zeros);
-    const auto size = arma::size(grid.ns, num_of_eq);
-    state(arma::sub2ind(size, 0, cons::RHO_I)) = static_cast<float>(rho_i);
-    state(arma::sub2ind(size, 0, cons::RHO_N)) = static_cast<float>(rho_n);
-    state(arma::sub2ind(size, 0, cons::MOM_I)) = static_cast<float>(momentum_i);
-    state(arma::sub2ind(size, 0, cons::MOM_N)) = static_cast<float>(momentum_n);
-    state(arma::sub2ind(size, 0, cons::E_I)) = static_cast<float>(energy_i);
-    state(arma::sub2ind(size, 0, cons::E_N)) = static_cast<float>(energy_n);
-    state(arma::sub2ind(size, 0, cons::E_E)) = -123.0f;
-    const Vec packed = project_equilibrium_single_fluid(grid, state);
-    const double packed_mass_before = static_cast<double>(state(cons::RHO_I)) + state(cons::RHO_N);
-    const double packed_mom_before = static_cast<double>(state(cons::MOM_I)) + state(cons::MOM_N);
-    const double packed_energy_before = static_cast<double>(state(cons::E_I)) + state(cons::E_N);
-    EXPECT_REL(static_cast<double>(packed(cons::RHO_I)) + packed(cons::RHO_N),
-               packed_mass_before, 2e-7);
-    EXPECT_REL(static_cast<double>(packed(cons::MOM_I)) + packed(cons::MOM_N),
-               packed_mom_before, 2e-7);
-    EXPECT_REL(static_cast<double>(packed(cons::E_I)) + packed(cons::E_N),
-               packed_energy_before, 2e-7);
-    EXPECT_REL(packed(cons::MOM_I)/packed(cons::RHO_I),
-               packed(cons::MOM_N)/packed(cons::RHO_N), 2e-6);
-    const MixtureThermo packed_decoded = decode_equilibrium_mixture(
-        table, packed(cons::RHO_I), packed(cons::RHO_N),
-        packed(cons::MOM_I), packed(cons::MOM_N),
-        packed(cons::E_I), packed(cons::E_N), phi);
-    EXPECT_REL(packed(cons::E_E), 1.5*packed_decoded.p_e, 2e-6);
+    EXPECT_TRUE(grid.n_mixture_state == 3);
+    Vec state(grid.n_mixture_state, arma::fill::zeros);
+    mixture_pack_cell(grid, state, 0, rho, velocity, temperature, phi);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
+    EXPECT_REL(state(arma::sub2ind(sz, 0, mix::RHO)), rho, 2e-7);
+    EXPECT_REL(state(arma::sub2ind(sz, 0, mix::MOM)), rho*velocity, 2e-7);
+    EXPECT_REL(state(arma::sub2ind(sz, 0, mix::ENERGY)), energy, 2e-7);
+    const MixtureThermo packed = decode_equilibrium_mixture(
+        table, state(arma::sub2ind(sz, 0, mix::RHO)),
+        state(arma::sub2ind(sz, 0, mix::MOM)),
+        state(arma::sub2ind(sz, 0, mix::ENERGY)), phi);
+    EXPECT_REL(packed.T, temperature, 2e-5);
+    EXPECT_REL(packed.rho, rho, 2e-7);
 
-    // Packed projection is all-or-nothing from the caller's perspective. Cell
-    // 0 is valid; cell 1 is above the density table and throws after cell 0 has
-    // been written only to the function-local result buffer.
-    Grid oob_grid;
-    oob_grid.init(2, 0.25f);
-    oob_grid.eos_gamma_table = table;
-    oob_grid.phi_g_imh.zeros();
-    oob_grid.phi_g_iph.zeros();
-    Vec oob_state(oob_grid.n_state, arma::fill::zeros);
-    const auto oob_size = arma::size(oob_grid.ns, num_of_eq);
-    const auto set_static_cell = [&](arma::uword cell, double cell_n_h) {
-        const double cell_rho = cell_n_h*eos_constants::m_h;
-        const double cell_x = saha_ionization_fraction_n_h(cell_n_h, temperature);
-        const double cell_p_e = cell_x*cell_n_h*eos_constants::k_b*temperature;
-        const double cell_p_i = 2.0*cell_p_e;
-        const double cell_p_n = (1.0-cell_x)*cell_n_h*eos_constants::k_b*temperature;
-        oob_state(arma::sub2ind(oob_size, cell, cons::RHO_I)) = static_cast<float>(0.4*cell_rho);
-        oob_state(arma::sub2ind(oob_size, cell, cons::RHO_N)) = static_cast<float>(0.6*cell_rho);
-        oob_state(arma::sub2ind(oob_size, cell, cons::E_I)) = static_cast<float>(
-            1.5*cell_p_i + cell_x*cell_n_h*eos_constants::chi_h);
-        oob_state(arma::sub2ind(oob_size, cell, cons::E_N)) = static_cast<float>(1.5*cell_p_n);
-        oob_state(arma::sub2ind(oob_size, cell, cons::E_E)) = static_cast<float>(1.5*cell_p_e);
-    };
-    set_static_cell(0, 1.0e18);
-    set_static_cell(1, 1.0e21);
-    const Vec oob_original = oob_state;
+    // Non-physical states are rejected rather than silently repaired.
     EXPECT_TRUE(throws_any([&] {
-        project_equilibrium_single_fluid(oob_grid, oob_state);
+        decode_equilibrium_mixture(table, -rho, 0.0, energy, phi);
     }));
-    EXPECT_TRUE(arma::approx_equal(oob_state, oob_original, "absdiff", 0.0));
+    EXPECT_TRUE(throws_any([&] {   // E below the gravitational + kinetic carry
+        decode_equilibrium_mixture(table, rho, rho*velocity,
+                                   rho*phi + 0.5*rho*velocity*velocity, phi);
+    }));
+    // The EOS density domain is a hard error in both directions.
+    for (double bad_n_h : {1.0e14, 1.0e21}) {
+        const double bad_rho = bad_n_h*eos_constants::m_h;
+        const double bad_e = equilibrium_internal_energy(bad_rho, temperature);
+        EXPECT_TRUE(throws_any([&] {
+            decode_equilibrium_mixture(table, bad_rho, 0.0, bad_e, 0.0);
+        }));
+    }
     std::remove(path.c_str());
 }
 
@@ -1007,10 +817,18 @@ static Vec setup_gamma_equilibrium(Grid& grid, const EosGammaTable& table,
                                    arma::uword ns, bool temperature_gradient) {
     grid.init(ns, 0.25f);
     grid.eos_gamma_table = table;
-    grid.single_fluid = true;
-    grid.enable_Te = false;
-    grid.enable_ionization = false;
     grid.enable_conduction = false;
+    grid.enable_radiative_cooling = false;
+    grid.enable_beam_heating = false;
+    grid.enable_coronal_heating = false;
+    grid.enable_trac = false;
+    grid.eq_wb = false;
+    grid.eq_state.reset();
+    grid.eq_residual.reset();
+    grid.impose_outer_heat_flux = false;
+    grid.inner_conduction_neumann = false;
+    grid.outer_conduction_temperature_override = false;
+    grid.numerical_diffusivity_per_length = 0.0f;
     grid.enable_radiative_cooling = false;
     grid.enable_beam_heating = false;
     grid.enable_coronal_heating = false;
@@ -1022,27 +840,20 @@ static Vec setup_gamma_equilibrium(Grid& grid, const EosGammaTable& table,
     grid.phi_g_imh.zeros(); grid.phi_g_iph.zeros();
     grid.broadcast();
 
-    Vec state(grid.n_state, arma::fill::zeros);
-    const auto sz = arma::size(ns, num_of_eq);
+    Vec state(grid.n_mixture_state, arma::fill::zeros);
+    const auto sz = arma::size(ns, num_of_mixture_eq);
     for (arma::uword i = 0; i < ns; ++i) {
         const double f = ns > 1 ? static_cast<double>(i)/(ns-1) : 0.0;
         const double n_h = 1.0e18;
         const double temperature = temperature_gradient ? 7.0e3 + 6.0e3*f : 1.0e4;
-        const MixtureFaceState face = equilibrium_mixture_face_state(
-            table, n_h*eos_constants::m_h, 150.0, temperature, 0.0,
-            grid.eos_trace_fraction_floor);
-        const double u[7] = {face.conserved.rho_i, face.conserved.rho_n,
-                             face.conserved.momentum_i, face.conserved.momentum_n,
-                             face.conserved.energy_i, face.conserved.energy_n,
-                             face.conserved.energy_e};
-        for (arma::uword k = 0; k < num_of_eq; ++k)
-            state(arma::sub2ind(sz, i, k)) = static_cast<float>(u[k]);
+        mixture_pack_cell(grid, state, i, n_h*eos_constants::m_h, 150.0,
+                          temperature, 0.0);
     }
-    for (arma::uword k = 0; k < num_of_eq; ++k) {
-        grid.inner_boundary0_i(k) = state(arma::sub2ind(sz, 0, k));
-        grid.inner_boundary1_i(k) = state(arma::sub2ind(sz, 0, k));
-        grid.outer_boundary0_i(k) = state(arma::sub2ind(sz, ns-1, k));
-        grid.outer_boundary1_i(k) = state(arma::sub2ind(sz, ns-1, k));
+    for (arma::uword k = 0; k < num_of_mixture_eq; ++k) {
+        grid.mix_inner_boundary0(k) = state(arma::sub2ind(sz, 0, k));
+        grid.mix_inner_boundary1(k) = state(arma::sub2ind(sz, 0, k));
+        grid.mix_outer_boundary0(k) = state(arma::sub2ind(sz, ns-1, k));
+        grid.mix_outer_boundary1(k) = state(arma::sub2ind(sz, ns-1, k));
     }
     grid.broadcast();
     return state;
@@ -1071,27 +882,26 @@ static void test_pressure_face_state_matches_temperature_face_state() {
         const double rho = s.first, t = s.second;
         const double p = saha_pressure_at(rho, t);
         const MixtureFaceState by_t = equilibrium_mixture_face_state_from_logs(
-            table, std::log(rho), 250.0, std::log(t), 2.0e6, 1.0e-8);
+            table, std::log(rho), 250.0, std::log(t), 2.0e6);
         const MixtureFaceState by_p =
             equilibrium_mixture_face_state_from_log_pressure(
-                table, std::log(rho), 250.0, std::log(p), 2.0e6, 1.0e-8);
-        EXPECT_REL(by_p.primitive.temperature, by_t.primitive.temperature, 1e-11);
-        EXPECT_REL(by_p.p_total, by_t.p_total, 1e-11);
+                table, std::log(rho), 250.0, std::log(p), 2.0e6);
+        EXPECT_REL(by_p.temperature, by_t.temperature, 1e-11);
+        EXPECT_REL(by_p.pressure, by_t.pressure, 1e-11);
         EXPECT_REL(by_p.sound_speed, by_t.sound_speed, 1e-11);
         EXPECT_REL(by_p.dp_deint_rho, by_t.dp_deint_rho, 1e-10);
-        EXPECT_REL(by_p.conserved.rho_i, by_t.conserved.rho_i, 1e-10);
-        EXPECT_REL(by_p.conserved.energy_i, by_t.conserved.energy_i, 1e-10);
-        EXPECT_REL(by_p.conserved.thermo.gamma1, by_t.conserved.thermo.gamma1, 1e-11);
+        EXPECT_REL(by_p.internal_energy, by_t.internal_energy, 1e-10);
+        EXPECT_REL(by_p.energy, by_t.energy, 1e-10);
+        EXPECT_REL(by_p.gamma1, by_t.gamma1, 1e-11);
         // The face pressure is exactly the reconstructed one, by construction.
-        EXPECT_REL(by_p.p_total, p, 1e-12);
-        EXPECT_TRUE(by_p.primitive.rho > 0.0 && by_p.p_total > 0.0
-                    && by_p.primitive.temperature > 0.0);
+        EXPECT_REL(by_p.pressure, p, 1e-12);
+        EXPECT_TRUE(by_p.rho > 0.0 && by_p.pressure > 0.0
+                    && by_p.temperature > 0.0);
     }
     EXPECT_TRUE(throws_any([&] {
         equilibrium_mixture_face_state_from_log_pressure(
             table, std::log(1.0e-10),
-            std::numeric_limits<double>::quiet_NaN(), std::log(1.0),
-            0.0, 1.0e-8); }));
+            std::numeric_limits<double>::quiet_NaN(), std::log(1.0), 0.0); }));
 }
 
 // The temperature hint fed to the pressure face builder is a Newton STARTING
@@ -1113,12 +923,9 @@ static void test_pressure_face_hint_does_not_change_face_state() {
                                    / (rho*eos_constants::k_b);
             const MixtureFaceState reference =
                 equilibrium_mixture_face_state_from_log_pressure(
-                    table, std::log(rho), 250.0, std::log(p), 2.0e6, 1.0e-8,
-                    false, nan);
-            const std::array<double, 3> ref_flux = {{
-                equilibrium_mixture_flux(reference)[0],
-                equilibrium_mixture_flux(reference)[2],
-                equilibrium_mixture_flux(reference)[4]}};
+                    table, std::log(rho), 250.0, std::log(p), 2.0e6, false, nan);
+            const std::array<double, 3> ref_flux =
+                equilibrium_mixture_flux(reference);
             // Legitimate parent-cell-like hints, then hints that a neighbouring
             // cell can genuinely produce at the bracket ends, then nonsense.
             const double hints[] = {
@@ -1128,32 +935,24 @@ static void test_pressure_face_hint_does_not_change_face_state() {
             for (double hint : hints) {
                 const MixtureFaceState probe =
                     equilibrium_mixture_face_state_from_log_pressure(
-                        table, std::log(rho), 250.0, std::log(p), 2.0e6, 1.0e-8,
+                        table, std::log(rho), 250.0, std::log(p), 2.0e6,
                         false, hint);
-                const std::array<double, 7> flux = equilibrium_mixture_flux(probe);
+                const std::array<double, 3> flux = equilibrium_mixture_flux(probe);
                 auto rel = [](double a, double b) {
                     return b != 0.0 ? std::abs(a-b)/std::abs(b) : std::abs(a);
                 };
-                worst_t = std::max(worst_t, rel(probe.primitive.temperature,
-                                                reference.primitive.temperature));
-                worst_t = std::max(worst_t, rel(probe.conserved.thermo.x_eq,
-                                                reference.conserved.thermo.x_eq));
-                worst_t = std::max(worst_t, rel(probe.conserved.thermo.internal_energy,
-                                                reference.conserved.thermo.internal_energy));
-                worst_t = std::max(worst_t, rel(probe.p_total, reference.p_total));
+                worst_t = std::max(worst_t, rel(probe.temperature,
+                                                reference.temperature));
+                worst_t = std::max(worst_t, rel(probe.internal_energy,
+                                                reference.internal_energy));
+                worst_t = std::max(worst_t, rel(probe.pressure, reference.pressure));
                 worst_t = std::max(worst_t, rel(probe.sound_speed,
                                                 reference.sound_speed));
-                worst_t = std::max(worst_t, rel(probe.conserved.thermo.gamma1,
-                                                reference.conserved.thermo.gamma1));
-                worst_u = std::max(worst_u, rel(probe.conserved.rho_i,
-                                                reference.conserved.rho_i));
-                worst_u = std::max(worst_u, rel(probe.conserved.energy_i
-                                                + probe.conserved.energy_n,
-                                                reference.conserved.energy_i
-                                                + reference.conserved.energy_n));
-                worst_flux = std::max(worst_flux, rel(flux[0], ref_flux[0]));
-                worst_flux = std::max(worst_flux, rel(flux[2], ref_flux[1]));
-                worst_flux = std::max(worst_flux, rel(flux[4], ref_flux[2]));
+                worst_t = std::max(worst_t, rel(probe.gamma1, reference.gamma1));
+                worst_u = std::max(worst_u, rel(probe.rho, reference.rho));
+                worst_u = std::max(worst_u, rel(probe.energy, reference.energy));
+                for (int k = 0; k < 3; ++k)
+                    worst_flux = std::max(worst_flux, rel(flux[k], ref_flux[k]));
             }
         }
     }
@@ -1215,8 +1014,11 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     EXPECT_TRUE(std::string(std::getenv("ISO_COOLING")) == "0");
     EXPECT_TRUE(std::string(std::getenv("ISO_TRAC")) == "0");
     EXPECT_TRUE(std::string(std::getenv("ISO_CORONA")) == "0");
-    EXPECT_TRUE(std::string(std::getenv("ISO_TWO_FLUID")) == "0");
-    EXPECT_TRUE(std::string(std::getenv("ISO_IONIZATION")) == "0");
+    // The release preset must not mention the legacy two-fluid research knobs at
+    // all: the single-fluid release solver has neither a neutral fluid nor a
+    // finite-rate ionization stage, and chromo_main rejects both outright.
+    EXPECT_TRUE(std::getenv("ISO_TWO_FLUID") == nullptr);
+    EXPECT_TRUE(std::getenv("ISO_IONIZATION") == nullptr);
 
     clear_model_column_release_defaults_env();
     setenv("ISO_NS", "777", 1);
@@ -1260,38 +1062,20 @@ static void test_final_serial_log_aware_eos_and_gamma1_contracts() {
         EXPECT_NEAR(gamma_log, gamma_normal, 0.0);
 
         const MixtureFaceState face_normal = equilibrium_mixture_face_state(
-            table, rho, 123.0, temperature, 2.0e6, 1.0e-8);
+            table, rho, 123.0, temperature, 2.0e6);
         const MixtureFaceState face_log = equilibrium_mixture_face_state_from_logs(
-            table, std::log(rho), 123.0, std::log(temperature), 2.0e6, 1.0e-8);
+            table, std::log(rho), 123.0, std::log(temperature), 2.0e6);
         // Exact equality was attempted first. The physical face API receives
         // rho,T directly, whereas the MUSCL API necessarily reconstructs them
         // through exp(log(rho)),exp(log(T)); that round trip differs by up to a
-        // few ULPs. Use a tight floating-point-equivalence bound here. The
-        // neutral-energy row is a conservative remainder and therefore uses an
-        // absolute tolerance scaled by the total carried energy.
-        EXPECT_REL(face_log.primitive.rho, face_normal.primitive.rho, 5e-14);
-        EXPECT_NEAR(face_log.primitive.velocity, face_normal.primitive.velocity, 0.0);
-        EXPECT_REL(face_log.primitive.temperature,
-                   face_normal.primitive.temperature, 5e-14);
-        EXPECT_REL(face_log.conserved.rho_i, face_normal.conserved.rho_i, 5e-14);
-        EXPECT_REL(face_log.conserved.rho_n, face_normal.conserved.rho_n, 5e-14);
-        EXPECT_REL(face_log.conserved.momentum_i,
-                   face_normal.conserved.momentum_i, 5e-14);
-        EXPECT_REL(face_log.conserved.momentum_n,
-                   face_normal.conserved.momentum_n, 5e-14);
-        EXPECT_REL(face_log.conserved.energy_i,
-                   face_normal.conserved.energy_i, 5e-14);
-        const double energy_scale = std::max(
-            1.0, std::abs(face_normal.conserved.energy_i)
-               + std::abs(face_normal.conserved.energy_n));
-        EXPECT_NEAR(face_log.conserved.energy_n,
-                    face_normal.conserved.energy_n,
-                    32.0*std::numeric_limits<double>::epsilon()*energy_scale);
-        EXPECT_REL(face_log.conserved.energy_e,
-                   face_normal.conserved.energy_e, 5e-14);
-        EXPECT_NEAR(face_log.conserved.thermo.gamma1,
-                    face_normal.conserved.thermo.gamma1, 0.0);
-        EXPECT_REL(face_log.p_total, face_normal.p_total, 5e-14);
+        // few ULPs. Use a tight floating-point-equivalence bound here.
+        EXPECT_REL(face_log.rho, face_normal.rho, 5e-14);
+        EXPECT_NEAR(face_log.velocity, face_normal.velocity, 0.0);
+        EXPECT_REL(face_log.temperature, face_normal.temperature, 5e-14);
+        EXPECT_REL(face_log.internal_energy, face_normal.internal_energy, 5e-14);
+        EXPECT_REL(face_log.energy, face_normal.energy, 5e-14);
+        EXPECT_NEAR(face_log.gamma1, face_normal.gamma1, 0.0);
+        EXPECT_REL(face_log.pressure, face_normal.pressure, 5e-14);
         EXPECT_REL(face_log.sound_speed, face_normal.sound_speed, 5e-14);
 
         const double inverted = temperature_from_rho_eint(
@@ -1302,97 +1086,37 @@ static void test_final_serial_log_aware_eos_and_gamma1_contracts() {
     const double n_h = 1.0e18;
     const double rho = n_h*eos_constants::m_h;
     const double temperature = 1.0e4;
-    const double x = saha_ionization_fraction_n_h(n_h, temperature);
-    const double x_row = 0.3;
-    const double rho_i = x_row*rho;
-    const double rho_n = (1.0-x_row)*rho;
-    const double velocity_i = 120.0;
-    const double velocity_n = -45.0;
-    const double momentum_i = rho_i*velocity_i;
-    const double momentum_n = rho_n*velocity_n;
+    const double velocity = 120.0;
     const double phi = 2.5e6;
-    const double p_e = x*n_h*eos_constants::k_b*temperature;
-    const double p_i = 2.0*p_e;
-    const double p_n = (1.0-x)*n_h*eos_constants::k_b*temperature;
-    const double energy_i = 1.5*p_i+x*n_h*eos_constants::chi_h
-                          +0.5*rho_i*velocity_i*velocity_i+rho_i*phi;
-    const double energy_n = 1.5*p_n
-                          +0.5*rho_n*velocity_n*velocity_n+rho_n*phi;
+    const double energy = mixture_total_energy(
+        rho, rho*velocity, equilibrium_internal_energy(rho, temperature), phi);
 
+    // The caloric decode must not query Gamma1 at all; the full decode queries
+    // it exactly once. This is the contract the predictor half step relies on.
     set_eos_operation_counting(true);
     reset_eos_operation_counts();
     const CaloricMixtureThermo caloric = decode_equilibrium_caloric_mixture(
-        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n, phi);
+        table, rho, rho*velocity, energy, phi);
     EXPECT_TRUE(eos_operation_counts().gamma1_queries == 0);
     reset_eos_operation_counts();
     const MixtureThermo full = decode_equilibrium_mixture(
-        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n, phi);
+        table, rho, rho*velocity, energy, phi);
     EXPECT_TRUE(eos_operation_counts().gamma1_queries == 1);
     EXPECT_NEAR(caloric.T, full.T, 0.0);
     EXPECT_NEAR(caloric.internal_energy, full.internal_energy, 0.0);
+    EXPECT_NEAR(caloric.p, full.p, 0.0);
+    EXPECT_NEAR(caloric.x, full.x, 0.0);
 
-    reset_eos_operation_counts();
-    const ProjectedMixtureRows rows = project_equilibrium_rows(
-        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n,
-        phi, 1.0e-8);
-    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 0);
-    reset_eos_operation_counts();
-    const ProjectedMixture projected = project_equilibrium_single_fluid(
-        table, rho_i, rho_n, momentum_i, momentum_n, energy_i, energy_n,
-        phi, 1.0e-8);
-    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 1);
-    EXPECT_NEAR(rows.rho_i, projected.rho_i, 0.0);
-    EXPECT_NEAR(rows.rho_n, projected.rho_n, 0.0);
-    EXPECT_NEAR(rows.momentum_i, projected.momentum_i, 0.0);
-    EXPECT_NEAR(rows.momentum_n, projected.momentum_n, 0.0);
-    EXPECT_NEAR(rows.energy_i, projected.energy_i, 0.0);
-    EXPECT_NEAR(rows.energy_n, projected.energy_n, 0.0);
-    EXPECT_NEAR(rows.energy_e, projected.energy_e, 0.0);
-
-    const double total_momentum = momentum_i+momentum_n;
-    const double total_energy = energy_i+energy_n;
-
-    // The equilibrium projection acts on the conserved mixture totals, so a
-    // small finite undershoot in a trace predictor row is recoverable. This is
-    // deliberately narrower than decode_equilibrium_mixture(), which still
-    // requires both stored density rows to be positive.
-    const double rho_n_undershoot = -1.0e-10*rho;
-    const double rho_i_compensated = rho-rho_n_undershoot;
-    const double momentum_n_predictor = -1.0e-10*total_momentum;
-    const double momentum_i_predictor = total_momentum-momentum_n_predictor;
-    const double energy_n_predictor = -1.0e-10*total_energy;
-    const double energy_i_predictor = total_energy-energy_n_predictor;
-    const ProjectedMixtureRows recovered = project_equilibrium_rows(
-        table, rho_i_compensated, rho_n_undershoot,
-        momentum_i_predictor, momentum_n_predictor,
-        energy_i_predictor, energy_n_predictor, phi, 1.0e-8);
-    EXPECT_TRUE(recovered.rho_i > 0.0 && recovered.rho_n > 0.0);
-    EXPECT_REL(recovered.rho_i+recovered.rho_n, rho, 2e-15);
-    EXPECT_REL(recovered.momentum_i+recovered.momentum_n, total_momentum, 2e-15);
-    EXPECT_REL(recovered.energy_i+recovered.energy_n, total_energy, 2e-15);
-
-    reset_eos_operation_counts();
-    const ProjectedMixtureRows packed_rows =
-        pack_equilibrium_rows_from_known_temperature(
-            table, rho, total_momentum, total_energy, projected.thermo.T,
-            phi, 1.0e-8, 4.0e-11);
-    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 0);
-    reset_eos_operation_counts();
-    const ProjectedMixture packed = pack_equilibrium_from_known_temperature(
-        table, rho, total_momentum, total_energy, projected.thermo.T,
-        phi, 1.0e-8, 4.0e-11);
-    EXPECT_TRUE(eos_operation_counts().gamma1_queries == 1);
-    EXPECT_NEAR(packed_rows.energy_i, packed.energy_i, 0.0);
-    EXPECT_NEAR(packed_rows.energy_n, packed.energy_n, 0.0);
-    EXPECT_NEAR(packed_rows.energy_e, packed.energy_e, 0.0);
-
+    // One explicit release RHS evaluation queries Gamma1 exactly six times per
+    // cell: the cell decode plus the four corrector faces and the one surviving
+    // predictor face rebuild.
     Grid grid;
     const Vec rhs_state = setup_gamma_equilibrium(grid, table, 8, true);
-    DecodedMixtureField decoded;
-    decode_mixture_field_into(grid, rhs_state, decoded, 1, nullptr);
+    MixtureField decoded;
+    mixture_decode_into(grid, rhs_state, decoded, 1, nullptr);
     reset_eos_operation_counts();
-    const Vec rhs = rhs_explicit_state(grid, rhs_state, decoded);
-    EXPECT_TRUE(rhs.n_elem == grid.n_state);
+    const Vec rhs = mixture_rhs_explicit(grid, rhs_state, decoded, 1.0e-4);
+    EXPECT_TRUE(rhs.n_elem == grid.n_mixture_state);
     EXPECT_TRUE(eos_operation_counts().gamma1_queries == 6*grid.ns);
     set_eos_operation_counting(false);
 }
@@ -1498,57 +1222,39 @@ static void test_openmp_thread_safety_contracts() {
 static Vec setup_gamma_uniform_point(Grid& grid, const EosGammaTable& table,
                                      double n_h, double temperature) {
     Vec state = setup_gamma_equilibrium(grid, table, 4, false);
-    const double rho_target = n_h*eos_constants::m_h;
-    const double x_eq_target = saha_ionization_fraction(rho_target, temperature);
-    const double x_row_target = std::max(static_cast<double>(grid.eos_trace_fraction_floor),
-        std::min(1.0-static_cast<double>(grid.eos_trace_fraction_floor), x_eq_target));
-    float rho_i = static_cast<float>(x_row_target*rho_target);
-    float rho_n = static_cast<float>((1.0-x_row_target)*rho_target);
-    // Pick the closest float carrier sum on the legal side of an exact density
-    // endpoint. This preserves the production hard-error policy while avoiding
-    // asking a float-packed state to represent an impossible exact double sum.
-    if (n_h == table.max_n_h()) {
-        while ((static_cast<double>(rho_i)+rho_n)/eos_constants::m_h > table.max_n_h())
-            rho_n = std::nextafter(rho_n, -std::numeric_limits<float>::infinity());
-    } else if (n_h == table.min_n_h()) {
-        while ((static_cast<double>(rho_i)+rho_n)/eos_constants::m_h < table.min_n_h())
-            rho_n = std::nextafter(rho_n, std::numeric_limits<float>::infinity());
-    }
-    const double rho = static_cast<double>(rho_i) + rho_n;
-    const GammaState gamma = gamma_state(table, rho, temperature);
-    const double actual_n_h = rho/eos_constants::m_h;
-    const double p_e = gamma.x_eq*actual_n_h*eos_constants::k_b*temperature;
-    const double p_i = 2.0*p_e;
-    const double p_n = (1.0-gamma.x_eq)*actual_n_h*eos_constants::k_b*temperature;
-    float energy_i = static_cast<float>(1.5*p_i
-        + gamma.x_eq*actual_n_h*eos_constants::chi_h);
-    float energy_n = static_cast<float>(equilibrium_internal_energy(rho, temperature)
-                                      - static_cast<double>(energy_i));
+    // Pick the closest float density/energy on the legal side of an exact table
+    // endpoint: the production policy is a hard domain error, so a state packed
+    // exactly AT an endpoint must not round outside it.
+    float rho_f = static_cast<float>(n_h*eos_constants::m_h);
+    while (rho_f/eos_constants::m_h > table.max_n_h())
+        rho_f = std::nextafter(rho_f, -std::numeric_limits<float>::infinity());
+    while (rho_f/eos_constants::m_h < table.min_n_h())
+        rho_f = std::nextafter(rho_f, std::numeric_limits<float>::infinity());
+    const double rho = rho_f;
+    for (arma::uword i = 0; i < grid.ns; ++i)
+        mixture_pack_cell(grid, state, i, rho, 0.0, temperature, 0.0);
+    const auto packed_sz = arma::size(grid.ns, num_of_mixture_eq);
     const double e_min = equilibrium_internal_energy(rho, table.min_temperature());
     const double e_max = equilibrium_internal_energy(rho, table.max_temperature());
-    if (temperature == table.min_temperature()) {
-        while (static_cast<double>(energy_i)+energy_n < e_min)
-            energy_n = std::nextafter(energy_n, std::numeric_limits<float>::infinity());
-    } else if (temperature == table.max_temperature()) {
-        while (static_cast<double>(energy_i)+energy_n > e_max)
-            energy_n = std::nextafter(energy_n, -std::numeric_limits<float>::infinity());
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        float& e = state(arma::sub2ind(packed_sz, i, mix::ENERGY));
+        while (static_cast<double>(e) < e_min)
+            e = std::nextafter(e, std::numeric_limits<float>::infinity());
+        while (static_cast<double>(e) > e_max)
+            e = std::nextafter(e, -std::numeric_limits<float>::infinity());
     }
-    const float u[7] = {rho_i, rho_n, 0.0f, 0.0f, energy_i, energy_n,
-                        static_cast<float>(1.5*p_e)};
-    const auto sz = arma::size(grid.ns, num_of_eq);
-    for (arma::uword i = 0; i < grid.ns; ++i)
-        for (arma::uword k = 0; k < num_of_eq; ++k)
-            state(arma::sub2ind(sz, i, k)) = static_cast<float>(u[k]);
-    for (arma::uword k = 0; k < num_of_eq; ++k) {
-        grid.inner_boundary0_i(k) = grid.inner_boundary1_i(k) = static_cast<float>(u[k]);
-        grid.outer_boundary0_i(k) = grid.outer_boundary1_i(k) = static_cast<float>(u[k]);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
+    for (arma::uword k = 0; k < num_of_mixture_eq; ++k) {
+        const float value = state(arma::sub2ind(sz, 0, k));
+        grid.mix_inner_boundary0(k) = grid.mix_inner_boundary1(k) = value;
+        grid.mix_outer_boundary0(k) = grid.mix_outer_boundary1(k) = value;
     }
-    grid.dt_state.zeros();
     grid.broadcast();
     return state;
 }
 
-static void test_stage5_production_table_boundary_reconstruction() {
+// The release solver must run at every corner of the EOS validity domain.
+static void test_release_production_table_domain_corners() {
     const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
     const double n_mid = std::sqrt(table.min_n_h()*table.max_n_h());
     const double t_mid = std::sqrt(table.min_temperature()*table.max_temperature());
@@ -1561,90 +1267,16 @@ static void test_stage5_production_table_boundary_reconstruction() {
     for (const auto& point : points) {
         EXPECT_TRUE(!throws_any([&] {
             equilibrium_mixture_face_state(
-                table, point.first*eos_constants::m_h, 0.0, point.second,
-                0.0, 1.0e-8);
+                table, point.first*eos_constants::m_h, 0.0, point.second, 0.0);
         }));
         Grid grid;
-        const Vec state = setup_gamma_uniform_point(grid, table, point.first, point.second);
-        EXPECT_TRUE(!rhs_explicit_state(grid, state).has_nan());
+        const Vec state = setup_gamma_uniform_point(grid, table, point.first,
+                                                    point.second);
+        const MixtureField decoded = mixture_decode(grid, state);
+        EXPECT_TRUE(!mixture_rhs_explicit(grid, state, decoded, 1.0e-6).has_nan());
         Vec dt(grid.ns, arma::fill::zeros);
-        EXPECT_TRUE(!advance_Euler_state(grid, state, dt).has_nan());
+        EXPECT_TRUE(!mixture_advance(grid, state, dt, decoded).has_nan());
     }
-}
-
-static void test_stage5_6_equilibrium_face_flux_and_sound_speed() {
-    const std::string path = write_gamma_table_fixture("gamma_stage56_face.dat");
-    const EosGammaTable table = EosGammaTable::load(path);
-    const double n_h = 1.0e18;
-    const double rho = n_h*eos_constants::m_h;
-    const double velocity = -2.3e3;
-    const double temperature = 1.0e4;
-    const double phi_face = 4.2e6;
-    const MixtureFaceState face = equilibrium_mixture_face_state(
-        table, rho, velocity, temperature, phi_face, 1.0e-8);
-    const std::array<double, 7> flux = equilibrium_mixture_flux(face);
-
-    EXPECT_REL(face.conserved.rho_i + face.conserved.rho_n, rho, 2e-15);
-    EXPECT_REL(face.conserved.momentum_i/face.conserved.rho_i, velocity, 2e-15);
-    EXPECT_REL(face.conserved.momentum_n/face.conserved.rho_n, velocity, 2e-15);
-    EXPECT_REL(flux[0] + flux[1], rho*velocity, 2e-15);
-    EXPECT_REL(flux[2] + flux[3], rho*velocity*velocity + face.p_total, 2e-15);
-    EXPECT_REL(flux[4] + flux[5],
-               (face.conserved.energy_i + face.conserved.energy_n
-                + face.p_total)*velocity, 2e-15);
-    EXPECT_REL(face.sound_speed*face.sound_speed,
-               face.conserved.thermo.gamma1*face.p_total/rho, 2e-15);
-    // b=(dp/de_int)_rho is a caloric derivative, distinct from Gamma1. Verify
-    // the stored analytic value against a centered finite difference at fixed rho.
-    const double dT = 1.0e-4*temperature;
-    auto pressure_at = [&](double T) {
-        const double x = saha_ionization_fraction_n_h(n_h,T);
-        return (1.0+x)*n_h*eos_constants::k_b*T;
-    };
-    const double b_fd = (pressure_at(temperature+dT)-pressure_at(temperature-dT))
-        /(equilibrium_internal_energy(rho,temperature+dT)
-          -equilibrium_internal_energy(rho,temperature-dT));
-    EXPECT_REL(face.dp_deint_rho,b_fd,2e-7);
-    EXPECT_TRUE(face.dp_deint_rho > 0.0 && face.dp_deint_rho < 2.0/3.0);
-    const MixtureThermo decoded = decode_equilibrium_mixture(
-        table, face.conserved.rho_i, face.conserved.rho_n,
-        face.conserved.momentum_i, face.conserved.momentum_n,
-        face.conserved.energy_i, face.conserved.energy_n, phi_face);
-    EXPECT_REL(decoded.T, temperature, 2e-12);
-    EXPECT_NEAR(decoded.x_eq, face.conserved.thermo.x_eq, 2e-14);
-
-    // Both sides packed with one interface potential have no gravitational
-    // energy jump. Using separate cell potentials would create exactly rho*dphi.
-    const MixtureFaceState same_phi = equilibrium_mixture_face_state(
-        table, rho, velocity, temperature, phi_face, 1.0e-8);
-    const MixtureFaceState wrong_phi = equilibrium_mixture_face_state(
-        table, rho, velocity, temperature, phi_face + 1.0e5, 1.0e-8);
-    EXPECT_NEAR((face.conserved.energy_i + face.conserved.energy_n)
-                - (same_phi.conserved.energy_i + same_phi.conserved.energy_n),
-                0.0, 0.0);
-    EXPECT_REL((wrong_phi.conserved.energy_i + wrong_phi.conserved.energy_n)
-               - (face.conserved.energy_i + face.conserved.energy_n),
-               rho*1.0e5, 2e-12);
-
-    // Storage floors alter carrier rows only, never face thermodynamics or flux sums.
-    const MixtureFaceState floor6 = equilibrium_mixture_face_state(
-        table, 1.0e20*eos_constants::m_h, velocity, 1.0e3, phi_face, 1.0e-6);
-    const MixtureFaceState floor10 = equilibrium_mixture_face_state(
-        table, 1.0e20*eos_constants::m_h, velocity, 1.0e3, phi_face, 1.0e-10);
-    EXPECT_NEAR(floor6.conserved.thermo.x_eq, floor10.conserved.thermo.x_eq, 0.0);
-    EXPECT_NEAR(floor6.p_total, floor10.p_total, 0.0);
-    EXPECT_NEAR(floor6.sound_speed, floor10.sound_speed, 0.0);
-    EXPECT_TRUE(floor6.conserved.rho_i > floor10.conserved.rho_i);
-
-    Grid grid;
-    Vec state = setup_gamma_equilibrium(grid, table, 4, false);
-    const Vec spectral = cal_spectral_radius_state(grid, state);
-    const MixtureFaceState rest = equilibrium_mixture_face_state(
-        table, rho, 150.0, temperature, 0.0, grid.eos_trace_fraction_floor);
-    for (arma::uword i = 0; i < grid.ns; ++i)
-        EXPECT_REL(spectral(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, 0)),
-                   std::abs(150.0)+rest.sound_speed, 2e-6);
-    std::remove(path.c_str());
 }
 
 static void test_stage9_acoustic_characteristic_speed() {
@@ -1697,203 +1329,163 @@ static void test_stage9_acoustic_characteristic_speed() {
     }
 }
 
-static void test_stage9_storage_floor_transport_independence() {
+static void test_stage5_6_equilibrium_face_flux_and_sound_speed() {
+    const std::string path = write_gamma_table_fixture("gamma_stage56_face.dat");
+    const EosGammaTable table = EosGammaTable::load(path);
+    const double n_h = 1.0e18;
+    const double rho = n_h*eos_constants::m_h;
+    const double velocity = -2.3e3;
+    const double temperature = 1.0e4;
+    const double phi_face = 4.2e6;
+    const MixtureFaceState face = equilibrium_mixture_face_state(
+        table, rho, velocity, temperature, phi_face);
+    const std::array<double, 3> flux = equilibrium_mixture_flux(face);
+
+    EXPECT_REL(face.rho, rho, 2e-15);
+    EXPECT_REL(face.velocity, velocity, 2e-15);
+    EXPECT_REL(flux[mix::RHO], rho*velocity, 2e-15);
+    EXPECT_REL(flux[mix::MOM], rho*velocity*velocity + face.pressure, 2e-15);
+    EXPECT_REL(flux[mix::ENERGY], (face.energy + face.pressure)*velocity, 2e-15);
+    EXPECT_REL(face.energy,
+               face.internal_energy + 0.5*rho*velocity*velocity + rho*phi_face,
+               2e-15);
+    EXPECT_REL(face.sound_speed*face.sound_speed,
+               face.gamma1*face.pressure/rho, 2e-15);
+    // b=(dp/de_int)_rho is a caloric derivative, distinct from Gamma1. Verify
+    // the stored analytic value against a centered finite difference at fixed rho.
+    const double dT = 1.0e-4*temperature;
+    auto pressure_at = [&](double T) {
+        const double x = saha_ionization_fraction_n_h(n_h,T);
+        return (1.0+x)*n_h*eos_constants::k_b*T;
+    };
+    const double b_fd = (pressure_at(temperature+dT)-pressure_at(temperature-dT))
+        /(equilibrium_internal_energy(rho,temperature+dT)
+          -equilibrium_internal_energy(rho,temperature-dT));
+    EXPECT_REL(face.dp_deint_rho,b_fd,2e-7);
+    EXPECT_TRUE(face.dp_deint_rho > 0.0 && face.dp_deint_rho < 2.0/3.0);
+    const MixtureThermo decoded = decode_equilibrium_mixture(
+        table, face.rho, face.rho*face.velocity, face.energy, phi_face);
+    EXPECT_REL(decoded.T, temperature, 2e-12);
+    EXPECT_REL(decoded.p, face.pressure, 2e-12);
+
+    // Both sides packed with one interface potential have no gravitational
+    // energy jump. Using separate cell potentials would create exactly rho*dphi.
+    const MixtureFaceState same_phi = equilibrium_mixture_face_state(
+        table, rho, velocity, temperature, phi_face);
+    const MixtureFaceState wrong_phi = equilibrium_mixture_face_state(
+        table, rho, velocity, temperature, phi_face + 1.0e5);
+    EXPECT_NEAR(face.energy - same_phi.energy, 0.0, 0.0);
+    EXPECT_REL(wrong_phi.energy - face.energy, rho*1.0e5, 2e-12);
+    std::remove(path.c_str());
+}
+
+// Three-variable Roe flux: consistency (zero jump => central flux), exact
+// conservation of the physical flux, and the face-local Rusanov fallback.
+static void test_mixture_roe_flux_and_rusanov_fallback() {
     const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
-    const double floors[] = {1.0e-6, 1.0e-8, 1.0e-10};
     Grid grid;
-    grid.init(4, 0.25f);
-    grid.ds_i.fill(2.0e4f);
-    grid.B_i.ones(); grid.B_imh.ones(); grid.B_iph.ones();
-    grid.broadcast();
+    const Vec uniform = setup_gamma_equilibrium(grid, table, 8, false);
+    grid.roe_characteristic_flux = true;
+    grid.pressure_reconstruct = true;
+    grid.mc3_limiter = true;
+    grid.limiter_beta = 2.0f;
 
-    struct Diagnostic {
-        double rho_i, rho_n, x_row;
-        double mass, energy, mass_flux, x, T, p, ne, nhi;
-        float ke, kn, qrad;
-    };
-    struct FloorCase { double n_h, temperature; bool trace_ion; };
-    const FloorCase cases[] = {
-        // x_eq=9.76e-11: all three lower clamps set distinct charged rows.
-        {8.0e25,3.3e3,true},
-        // 1-x_eq=4.85e-11: all three upper clamps set distinct neutral rows.
-        {1.0e20,1.0e6,false}
-    };
-    for (const FloorCase& state : cases) {
-        Diagnostic result[3];
-        for (int f = 0; f < 3; ++f) {
-            const MixtureFaceState face = equilibrium_mixture_face_state(
-                table,state.n_h*eos_constants::m_h,320.0,state.temperature,
-                7.0e5,floors[f]);
-            // Exercise the actual runtime precision boundary: pack all seven
-            // conservative rows as float, then recover physical composition only
-            // through the read-only mixture decoder. This catches accidental use
-            // of the storage-floor carrier densities in transport/source paths.
-            Vec packed(num_of_eq);
-            packed(cons::RHO_I) = static_cast<float>(face.conserved.rho_i);
-            packed(cons::RHO_N) = static_cast<float>(face.conserved.rho_n);
-            packed(cons::MOM_I) = static_cast<float>(face.conserved.momentum_i);
-            packed(cons::MOM_N) = static_cast<float>(face.conserved.momentum_n);
-            packed(cons::E_I) = static_cast<float>(face.conserved.energy_i);
-            packed(cons::E_N) = static_cast<float>(face.conserved.energy_n);
-            packed(cons::E_E) = static_cast<float>(face.conserved.energy_e);
-            const MixtureThermo decoded = decode_equilibrium_mixture(
-                table,packed(cons::RHO_I),packed(cons::RHO_N),
-                packed(cons::MOM_I),packed(cons::MOM_N),
-                packed(cons::E_I),packed(cons::E_N),7.0e5);
-            Vec ne(grid.ns), nhi(grid.ns), temp(grid.ns);
-            ne.fill(static_cast<float>(decoded.n_e));
-            nhi.fill(static_cast<float>(decoded.n_HI));
-            temp.fill(static_cast<float>(decoded.T));
-            const Vec q = radiative_loss_thick(grid,ne,nhi,temp)
-                        + radiative_loss_thin(grid,ne,nhi,temp);
-            result[f] = {
-                packed(cons::RHO_I),packed(cons::RHO_N),decoded.x_row,
-                static_cast<double>(packed(cons::RHO_I))+packed(cons::RHO_N),
-                static_cast<double>(packed(cons::E_I))+packed(cons::E_N),
-                static_cast<double>(packed(cons::MOM_I))+packed(cons::MOM_N),
-                decoded.x_eq,decoded.T,decoded.p_i+decoded.p_n,
-                decoded.n_e,decoded.n_HI,
-                kappa_e(ne,nhi,temp)(0),kappa_n(ne,nhi,temp,temp)(0),q(0)};
-        }
-        if (state.trace_ion) {
-            EXPECT_TRUE(result[0].rho_i > result[1].rho_i);
-            EXPECT_TRUE(result[1].rho_i > result[2].rho_i);
-            EXPECT_TRUE(result[0].x_row > result[1].x_row);
-            EXPECT_TRUE(result[1].x_row > result[2].x_row);
-        } else {
-            EXPECT_TRUE(result[0].rho_n > result[1].rho_n);
-            EXPECT_TRUE(result[1].rho_n > result[2].rho_n);
-            EXPECT_TRUE(result[0].x_row < result[1].x_row);
-            EXPECT_TRUE(result[1].x_row < result[2].x_row);
-        }
-        for (int f = 1; f < 3; ++f) {
-            EXPECT_REL(result[f].x,result[0].x,2e-6);
-            EXPECT_REL(result[f].T,result[0].T,2e-6);
-            EXPECT_REL(result[f].p,result[0].p,2e-6);
-            EXPECT_REL(result[f].ne,result[0].ne,2e-6);
-            EXPECT_REL(result[f].nhi,result[0].nhi,2e-6);
-            EXPECT_REL(result[f].ke,result[0].ke,3e-6);
-            EXPECT_REL(result[f].kn,result[0].kn,3e-6);
-            EXPECT_REL(result[f].qrad,result[0].qrad,3e-6);
-            EXPECT_REL(result[f].mass,result[0].mass,2e-7);
-            EXPECT_REL(result[f].energy,result[0].energy,2e-7);
-            EXPECT_REL(result[f].mass_flux,result[0].mass_flux,2e-7);
-        }
+    // A uniform state has no jump at any face, so both fluxes reduce to F(U)
+    // exactly and the RHS is the pure geometric source (zero here: B=1, phi=0).
+    const MixtureField decoded = mixture_decode(grid, uniform);
+    const Vec rhs_roe = mixture_rhs_explicit(grid, uniform, decoded, 1.0e-4);
+    grid.roe_characteristic_flux = false;
+    const Vec rhs_rusanov = mixture_rhs_explicit(grid, uniform, decoded, 1.0e-4);
+    EXPECT_TRUE(rhs_roe.n_elem == grid.n_mixture_state);
+    EXPECT_TRUE(arma::approx_equal(rhs_roe, rhs_rusanov, "absdiff", 1.0e-8));
+    for (arma::uword k = 0; k < rhs_roe.n_elem; ++k)
+        EXPECT_TRUE(std::abs(rhs_roe(k)) < 1.0e-6);
+
+    // Stationary contact: uniform pressure, u = 0, a density/temperature jump.
+    // The exact Riemann solution carries NO mass across such a face, so the Roe
+    // decomposition — which resolves the entropy wave — must produce a mass RHS
+    // orders of magnitude smaller than Rusanov, whose -1/2 a (rho_R - rho_L)
+    // dissipation smears the contact at the acoustic rate. This is exactly the
+    // property the release solver is chosen for.
+    Grid graded;
+    Vec state = setup_gamma_equilibrium(graded, table, 32, false);
+    graded.pressure_reconstruct = true;
+    graded.mc3_limiter = true;
+    graded.limiter_beta = 2.0f;
+    const double p0 = 1.0;
+    for (arma::uword i = 0; i < graded.ns; ++i) {
+        const double f = static_cast<double>(i)/(graded.ns-1);
+        const double T = 6.0e3 + 4.0e3*f;
+        mixture_pack_cell(graded, state, i, 
+                          equilibrium_density_from_pressure(p0, T), 0.0, T, 0.0);
     }
+    const auto sz = arma::size(graded.ns, num_of_mixture_eq);
+    for (arma::uword k = 0; k < num_of_mixture_eq; ++k) {
+        graded.mix_inner_boundary0(k) = graded.mix_inner_boundary1(k) =
+            state(arma::sub2ind(sz, 0, k));
+        graded.mix_outer_boundary0(k) = graded.mix_outer_boundary1(k) =
+            state(arma::sub2ind(sz, graded.ns-1, k));
+    }
+    graded.broadcast();
+    const MixtureField gd = mixture_decode(graded, state);
+    graded.roe_characteristic_flux = true;
+    const Vec roe = mixture_rhs_explicit(graded, state, gd, 1.0e-4);
+    graded.roe_characteristic_flux = false;
+    const Vec rus = mixture_rhs_explicit(graded, state, gd, 1.0e-4);
+    EXPECT_TRUE(!roe.has_nan() && !rus.has_nan());
+    double roe_mass = 0.0, rusanov_mass = 0.0, rho_scale = 0.0;
+    for (arma::uword i = 1; i+1 < graded.ns; ++i) {
+        roe_mass = std::max(roe_mass,
+            std::abs(static_cast<double>(roe(arma::sub2ind(sz, i, mix::RHO)))));
+        rusanov_mass = std::max(rusanov_mass,
+            std::abs(static_cast<double>(rus(arma::sub2ind(sz, i, mix::RHO)))));
+        rho_scale = std::max(rho_scale,
+            static_cast<double>(state(arma::sub2ind(sz, i, mix::RHO))));
+    }
+    EXPECT_TRUE(rusanov_mass > 0.0);
+    EXPECT_TRUE(roe_mass < 1.0e-3*rusanov_mass);
+
+    // Fallback: a state whose Roe average is inadmissible must not produce NaN.
+    // Drive one cell to a huge velocity so the acoustic branch is degenerate.
+    Grid fallback;
+    Vec extreme = setup_gamma_equilibrium(fallback, table, 8, true);
+    fallback.roe_characteristic_flux = true;
+    fallback.pressure_reconstruct = true;
+    const auto fsz = arma::size(fallback.ns, num_of_mixture_eq);
+    const float rho4 = extreme(arma::sub2ind(fsz, 4, mix::RHO));
+    extreme(arma::sub2ind(fsz, 4, mix::MOM)) = rho4*3.0e5f;
+    extreme(arma::sub2ind(fsz, 4, mix::ENERGY)) =
+        extreme(arma::sub2ind(fsz, 4, mix::ENERGY))
+        + 0.5f*rho4*3.0e5f*3.0e5f;
+    const MixtureField fd = mixture_decode(fallback, extreme);
+    const Vec fb = mixture_rhs_explicit(fallback, extreme, fd, 1.0e-6);
+    EXPECT_TRUE(!fb.has_nan());
+    EXPECT_TRUE(fb.is_finite());
 }
 
-struct EvaporationDiagnostic {
-    double upward_mass_flux, max_temperature, top_pressure;
-};
-
-static EvaporationDiagnostic run_stage9_evaporation_comparison(bool gamma_mode) {
-    Grid grid;
-    grid.init(32, 0.25f);
-    if (gamma_mode)
-        grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
-    Vec state = model_column_ic(grid);
-    for (int step = 0; step < 8; ++step) {
-        model_column_update_bc(grid,state);
-        const Vec dt = cal_dt_i(grid,state);
-        state = advance_Euler_state(grid,state,dt);
-        grid.sim_time += dt(0);
-    }
-    const auto sz = arma::size(grid.ns,num_of_eq);
-    double max_temperature = 0.0, top_pressure = 0.0;
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        if (gamma_mode) {
-            auto at = [&](arma::uword k) { return static_cast<double>(
-                state(arma::sub2ind(sz,i,k))); };
-            const double phi = 0.5*(grid.phi_g_imh(i)+grid.phi_g_iph(i));
-            const MixtureThermo th = decode_equilibrium_mixture(
-                grid.eos_gamma_table,at(cons::RHO_I),at(cons::RHO_N),
-                at(cons::MOM_I),at(cons::MOM_N),at(cons::E_I),at(cons::E_N),phi);
-            max_temperature = std::max(max_temperature,th.T);
-            if (i+1 == grid.ns) top_pressure = th.p_i+th.p_n;
-        } else {
-            const Vec primitive = cons2prim(grid,state);
-            const double ri = primitive(arma::sub2ind(sz,i,prim::RHO_I));
-            const double rn = primitive(arma::sub2ind(sz,i,prim::RHO_N));
-            const double pi = primitive(arma::sub2ind(sz,i,prim::P_I));
-            const double pn = primitive(arma::sub2ind(sz,i,prim::P_N));
-            const double t = (pi+pn)/((2.0*ri/grid.m_i+rn/grid.m_n)*grid.k_b);
-            max_temperature = std::max(max_temperature,t);
-            if (i+1 == grid.ns) top_pressure = pi+pn;
-        }
-    }
-    double mass_flux = -std::numeric_limits<double>::infinity();
-    for (arma::uword i = 0; i < grid.ns; ++i)
-        mass_flux = std::max(mass_flux,
-            static_cast<double>(state(arma::sub2ind(sz,i,cons::MOM_I)))
-            +state(arma::sub2ind(sz,i,cons::MOM_N)));
-    return {mass_flux,max_temperature,top_pressure};
-}
-
-static void test_stage9_evaporation_vs_fixed_gamma() {
-    unsetenv("GAMMA_TABLE"); unsetenv("ISO_GAMMA");
-    setenv("ISO_TWO_FLUID","0",1); setenv("ISO_IONIZATION","0",1);
-    setenv("ISO_HEAT_FLUX","1",1); setenv("ISO_COOLING","0",1);
-    setenv("ISO_CORONA","0",1); setenv("ISO_TRAC","0",1);
-    setenv("ISO_TJUMP_A","1.3",1); setenv("ISO_TJUMP_B","1.0",1);
-    setenv("ISO_INNER_T_NEUMANN","1",1);
-    // This historical Stage-9 regression predates the physical-conduction-only
-    // production baseline; keep its old artificial-conduction coefficient explicit.
-    setenv("ISO_NUMERICAL_DIFFUSIVITY_MULT","1",1);
-    const EvaporationDiagnostic fixed = run_stage9_evaporation_comparison(false);
-    const EvaporationDiagnostic gamma = run_stage9_evaporation_comparison(true);
-    EXPECT_TRUE(std::isfinite(fixed.upward_mass_flux) && std::isfinite(gamma.upward_mass_flux));
-    EXPECT_TRUE(fixed.max_temperature > 0.0 && gamma.max_temperature > 0.0);
-    EXPECT_TRUE(fixed.top_pressure > 0.0 && gamma.top_pressure > 0.0);
-    EXPECT_TRUE(fixed.upward_mass_flux > 0.0 && gamma.upward_mass_flux > 0.0);
-    // The `fixed` (non-gamma) leg keeps the legacy Rusanov + (ln rho,V,ln T)
-    // scheme and its original pins. The `gamma` leg is re-pinned to the release
-    // numerics (Roe + (ln rho,V,ln p)): the much smaller Roe dissipation lowers
-    // the transient mass flux on this 32-cell, 8-step artificial-conduction
-    // configuration, but the qualitative Stage-9 result — ionization-energy
-    // storage drives a stronger evaporative flux than a fixed gamma — is intact.
-    EXPECT_REL(fixed.upward_mass_flux,1.10074e-3,0.1);
-    EXPECT_REL(gamma.upward_mass_flux,1.87885e-3,0.1);
-    EXPECT_REL(fixed.max_temperature,6813.14,0.03);
-    EXPECT_REL(gamma.max_temperature,7104.40,0.03);
-    EXPECT_REL(fixed.top_pressure,3.43710,0.05);
-    EXPECT_REL(gamma.top_pressure,3.51937,0.05);
-    const double mass_flux_ratio = gamma.upward_mass_flux/fixed.upward_mass_flux;
-    EXPECT_TRUE(mass_flux_ratio > 1.3 && mass_flux_ratio < 3.0);
-    std::cout << "  Stage-9 evaporation regression (fixed,gamma): maximum_upward_mass_flux=("
-              << fixed.upward_mass_flux << ',' << gamma.upward_mass_flux << ") T_max=("
-              << fixed.max_temperature << ',' << gamma.max_temperature << ") p_top=("
-              << fixed.top_pressure << ',' << gamma.top_pressure << ")\n";
-    unsetenv("ISO_TWO_FLUID"); unsetenv("ISO_IONIZATION");
-    unsetenv("ISO_HEAT_FLUX"); unsetenv("ISO_COOLING");
-    unsetenv("ISO_CORONA"); unsetenv("ISO_TRAC");
-    unsetenv("ISO_TJUMP_A"); unsetenv("ISO_TJUMP_B");
-    unsetenv("ISO_INNER_T_NEUMANN"); unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
-}
-
-static void test_stage5_gamma_integrator_projection_and_guards() {
-    const std::string path = write_gamma_table_fixture("gamma_stage5_integrator.dat");
+static void test_mixture_integrator_path_and_guards() {
+    const std::string path = write_gamma_table_fixture("gamma_mixture_integrator.dat");
     const EosGammaTable table = EosGammaTable::load(path);
     Grid grid;
     const Vec state = setup_gamma_equilibrium(grid, table, 6, false);
-    // A NaN legacy gamma is harmless here: both reconstruction passes, fluxes,
-    // source decode, and the internal predictor consume only the mixture EOS.
+    // The release solver never reads the legacy fixed gamma: a NaN there is
+    // harmless because every thermodynamic factor comes from the Saha closure.
     grid.gamma_mono = std::numeric_limits<float>::quiet_NaN();
     Vec dt(grid.ns); dt.fill(1.0e-4f);
-    const Vec result = advance_Euler_state(grid, state, dt);
+    const MixtureField decoded = mixture_decode(grid, state);
+    const Vec result = mixture_advance(grid, state, dt, decoded);
     EXPECT_TRUE(!result.has_nan());
-    EXPECT_TRUE(arma::approx_equal(result, project_equilibrium_single_fluid(grid, result),
-                                   "reldiff", 2.0e-6));
+    EXPECT_TRUE(result.n_elem == grid.n_mixture_state);
+    // With conduction on the step still runs and stays on the manifold.
+    grid.enable_conduction = true;
+    const Vec conducted = mixture_advance(grid, state, dt, decoded);
+    EXPECT_TRUE(!conducted.has_nan());
+    // The legacy two-fluid entry points must refuse a release Grid outright.
+    EXPECT_TRUE(throws_any([&] { advance_Euler_state(grid, state, dt); }));
     EXPECT_TRUE(throws_any([&] { advance_Euler_explicit_state(grid, state, dt); }));
     EXPECT_TRUE(throws_any([&] { advance_RK4(grid, state, dt); }));
-
-    grid.single_fluid = false;
-    EXPECT_TRUE(throws_any([&] { advance_Euler_state(grid, state, dt); }));
-    grid.single_fluid = true; grid.enable_Te = true;
-    EXPECT_TRUE(throws_any([&] { advance_Euler_state(grid, state, dt); }));
-    grid.enable_Te = false; grid.enable_ionization = true;
-    EXPECT_TRUE(throws_any([&] { advance_Euler_state(grid, state, dt); }));
-    grid.enable_ionization = false; grid.enable_conduction = true;
-    EXPECT_TRUE(!advance_Euler_state(grid, state, dt).has_nan());
+    EXPECT_TRUE(throws_any([&] { cal_dt_i(grid, state); }));
+    EXPECT_TRUE(throws_any([&] { rhs_explicit_state(grid, state); }));
     std::remove(path.c_str());
 }
 
@@ -1906,74 +1498,102 @@ static double packed_total_energy(const Grid& grid, const Vec& state) {
     return sum;
 }
 
+// Flux-tube-weighted total energy: the quantity the conduction operator, which
+// differences A q = q/B, actually conserves.
 static double weighted_domain_energy(const Grid& grid, const Vec& state) {
-    const auto sz = arma::size(grid.ns, num_of_eq);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
     double sum = 0.0;
     for (arma::uword i = 0; i < grid.ns; ++i)
-        sum += (static_cast<double>(state(arma::sub2ind(sz, i, cons::E_I)))
-              + state(arma::sub2ind(sz, i, cons::E_N)))*grid.ds_i(i)/grid.B_i(i);
+        sum += static_cast<double>(state(arma::sub2ind(sz, i, mix::ENERGY)))
+             * grid.ds_i(i)/grid.B_i(i);
     return sum;
 }
 
-static void test_stage7_gamma_total_energy_sources_and_conduction() {
+static double domain_total_energy(const Grid& grid, const Vec& state) {
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
+    double sum = 0.0;
+    for (arma::uword i = 0; i < grid.ns; ++i)
+        sum += static_cast<double>(state(arma::sub2ind(sz, i, mix::ENERGY)));
+    return sum;
+}
+
+// Fill every cell with a prescribed T(s) profile at fixed density, and mirror
+// the end cells into both ghost layers.
+static void fill_temperature_profile(Grid& grid, Vec& state, double rho,
+                                     double (*profile)(double)) {
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const double f = grid.ns > 1 ? static_cast<double>(i)/(grid.ns-1) : 0.0;
+        mixture_pack_cell(grid, state, i, rho, 0.0, profile(f), 0.0);
+    }
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
+    for (arma::uword k = 0; k < num_of_mixture_eq; ++k) {
+        grid.mix_inner_boundary0(k) = grid.mix_inner_boundary1(k) =
+            state(arma::sub2ind(sz, 0, k));
+        grid.mix_outer_boundary0(k) = grid.mix_outer_boundary1(k) =
+            state(arma::sub2ind(sz, grid.ns-1, k));
+    }
+}
+
+static double linear_ramp_profile(double f) { return 7.0e3 + 6.0e3*f; }
+static double coronal_ramp_profile(double f) {
+    return std::exp(std::log(1.0e4)*(1.0-f) + std::log(1.0e6)*f);
+}
+
+// The release energy stages: volumetric heating adds exactly dt*Q, radiative
+// cooling removes energy, and the nonlinear conduction solve conserves the
+// flux-tube-weighted energy while driving its own residual to zero. Mass and
+// momentum must be bit-preserved by every one of them.
+static void test_mixture_energy_sources_and_conduction() {
     const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
     Grid grid;
     Vec state = setup_gamma_equilibrium(grid, table, 8, false);
-    Vec dt(grid.ns); dt.fill(2.0e-3f);
-    const auto sz = arma::size(grid.ns, num_of_eq);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
+    Vec dt(grid.ns); dt.fill(1.0e-4f);
 
     grid.enable_coronal_heating = true;
-    grid.coronal_heat_E0 = 2.5e-3f;
+    // Sized so dt*Q is ~1e-3 of the cell energy: the single float energy row
+    // resolves the increment to ~1e-7 relative, so a much smaller probe would
+    // measure float rounding rather than the source term.
+    grid.coronal_heat_E0 = 1.0f;
     grid.coronal_heat_sH = 1.0e30f;
-    grid.coronal_heat_s0 = 0.0f;
-    grid.coronal_heat_two_sided = false;
     const Vec H = coronal_heating_rate(grid);
-    const double energy0 = packed_total_energy(grid, state);
-    const Vec heated = advance_Euler_state(grid, state, dt);
-    EXPECT_REL(packed_total_energy(grid, heated)-energy0,
-               dt(0)*arma::sum(H), 3e-2); // float packed-row increment
+    const double energy0 = domain_total_energy(grid, state);
+    const MixtureField decoded = mixture_decode(grid, state);
+    const Vec heated = mixture_advance(grid, state, dt, decoded);
+    EXPECT_REL(domain_total_energy(grid, heated)-energy0,
+               dt(0)*arma::sum(H), 3e-2);   // float packed-row increment
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        EXPECT_NEAR(heated(arma::sub2ind(sz, i, cons::RHO_I))
-                  + heated(arma::sub2ind(sz, i, cons::RHO_N)),
-                    state(arma::sub2ind(sz, i, cons::RHO_I))
-                  + state(arma::sub2ind(sz, i, cons::RHO_N)), 2e-12);
+        EXPECT_NEAR(heated(arma::sub2ind(sz, i, mix::RHO)),
+                    state(arma::sub2ind(sz, i, mix::RHO)), 2e-12);
+        EXPECT_NEAR(heated(arma::sub2ind(sz, i, mix::MOM)),
+                    state(arma::sub2ind(sz, i, mix::MOM)), 2e-12);
     }
 
     grid.enable_coronal_heating = false;
     grid.enable_beam_heating = true;
-    grid.beam_flux = 1.0f;
+    grid.beam_flux = 1.0e4f;
     grid.beam_t_on = 0.0f; grid.beam_duration = 10.0f; grid.beam_ramp = 1.0f;
+    // The deposition window is an ABSOLUTE height band; widen it to cover this
+    // 8-cell test column, which sits just above the default C7 base.
+    grid.beam_h_lo_km = 0.0f; grid.beam_h_hi_km = 1.0e4f;
     grid.sim_time = 5.0f;
-    const Vec beamed = advance_Euler_state(grid, state, dt);
-    EXPECT_TRUE(packed_total_energy(grid, beamed) > energy0);
+    const Vec beamed = mixture_advance(grid, state, dt, decoded);
+    EXPECT_TRUE(domain_total_energy(grid, beamed) > energy0);
     EXPECT_TRUE(!beamed.has_nan());
 
     grid.enable_beam_heating = false;
     grid.enable_radiative_cooling = true;
-    const Vec cooled = advance_Euler_state(grid, heated, dt);
-    EXPECT_TRUE(packed_total_energy(grid, cooled) < packed_total_energy(grid, heated));
+    const MixtureField heated_field = mixture_decode(grid, heated);
+    const Vec cooled = mixture_advance(grid, heated, dt, heated_field);
+    EXPECT_TRUE(domain_total_energy(grid, cooled)
+                < domain_total_energy(grid, heated));
     EXPECT_TRUE(!cooled.has_nan());
 
-    // Closed-end conduction smooths a pulse while conserving the packed total
-    // energy. Repack at zero velocity so the explicit hydro boundary flux is zero.
+    // Closed-end conduction on a refined, flux-tube-varying mesh smooths a
+    // temperature ramp while conserving the weighted total energy.
     state = setup_gamma_equilibrium(grid, table, 8, true);
     grid.enable_radiative_cooling = false;
     grid.enable_conduction = true;
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const double f = static_cast<double>(i)/(grid.ns-1);
-        const MixtureFaceState face = equilibrium_mixture_face_state(
-            table, 1.0e18*eos_constants::m_h, 0.0, 7.0e3+6.0e3*f, 0.0,
-            grid.eos_trace_fraction_floor);
-        const double u[7] = {face.conserved.rho_i, face.conserved.rho_n,
-            face.conserved.momentum_i, face.conserved.momentum_n,
-            face.conserved.energy_i, face.conserved.energy_n, face.conserved.energy_e};
-        for (arma::uword k = 0; k < num_of_eq; ++k)
-            state(arma::sub2ind(sz, i, k)) = u[k];
-    }
-    for (arma::uword k = 0; k < num_of_eq; ++k) {
-        grid.inner_boundary0_i(k)=grid.inner_boundary1_i(k)=state(arma::sub2ind(sz,0,k));
-        grid.outer_boundary0_i(k)=grid.outer_boundary1_i(k)=state(arma::sub2ind(sz,grid.ns-1,k));
-    }
     for (arma::uword i = 0; i < grid.ns; ++i) {
         grid.ds_i(i) = 4.0e3f*(1.0f+0.12f*i);
         grid.B_imh(i) = 1.0f+0.05f*i;
@@ -1981,6 +1601,8 @@ static void test_stage7_gamma_total_energy_sources_and_conduction() {
         grid.B_i(i) = 0.5f*(grid.B_imh(i)+grid.B_iph(i));
         grid.dinvB_ds_i(i) = (1.0f/grid.B_iph(i)-1.0f/grid.B_imh(i))/grid.ds_i(i);
     }
+    fill_temperature_profile(grid, state, 1.0e18*eos_constants::m_h,
+                             linear_ramp_profile);
     grid.inner_conduction_neumann = true;
     grid.impose_outer_heat_flux = true;
     grid.outer_heat_flux = 0.0f;
@@ -1989,173 +1611,173 @@ static void test_stage7_gamma_total_energy_sources_and_conduction() {
     grid.broadcast();
     dt.fill(1.0e-4f);
     const double conduction_e0 = weighted_domain_energy(grid, state);
-    grid.dt_state.zeros();
-    for (arma::uword k = 0; k < num_of_eq; ++k)
-        grid.dt_state += scalar_to(grid, dt, k);
-    const Vec conduction_input = project_equilibrium_single_fluid(
-        grid, state+grid.dt_state%rhs_explicit_state(grid, state));
-    const Vec conducted = advance_Euler_state(grid, state, dt);
+    const MixtureField cond_field = mixture_decode(grid, state);
+    const Vec conduction_input =
+        state + dt(0)*mixture_rhs_explicit(grid, state, cond_field, dt(0));
+    const Vec conducted = mixture_advance(grid, state, dt, cond_field);
     EXPECT_REL(weighted_domain_energy(grid, conducted), conduction_e0, 3e-6);
     EXPECT_TRUE(!conducted.has_nan());
-    EXPECT_TRUE(gamma_conduction_residual_max(
+    EXPECT_TRUE(mixture_conduction_residual_max(
         grid, conduction_input, conducted, dt(0)) < 2e-5);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        EXPECT_NEAR(conducted(arma::sub2ind(sz, i, mix::RHO)),
+                    conduction_input(arma::sub2ind(sz, i, mix::RHO)), 0.0);
+        EXPECT_NEAR(conducted(arma::sub2ind(sz, i, mix::MOM)),
+                    conduction_input(arma::sub2ind(sz, i, mix::MOM)), 0.0);
+    }
 
     // Strong nonlinear/TRAC case spanning chromosphere to corona. This drives
     // kappa_e through five decades of T^(5/2), produces a visible implicit
-    // update, and independently checks the final packed residual and energy.
+    // update, and independently checks the final residual and energy.
     state = setup_gamma_equilibrium(grid, table, 12, false);
     grid.enable_conduction = true;
     grid.enable_trac = true;
     grid.trac_T_chrom = 2.0e4f;
     grid.trac_Tc_max_frac = 0.2f;
-    const auto strong_sz = arma::size(grid.ns, num_of_eq);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const double f = static_cast<double>(i)/(grid.ns-1);
-        const double temperature = std::exp(std::log(1.0e4)*(1.0-f)+std::log(1.0e6)*f);
-        const MixtureFaceState face = equilibrium_mixture_face_state(
-            table, 1.0e18*eos_constants::m_h, 0.0, temperature, 0.0,
-            grid.eos_trace_fraction_floor);
-        const double u[7] = {face.conserved.rho_i,face.conserved.rho_n,
-            face.conserved.momentum_i,face.conserved.momentum_n,
-            face.conserved.energy_i,face.conserved.energy_n,face.conserved.energy_e};
-        for (arma::uword k = 0; k < num_of_eq; ++k)
-            state(arma::sub2ind(strong_sz,i,k)) = u[k];
-        grid.ds_i(i) = 2.0e4f;
-    }
-    for (arma::uword k = 0; k < num_of_eq; ++k) {
-        grid.inner_boundary0_i(k)=grid.inner_boundary1_i(k)=state(arma::sub2ind(strong_sz,0,k));
-        grid.outer_boundary0_i(k)=grid.outer_boundary1_i(k)=state(arma::sub2ind(strong_sz,grid.ns-1,k));
-    }
+    for (arma::uword i = 0; i < grid.ns; ++i) grid.ds_i(i) = 2.0e4f;
+    grid.broadcast();
+    fill_temperature_profile(grid, state, 1.0e18*eos_constants::m_h,
+                             coronal_ramp_profile);
     grid.inner_conduction_neumann = true;
     grid.impose_outer_heat_flux = true;
     grid.outer_heat_flux = 0.0f;
     grid.broadcast();
     dt.set_size(grid.ns); dt.fill(2.0e-2f);
-    grid.dt_state.zeros();
-    for (arma::uword k = 0; k < num_of_eq; ++k) grid.dt_state += scalar_to(grid,dt,k);
-    const Vec strong_input = project_equilibrium_single_fluid(
-        grid,state+grid.dt_state%rhs_explicit_state(grid,state));
-    const double strong_energy = weighted_domain_energy(grid,state);
-    const Vec strong_result = advance_Euler_state(grid,state,dt);
-    EXPECT_REL(weighted_domain_energy(grid,strong_result),strong_energy,5e-6);
-    EXPECT_TRUE(gamma_conduction_residual_max(grid,strong_input,strong_result,dt(0)) < 5e-5);
+    const MixtureField strong_field = mixture_decode(grid, state);
+    const Vec strong_input =
+        state + dt(0)*mixture_rhs_explicit(grid, state, strong_field, dt(0));
+    const double strong_energy = weighted_domain_energy(grid, state);
+    const Vec strong_result = mixture_advance(grid, state, dt, strong_field);
+    EXPECT_REL(weighted_domain_energy(grid, strong_result), strong_energy, 5e-6);
+    EXPECT_TRUE(mixture_conduction_residual_max(
+        grid, strong_input, strong_result, dt(0)) < 5e-5);
+    const auto strong_sz = arma::size(grid.ns, num_of_mixture_eq);
     for (arma::uword i = 0; i < grid.ns; ++i) {
         auto value = [&](arma::uword k) { return static_cast<double>(
-            strong_result(arma::sub2ind(strong_sz,i,k))); };
+            strong_result(arma::sub2ind(strong_sz, i, k))); };
         const MixtureThermo th = decode_equilibrium_mixture(
-            table,value(cons::RHO_I),value(cons::RHO_N),value(cons::MOM_I),
-            value(cons::MOM_N),value(cons::E_I),value(cons::E_N),0.0);
-        EXPECT_TRUE(th.T >= table.min_temperature() && th.T <= table.max_temperature());
+            table, value(mix::RHO), value(mix::MOM), value(mix::ENERGY), 0.0);
+        EXPECT_TRUE(th.T >= table.min_temperature()
+                    && th.T <= table.max_temperature());
     }
 
     // Strong sinks/sources at several density decades must remain within the
-    // strict caloric domain after the double target is packed into float rows.
+    // strict caloric domain after the double target is packed into a float row.
     const double densities[] = {1.0e14, 1.0e18, 1.0e22, 1.0e25};
     for (double n_h : densities) {
         Vec boundary_state = setup_gamma_uniform_point(grid, table, n_h, 1.0e4);
         dt.set_size(grid.ns);
         grid.enable_radiative_cooling = true;
+        grid.enable_coronal_heating = false;
         dt.fill(1.0e30f);
-        const Vec floor_state = advance_Euler_state(grid, boundary_state, dt);
-        const auto boundary_sz = arma::size(grid.ns, num_of_eq);
+        const MixtureField bf = mixture_decode(grid, boundary_state);
+        const Vec floor_state = mixture_advance(grid, boundary_state, dt, bf);
+        const auto bsz = arma::size(grid.ns, num_of_mixture_eq);
         auto first = [&](const Vec& u, arma::uword k) {
-            return static_cast<double>(u(arma::sub2ind(boundary_sz, 0, k)));
+            return static_cast<double>(u(arma::sub2ind(bsz, 0, k)));
         };
         const MixtureThermo floor_th = decode_equilibrium_mixture(
-            table, first(floor_state, cons::RHO_I), first(floor_state, cons::RHO_N),
-            first(floor_state, cons::MOM_I), first(floor_state, cons::MOM_N),
-            first(floor_state, cons::E_I), first(floor_state, cons::E_N), 0.0);
+            table, first(floor_state, mix::RHO), first(floor_state, mix::MOM),
+            first(floor_state, mix::ENERGY), 0.0);
         EXPECT_TRUE(floor_th.T >= table.min_temperature());
         EXPECT_REL(floor_th.T, table.min_temperature(), 2e-5);
 
         boundary_state = setup_gamma_uniform_point(
             grid, table, n_h, 0.999*table.max_temperature());
+        grid.enable_radiative_cooling = false;
         grid.enable_coronal_heating = true;
         grid.coronal_heat_E0 = 1.0e30f;
         grid.coronal_heat_sH = 1.0e30f;
         dt.fill(1.0f);
+        const MixtureField hf = mixture_decode(grid, boundary_state);
         EXPECT_TRUE(throws_any([&] {
-            (void)advance_Euler_state(grid, boundary_state, dt);
+            (void)mixture_advance(grid, boundary_state, dt, hf);
         }));
     }
     Vec nonfinite_state = setup_gamma_uniform_point(grid, table, 1.0e20, 1.0e4);
     dt.set_size(grid.ns); dt.fill(1.0f);
     grid.enable_coronal_heating = true;
     grid.coronal_heat_E0 = std::numeric_limits<float>::quiet_NaN();
+    const MixtureField nf = mixture_decode(grid, nonfinite_state);
     EXPECT_TRUE(throws_any([&] {
-        (void)advance_Euler_state(grid, nonfinite_state, dt);
+        (void)mixture_advance(grid, nonfinite_state, dt, nf);
     }));
 }
 
-static void test_gamma_phase1_3_cache_and_known_temperature_pack() {
+// The decoded field is a validated cache of one immutable state: it must equal
+// an independent direct decode at every stencil offset, and must refuse to be
+// reused for a different state or after a ghost update.
+static void test_mixture_field_cache_contract() {
     unsetenv("GAMMA_TABLE"); unsetenv("ISO_GAMMA");
-    setenv("ISO_TWO_FLUID","0",1); setenv("ISO_IONIZATION","0",1);
     setenv("ISO_HEAT_FLUX","0",1); setenv("ISO_COOLING","0",1);
     setenv("ISO_CORONA","0",1); setenv("ISO_TRAC","0",1);
     Grid grid; grid.init(24,0.25f);
     grid.eos_gamma_table=EosGammaTable::load(production_gamma_table_path());
     Vec state=model_column_ic(grid);
     model_column_update_bc(grid,state);
-    const DecodedMixtureField decoded=decode_mixture_field(grid,state,17);
+    EXPECT_TRUE(state.n_elem == grid.n_mixture_state);
+    const MixtureField decoded=mixture_decode(grid,state,17);
     decoded.require_matches(grid,state);
     EXPECT_TRUE(decoded.state_generation==17);
     EXPECT_TRUE(decoded.cells.size()==grid.ns);
 
     // Every cached center and shifted stencil entry must equal an independent
     // direct decode using the potential actually carried by that state.
-    const Vec phi_cell=0.5f*(grid.phi_g_imh+grid.phi_g_iph);
-    Vec phi_ip1=ip1(grid,phi_cell,SLICE); phi_ip1(grid.ns-1)=grid.phi_g_iph(grid.ns-1);
-    Vec phi_im1=im1(grid,phi_cell,SLICE); phi_im1(0)=grid.phi_g_imh(0);
-    Vec phi_ip2=ip1(grid,phi_ip1,SLICE); phi_ip2(grid.ns-1)=grid.phi_g_iph(grid.ns-1);
-    Vec phi_im2=im1(grid,phi_im1,SLICE); phi_im2(0)=grid.phi_g_imh(0);
-    const Vec shifted_states[] = {im2(grid,state),im1(grid,state),state,
-                                  ip1(grid,state),ip2(grid,state)};
-    const Vec shifted_phi[] = {phi_im2,phi_im1,phi_cell,phi_ip1,phi_ip2};
-    const int offsets[] = {-2,-1,0,1,2};
     const arma::uword ext_n=grid.ns+4;
-    const auto ext_size=arma::size(ext_n,3);
-    const auto sz=arma::size(grid.ns,num_of_eq);
-    for (int stencil=0; stencil<5; ++stencil) {
-        for (arma::uword i=0; i<grid.ns; ++i) {
-            const Vec& shifted=shifted_states[stencil];
-            auto at=[&](arma::uword row) { return static_cast<double>(
-                shifted(arma::sub2ind(sz,i,row))); };
-            const MixtureThermo direct=decode_equilibrium_mixture(
-                grid.eos_gamma_table,at(cons::RHO_I),at(cons::RHO_N),
-                at(cons::MOM_I),at(cons::MOM_N),at(cons::E_I),at(cons::E_N),
-                shifted_phi[stencil](i));
-            const arma::uword ext_i=static_cast<arma::uword>(
-                static_cast<int>(i)+2+offsets[stencil]);
-            EXPECT_NEAR(decoded.extended_primitive(
-                arma::sub2ind(ext_size,ext_i,0)),std::log(direct.rho),1e-13);
-            EXPECT_NEAR(decoded.extended_primitive(
-                arma::sub2ind(ext_size,ext_i,1)),
-                (at(cons::MOM_I)+at(cons::MOM_N))/direct.rho,1e-13);
-            // Slot 2 is the thermal reconstruction variable: log(p_total) on the
-            // release (ln rho,V,ln p) path, log(T) with the lnT reference set.
-            EXPECT_NEAR(decoded.extended_primitive(
-                arma::sub2ind(ext_size,ext_i,2)),
-                grid.pressure_reconstruct ? std::log(direct.p_i+direct.p_n)
-                                          : std::log(direct.T),1e-13);
-        }
+    const auto ext_size=arma::size(ext_n,num_of_mixture_eq);
+    const auto sz=arma::size(grid.ns,num_of_mixture_eq);
+    for (arma::uword i=0; i<grid.ns; ++i) {
+        auto at=[&](arma::uword row) {
+            return static_cast<double>(state(arma::sub2ind(sz,i,row)));
+        };
+        const MixtureThermo direct=decode_equilibrium_mixture(
+            grid.eos_gamma_table,at(mix::RHO),at(mix::MOM),at(mix::ENERGY),
+            mixture_cell_phi(grid,i));
+        const arma::uword ext_i=i+2;
+        EXPECT_NEAR(decoded.extended_primitive(
+            arma::sub2ind(ext_size,ext_i,0)),std::log(direct.rho),1e-13);
+        EXPECT_NEAR(decoded.extended_primitive(
+            arma::sub2ind(ext_size,ext_i,1)),at(mix::MOM)/direct.rho,1e-13);
+        // Slot 2 is the thermal reconstruction variable: log(p) on the release
+        // (ln rho, u, ln p) path, log(T) with the lnT reference set.
+        EXPECT_NEAR(decoded.extended_primitive(
+            arma::sub2ind(ext_size,ext_i,2)),
+            grid.pressure_reconstruct ? std::log(direct.p) : std::log(direct.T),
+            1e-13);
+        EXPECT_NEAR(decoded.extended_temperature(ext_i),direct.T,1e-13);
+    }
+    // The four ghost slots decode the four ghost buffers at the face potentials.
+    const Vec* ghosts[4] = {&grid.mix_inner_boundary1,&grid.mix_inner_boundary0,
+                            &grid.mix_outer_boundary0,&grid.mix_outer_boundary1};
+    const arma::uword ghost_slots[4] = {0,1,grid.ns+2,grid.ns+3};
+    const double ghost_phi[4] = {grid.phi_g_imh(0),grid.phi_g_imh(0),
+                                 grid.phi_g_iph(grid.ns-1),
+                                 grid.phi_g_iph(grid.ns-1)};
+    for (int gi=0; gi<4; ++gi) {
+        const Vec& g=*ghosts[gi];
+        const MixtureThermo direct=decode_equilibrium_mixture(
+            grid.eos_gamma_table,g(mix::RHO),g(mix::MOM),g(mix::ENERGY),
+            ghost_phi[gi]);
+        EXPECT_NEAR(decoded.extended_primitive(
+            arma::sub2ind(ext_size,ghost_slots[gi],0)),std::log(direct.rho),1e-13);
+        EXPECT_NEAR(decoded.extended_temperature(ghost_slots[gi]),direct.T,1e-13);
     }
 
     // A cache cannot be reused for another state or after its ghost buffers
     // change, preventing silent stale-state and stale-boundary reads.
     Vec changed=state;
     EXPECT_TRUE(throws_any([&] { decoded.require_matches(grid,changed); }));
-    const float saved=grid.inner_boundary0_i(cons::E_N);
-    grid.inner_boundary0_i(cons::E_N)=std::nextafter(
+    const float saved=grid.mix_inner_boundary0(mix::ENERGY);
+    grid.mix_inner_boundary0(mix::ENERGY)=std::nextafter(
         saved,std::numeric_limits<float>::infinity());
     EXPECT_TRUE(throws_any([&] { decoded.require_matches(grid,state); }));
-    grid.inner_boundary0_i(cons::E_N)=saved;
+    grid.mix_inner_boundary0(mix::ENERGY)=saved;
     decoded.require_matches(grid,state);
 
-    // Cached gamma RHS performs one inversion per predicted physical cell plus
+    // The cached RHS performs one inversion per predicted physical cell plus
     // four distinct ghosts, never one inversion per shifted copy.
     set_runtime_profiling(true); reset_runtime_profile();
-    grid.dt_state.fill(1.0e-4f);
-    const Vec rhs=rhs_explicit_state(grid,state,decoded);
+    const Vec rhs=mixture_rhs_explicit(grid,state,decoded,1.0e-4);
     const EosInversionProfile profile=eos_inversion_profile();
     EXPECT_TRUE(!rhs.has_nan());
     EXPECT_TRUE(profile.calls<=grid.ns+4);
@@ -2172,23 +1794,6 @@ static void test_gamma_phase1_3_cache_and_known_temperature_pack() {
     EXPECT_TRUE(fast.calls==1 && fast.initial_guess_accepts==1);
     EXPECT_TRUE(fast.bracket_evaluations==0);
     set_runtime_profiling(false); reset_runtime_profile();
-
-    // Known-temperature packing keeps the supplied total energy authoritative,
-    // even when it differs slightly from the analytic EOS energy within the
-    // accepted nonlinear residual.
-    const double rho=1.0e20*eos_constants::m_h, T=9000.0, v=123.0, phi=-2.0e6;
-    const double e_eos=equilibrium_internal_energy(rho,T);
-    const double total=e_eos*(1.0+1.0e-12)+0.5*rho*v*v+rho*phi;
-    const ProjectedMixture packed=pack_equilibrium_from_known_temperature(
-        grid.eos_gamma_table,rho,rho*v,total,T,phi,1.0e-8,2.0e-11);
-    EXPECT_REL(packed.rho_i+packed.rho_n,rho,2e-16);
-    EXPECT_REL(packed.momentum_i+packed.momentum_n,rho*v,2e-16);
-    EXPECT_NEAR(packed.energy_i+packed.energy_n,total,
-                4.0*std::numeric_limits<double>::epsilon()*std::abs(total));
-    EXPECT_TRUE(throws_any([&] {
-        (void)pack_equilibrium_from_known_temperature(
-            grid.eos_gamma_table,rho,rho*v,total,T*1.01,phi,1.0e-8,2.0e-11);
-    }));
 }
 
 static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
@@ -2213,17 +1818,17 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
     grid.init(48, 0.25f);
     grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
     const Vec state = model_column_ic(grid);
-    EXPECT_TRUE(grid.single_fluid && !grid.enable_ionization && !grid.enable_Te);
+    EXPECT_TRUE(!grid.enable_ionization && !grid.enable_Te);
+    EXPECT_TRUE(state.n_elem == grid.n_mixture_state);
     EXPECT_TRUE(!state.has_nan());
-    const auto sz = arma::size(grid.ns, num_of_eq);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
     double previous_p = 0.0, previous_invH = 0.0;
     for (arma::uword i = 0; i < grid.ns; ++i) {
         auto u = [&](arma::uword k) { return static_cast<double>(
             state(arma::sub2ind(sz, i, k))); };
-        const double phi = 0.5*(grid.phi_g_imh(i)+grid.phi_g_iph(i));
+        const double phi = mixture_cell_phi(grid, i);
         const MixtureThermo th = decode_equilibrium_mixture(
-            grid.eos_gamma_table, u(cons::RHO_I), u(cons::RHO_N),
-            u(cons::MOM_I), u(cons::MOM_N), u(cons::E_I), u(cons::E_N), phi);
+            grid.eos_gamma_table, u(mix::RHO), u(mix::MOM), u(mix::ENERGY), phi);
         const double h_km = phi/(grid.g*1000.0);
         constexpr double inv_sqrt3 = 0.57735026918962576451;
         const double half_km = 0.5*grid.ds_i(i)*1.0e-3;
@@ -2231,10 +1836,10 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
             c7_full_temperature_pchip(h_km-half_km*inv_sqrt3)
            +c7_full_temperature_pchip(h_km+half_km*inv_sqrt3));
         EXPECT_REL(th.T, T_average, 3e-5);
-        EXPECT_REL(th.x_eq, saha_ionization_fraction_n_h(th.n_H, th.T), 2e-13);
-        const double p = th.p_i+th.p_n;
+        EXPECT_REL(th.x, saha_ionization_fraction_n_h(th.n_H, th.T), 2e-13);
+        const double p = th.p;
         const double invH = grid.g*eos_constants::m_h/
-            ((1.0+th.x_eq)*eos_constants::k_b*th.T);
+            ((1.0+th.x)*eos_constants::k_b*th.T);
         if (i > 0) {
             const double dh = 0.5*(grid.ds_i(i-1)+grid.ds_i(i));
             EXPECT_NEAR(std::log(p/previous_p)+0.5*(previous_invH+invH)*dh,
@@ -2242,35 +1847,33 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
         }
         previous_p = p; previous_invH = invH;
     }
-    const Vec* ghosts[] = {&grid.inner_boundary0_i, &grid.inner_boundary1_i,
-                           &grid.outer_boundary0_i, &grid.outer_boundary1_i};
+    const Vec* ghosts[] = {&grid.mix_inner_boundary0, &grid.mix_inner_boundary1,
+                           &grid.mix_outer_boundary0, &grid.mix_outer_boundary1};
     const double phis[] = {grid.phi_g_imh(0), grid.phi_g_imh(0),
                            grid.phi_g_iph(grid.ns-1), grid.phi_g_iph(grid.ns-1)};
     for (int j = 0; j < 4; ++j) {
         const Vec& g = *ghosts[j];
         const MixtureThermo th = decode_equilibrium_mixture(
-            grid.eos_gamma_table, g(cons::RHO_I), g(cons::RHO_N),
-            g(cons::MOM_I), g(cons::MOM_N), g(cons::E_I), g(cons::E_N), phis[j]);
-        EXPECT_REL(th.x_eq, saha_ionization_fraction_n_h(th.n_H, th.T), 2e-13);
-        EXPECT_REL(g(cons::E_I)+g(cons::E_N),
+            grid.eos_gamma_table, g(mix::RHO), g(mix::MOM), g(mix::ENERGY),
+            phis[j]);
+        EXPECT_REL(th.x, saha_ionization_fraction_n_h(th.n_H, th.T), 2e-13);
+        EXPECT_REL(g(mix::ENERGY),
                    th.internal_energy+0.5*th.rho*std::pow(
-                       (g(cons::MOM_I)+g(cons::MOM_N))/th.rho, 2)+th.rho*phis[j],
-                   3e-6);
+                       g(mix::MOM)/th.rho, 2)+th.rho*phis[j], 3e-6);
     }
     Vec evolved = state;
     for (int step = 0; step < 5; ++step) {
         model_column_update_bc(grid, evolved);
-        const Vec dt = cal_dt_i(grid, evolved);
-        evolved = advance_Euler_state(grid, evolved, dt);
+        const MixtureField field = mixture_decode(grid, evolved);
+        const Vec dt = mixture_timestep(grid, evolved, field);
+        evolved = mixture_advance(grid, evolved, dt, field);
         grid.sim_time += dt(0);
     }
     EXPECT_TRUE(!evolved.has_nan());
     double max_velocity = 0.0, max_total_momentum = 0.0;
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const double rho = evolved(arma::sub2ind(sz, i, cons::RHO_I))
-                         + evolved(arma::sub2ind(sz, i, cons::RHO_N));
-        const double momentum = evolved(arma::sub2ind(sz, i, cons::MOM_I))
-                              + evolved(arma::sub2ind(sz, i, cons::MOM_N));
+        const double rho = evolved(arma::sub2ind(sz, i, mix::RHO));
+        const double momentum = evolved(arma::sub2ind(sz, i, mix::MOM));
         max_velocity = std::max(max_velocity, std::abs(momentum/rho));
         max_total_momentum = std::max(max_total_momentum, std::abs(momentum));
     }
@@ -2294,7 +1897,6 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
 // baseline hydro ghost temperature is a known constant.
 static Vec setup_decoupling_column(Grid& grid, bool decouple, arma::uword ns) {
     unsetenv("ISO_GAMMA");
-    setenv("ISO_TWO_FLUID", "0", 1); setenv("ISO_IONIZATION", "0", 1);
     setenv("ISO_COOLING", "0", 1);   setenv("ISO_CORONA", "0", 1);
     setenv("ISO_TRAC", "0", 1);      setenv("ISO_HEAT_FLUX", "1", 1);
     setenv("ISO_H_BASE", "1600", 1); setenv("ISO_DH", "553", 1);
@@ -2306,7 +1908,7 @@ static Vec setup_decoupling_column(Grid& grid, bool decouple, arma::uword ns) {
 }
 
 static void clear_decoupling_env() {
-    unsetenv("ISO_TWO_FLUID"); unsetenv("ISO_IONIZATION"); unsetenv("ISO_COOLING");
+    unsetenv("ISO_COOLING");
     unsetenv("ISO_CORONA");    unsetenv("ISO_TRAC");       unsetenv("ISO_HEAT_FLUX");
     unsetenv("ISO_H_BASE");    unsetenv("ISO_DH");         unsetenv("ISO_T_TOP");
     unsetenv("ISO_HYDRO_T_DECOUPLE"); unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
@@ -2314,19 +1916,17 @@ static void clear_decoupling_env() {
 }
 
 static MixtureThermo decode_cell(const Grid& grid, const Vec& state, arma::uword i) {
-    const auto sz = arma::size(grid.ns, num_of_eq);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
     auto u = [&](arma::uword k) {
         return static_cast<double>(state(arma::sub2ind(sz, i, k)));
     };
     return decode_equilibrium_mixture(grid.eos_gamma_table,
-        u(cons::RHO_I), u(cons::RHO_N), u(cons::MOM_I), u(cons::MOM_N),
-        u(cons::E_I), u(cons::E_N), 0.5*(grid.phi_g_imh(i)+grid.phi_g_iph(i)));
+        u(mix::RHO), u(mix::MOM), u(mix::ENERGY), mixture_cell_phi(grid, i));
 }
 
 static MixtureThermo decode_outer_ghost(const Grid& grid, const Vec& ghost) {
     return decode_equilibrium_mixture(grid.eos_gamma_table,
-        ghost(cons::RHO_I), ghost(cons::RHO_N), ghost(cons::MOM_I),
-        ghost(cons::MOM_N), ghost(cons::E_I), ghost(cons::E_N),
+        ghost(mix::RHO), ghost(mix::MOM), ghost(mix::ENERGY),
         grid.phi_g_iph(grid.ns-1));
 }
 
@@ -2347,15 +1947,7 @@ static double saha_density_from_pressure(double pressure, double temperature) {
 // Overwrite one cell with an equilibrium-mixture state at (rho, V, T).
 static void set_cell_state(const Grid& grid, Vec& state, arma::uword i,
                            double rho, double V, double T) {
-    const auto sz = arma::size(grid.ns, num_of_eq);
-    const MixtureFaceState face = equilibrium_mixture_face_state(
-        grid.eos_gamma_table, rho, V, T,
-        0.5*(grid.phi_g_imh(i)+grid.phi_g_iph(i)), grid.eos_trace_fraction_floor);
-    const double u[7] = {face.conserved.rho_i, face.conserved.rho_n,
-        face.conserved.momentum_i, face.conserved.momentum_n,
-        face.conserved.energy_i, face.conserved.energy_n, face.conserved.energy_e};
-    for (arma::uword k = 0; k < num_of_eq; ++k)
-        state(arma::sub2ind(sz, i, k)) = u[k];
+    mixture_pack_cell(grid, state, i, rho, V, T, mixture_cell_phi(grid, i));
 }
 
 static void test_upper_bc_hydro_conduction_temperature_decoupling() {
@@ -2368,8 +1960,8 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
         Grid grid;
         Vec state = setup_decoupling_column(grid, false, ns);
         EXPECT_TRUE(!grid.outer_conduction_temperature_override);
-        const MixtureThermo g0 = decode_outer_ghost(grid, grid.outer_boundary0_i);
-        const MixtureThermo g1 = decode_outer_ghost(grid, grid.outer_boundary1_i);
+        const MixtureThermo g0 = decode_outer_ghost(grid, grid.mix_outer_boundary0);
+        const MixtureThermo g1 = decode_outer_ghost(grid, grid.mix_outer_boundary1);
         EXPECT_REL(g0.T, 22000.0, 1e-5);
         EXPECT_REL(g1.T, 22000.0, 1e-5);
         // Move the live top cell well off the wall: the baseline hydro ghost must NOT
@@ -2377,7 +1969,7 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
         const MixtureThermo top = decode_cell(grid, state, grid.ns-1);
         set_cell_state(grid, state, grid.ns-1, top.rho, 0.0, 1.20*top.T);
         model_column_update_bc(grid, state);
-        EXPECT_REL(decode_outer_ghost(grid, grid.outer_boundary0_i).T, 22000.0, 1e-5);
+        EXPECT_REL(decode_outer_ghost(grid, grid.mix_outer_boundary0).T, 22000.0, 1e-5);
         EXPECT_TRUE(!grid.outer_conduction_temperature_override);
     }
 
@@ -2390,18 +1982,17 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
         EXPECT_REL(grid.outer_conduction_temperature, 22000.0, 1e-6);
         // ...while the hydro ghost zero-gradient-extrapolates the live top cell.
         const MixtureThermo top0 = decode_cell(grid, state, grid.ns-1);
-        MixtureThermo g0 = decode_outer_ghost(grid, grid.outer_boundary0_i);
-        MixtureThermo g1 = decode_outer_ghost(grid, grid.outer_boundary1_i);
+        MixtureThermo g0 = decode_outer_ghost(grid, grid.mix_outer_boundary0);
+        MixtureThermo g1 = decode_outer_ghost(grid, grid.mix_outer_boundary1);
         EXPECT_REL(g0.T, top0.T, 2e-6);           // T_hydro_g0 = T_top
         EXPECT_REL(g1.T, g0.T, 2e-6);             // T_hydro_g1 = T_hydro_g0
-        const double p_back = g0.p_i+g0.p_n;      // the captured reservoir back-pressure
+        const double p_back = g0.p;               // the captured reservoir back-pressure
 
         // (7) second ghost: EOS-closed density on a one-sided HSE rung off the first.
         const float ds = grid.ds_i(grid.ns-1);
-        EXPECT_REL(g1.p_i+g1.p_n,
-                   p_back - ds*0.5*(g0.rho+g1.rho)*grid.g, 1e-5);   // float32 ghost rows
+        EXPECT_REL(g1.p, p_back - ds*0.5*(g0.rho+g1.rho)*grid.g, 1e-5);
         EXPECT_REL(g0.rho, saha_density_from_pressure(p_back, g0.T), 2e-6);
-        EXPECT_REL(g1.rho, saha_density_from_pressure(g1.p_i+g1.p_n, g1.T), 2e-6);
+        EXPECT_REL(g1.rho, saha_density_from_pressure(g1.p, g1.T), 2e-6);
 
         // (5) changing the LIVE top temperature moves the hydro ghost temperature but
         // leaves the conduction-only wall alone. (6) The ghost pressure stays exactly
@@ -2409,9 +2000,9 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
         const MixtureThermo top = decode_cell(grid, state, grid.ns-1);
         set_cell_state(grid, state, grid.ns-1, 1.05*top.rho, 0.0, 1.20*top.T);
         model_column_update_bc(grid, state);
-        g0 = decode_outer_ghost(grid, grid.outer_boundary0_i);
+        g0 = decode_outer_ghost(grid, grid.mix_outer_boundary0);
         EXPECT_REL(g0.T, 1.20*top.T, 2e-5);
-        EXPECT_REL(g0.p_i+g0.p_n, p_back, 2e-6);
+        EXPECT_REL(g0.p, p_back, 2e-6);
         EXPECT_REL(grid.outer_conduction_temperature, 22000.0, 1e-6);
         EXPECT_TRUE(std::abs(g0.T-grid.outer_conduction_temperature)
                     > 0.05*grid.outer_conduction_temperature);   // genuinely decoupled
@@ -2423,18 +2014,19 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
         Vec state = setup_decoupling_column(grid, true, ns);
         EXPECT_TRUE(grid.enable_conduction);
         model_column_update_bc(grid, state);
-        const Vec ghost_before = grid.outer_boundary0_i;
-        const Vec dt = cal_dt_i(grid, state);
-        const Vec cold_wall = advance_Euler_state(grid, state, dt);
+        const Vec ghost_before = grid.mix_outer_boundary0;
+        const MixtureField field = mixture_decode(grid, state);
+        const Vec dt = mixture_timestep(grid, state, field);
+        const Vec cold_wall = mixture_advance(grid, state, dt, field);
         // Raising ONLY the conduction wall must change the conductive result...
         grid.outer_conduction_temperature = 26000.0f;
-        const Vec hot_wall = advance_Euler_state(grid, state, dt);
+        const Vec hot_wall = mixture_advance(grid, state, dt, field);
         const double T_cold = decode_cell(grid, cold_wall, grid.ns-1).T;
         const double T_hot  = decode_cell(grid, hot_wall,  grid.ns-1).T;
         EXPECT_TRUE(T_hot > T_cold);
         EXPECT_TRUE(std::abs(T_hot-T_cold) > 1e-3*T_cold);
         // ...without touching the hydro ghost state at all.
-        EXPECT_TRUE(arma::approx_equal(grid.outer_boundary0_i, ghost_before,
+        EXPECT_TRUE(arma::approx_equal(grid.mix_outer_boundary0, ghost_before,
                                        "absdiff", 0.0));
 
         // (3) Conduction reads the WALL, not the live hydro ghost. Same state, same
@@ -2443,13 +2035,13 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
         // COLDER than the overridden one. If Stage D were still reading the ghost the
         // two would be identical.
         grid.outer_conduction_temperature = 22000.0f;
-        const Vec wall_driven = advance_Euler_state(grid, state, dt);
+        const Vec wall_driven = mixture_advance(grid, state, dt, field);
         grid.outer_conduction_temperature_override = false;
-        const Vec ghost_driven = advance_Euler_state(grid, state, dt);
+        const Vec ghost_driven = mixture_advance(grid, state, dt, field);
         grid.outer_conduction_temperature_override = true;
         const double T_wall_driven  = decode_cell(grid, wall_driven,  grid.ns-1).T;
         const double T_ghost_driven = decode_cell(grid, ghost_driven, grid.ns-1).T;
-        EXPECT_TRUE(decode_outer_ghost(grid, grid.outer_boundary0_i).T < 22000.0);
+        EXPECT_TRUE(decode_outer_ghost(grid, grid.mix_outer_boundary0).T < 22000.0);
         EXPECT_TRUE(T_wall_driven > T_ghost_driven);
     }
 
@@ -2463,22 +2055,21 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
             Grid grid;
             Vec state = setup_decoupling_column(grid, decouple, ns);
             const MixtureThermo top = decode_cell(grid, state, grid.ns-1);
-            const MixtureThermo ghost = decode_outer_ghost(grid, grid.outer_boundary0_i);
+            const MixtureThermo ghost = decode_outer_ghost(grid, grid.mix_outer_boundary0);
             if (decouple) EXPECT_REL(ghost.T, top.T, 2e-6);   // T_hydro_g0 = T_top,ref
             for (int step = 0; step < 20; ++step) {
                 model_column_update_bc(grid, state);
-                const Vec dt = cal_dt_i(grid, state);
-                state = advance_Euler_state(grid, state, dt);
+                const MixtureField f = mixture_decode(grid, state);
+                const Vec dt = mixture_timestep(grid, state, f);
+                state = mixture_advance(grid, state, dt, f);
                 grid.sim_time += dt(0);
                 EXPECT_TRUE(!state.has_nan());
             }
-            const auto sz = arma::size(grid.ns, num_of_eq);
+            const auto sz = arma::size(grid.ns, num_of_mixture_eq);
             double vmax = 0.0;
             for (arma::uword i = 0; i < grid.ns; ++i) {
-                const double momentum = state(arma::sub2ind(sz, i, cons::MOM_I))
-                                      + state(arma::sub2ind(sz, i, cons::MOM_N));
-                const double rho = state(arma::sub2ind(sz, i, cons::RHO_I))
-                                 + state(arma::sub2ind(sz, i, cons::RHO_N));
+                const double momentum = state(arma::sub2ind(sz, i, mix::MOM));
+                const double rho = state(arma::sub2ind(sz, i, mix::RHO));
                 vmax = std::max(vmax, std::abs(momentum/rho));
             }
             return vmax;
@@ -2502,24 +2093,22 @@ static void test_face_flux_capture_matches_production_continuity() {
     Grid grid;
     Vec state = setup_decoupling_column(grid, false, ns);
     model_column_update_bc(grid, state);
-    const Vec dt = cal_dt_i(grid, state);
-    grid.dt_state.zeros();
-    for (arma::uword k = 0; k < num_of_eq; ++k)
-        grid.dt_state += scalar_to(grid, dt, k);
+    MixtureField field = mixture_decode(grid, state);
+    const Vec dt = mixture_timestep(grid, state, field);
 
     // (a) flag off vs on: the returned RHS must be bit-for-bit identical.
     EXPECT_TRUE(!grid.capture_face_flux);
-    const Vec rhs_off = rhs_explicit_state(grid, state);
+    const Vec rhs_off = mixture_rhs_explicit(grid, state, field, dt(0));
     grid.capture_face_flux = true;
-    const Vec rhs_on = rhs_explicit_state(grid, state);
+    const Vec rhs_on = mixture_rhs_explicit(grid, state, field, dt(0));
     grid.capture_face_flux = false;
     EXPECT_TRUE(arma::approx_equal(rhs_on, rhs_off, "absdiff", 0.0));
 
-    const GammaFaceFluxCapture& c = grid.face_flux_capture;
+    const MixtureFaceFluxCapture& c = grid.face_flux_capture;
     EXPECT_TRUE(c.valid);
     EXPECT_TRUE(c.f_total.size() == ns);
 
-    const auto sz = arma::size(grid.ns, num_of_eq);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
     double worst_split = 0.0, worst_continuity = 0.0, scale = 0.0;
     for (arma::uword i = 0; i < ns; ++i) {
         // central + diffusive must reproduce the captured Rusanov total (the split
@@ -2539,8 +2128,7 @@ static void test_face_flux_capture_matches_production_continuity() {
     // continuity carries no source, so nothing else may appear.
     for (arma::uword i = 1; i < ns; ++i) {
         const double produced =
-            static_cast<double>(rhs_off(arma::sub2ind(sz, i, cons::RHO_I)))
-          + static_cast<double>(rhs_off(arma::sub2ind(sz, i, cons::RHO_N)));
+            static_cast<double>(rhs_off(arma::sub2ind(sz, i, mix::RHO)));
         const double from_faces = -(c.f_total[i] - c.f_total[i-1])/grid.ds_i(i)
                                 - c.eq_residual_mass[i];
         worst_continuity = std::max(worst_continuity,
@@ -2553,8 +2141,9 @@ static void test_face_flux_capture_matches_production_continuity() {
     const double before = c.f_total[ns-1];
     const MixtureThermo top = decode_cell(grid, state, ns-1);
     set_cell_state(grid, state, ns-1, top.rho, 500.0, top.T);
+    field = mixture_decode(grid, state);
     grid.capture_face_flux = true;
-    rhs_explicit_state(grid, state);
+    mixture_rhs_explicit(grid, state, field, dt(0));
     grid.capture_face_flux = false;
     EXPECT_TRUE(std::abs(c.f_total[ns-1] - before) > 0.0);
 
@@ -2569,7 +2158,6 @@ static void test_face_flux_capture_matches_production_continuity() {
 static void test_model_column_release_numerics_defaults() {
     auto build = [](bool gamma_mode) {
         unsetenv("ISO_GAMMA");
-        setenv("ISO_TWO_FLUID","0",1); setenv("ISO_IONIZATION","0",1);
         setenv("ISO_COOLING","0",1);   setenv("ISO_CORONA","0",1);
         setenv("ISO_TRAC","0",1);      setenv("ISO_HEAT_FLUX","0",1);
         auto grid = std::make_unique<Grid>();
@@ -2580,7 +2168,6 @@ static void test_model_column_release_numerics_defaults() {
         return grid;
     };
     auto clear = [] {
-        unsetenv("ISO_TWO_FLUID"); unsetenv("ISO_IONIZATION");
         unsetenv("ISO_COOLING");   unsetenv("ISO_CORONA");
         unsetenv("ISO_TRAC");      unsetenv("ISO_HEAT_FLUX");
         unsetenv("ISO_RIEMANN");   unsetenv("ISO_RECONSTRUCTION");
@@ -2629,24 +2216,22 @@ static void test_roe_local_face_flux_and_projection() {
     Grid grid;
     Vec state = setup_decoupling_column(grid, false, ns);
     model_column_update_bc(grid, state);
-    const Vec dt = cal_dt_i(grid, state);
-    grid.dt_state.zeros();
-    for (arma::uword k = 0; k < num_of_eq; ++k)
-        grid.dt_state += scalar_to(grid, dt, k);
+    const MixtureField field = mixture_decode(grid, state);
+    const Vec dt = mixture_timestep(grid, state, field);
 
     // Capture the same reconstructed state with each corrector flux. Roe-local
     // must actually differ from Rusanov on the stratified TR, while remaining a
     // conservative finite-volume mass flux.
     grid.capture_face_flux = true;
     grid.roe_characteristic_flux = false;
-    rhs_explicit_state(grid, state);
+    mixture_rhs_explicit(grid, state, field, dt(0));
     const std::vector<double> f_rusanov = grid.face_flux_capture.f_total;
 
     grid.roe_characteristic_flux = true;
-    const Vec rhs_roe = rhs_explicit_state(grid, state);
+    const Vec rhs_roe = mixture_rhs_explicit(grid, state, field, dt(0));
     EXPECT_TRUE(!rhs_roe.has_nan());
-    const GammaFaceFluxCapture& c = grid.face_flux_capture;
-    const auto sz = arma::size(grid.ns, num_of_eq);
+    const MixtureFaceFluxCapture& c = grid.face_flux_capture;
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
     double flux_scale = 0.0, max_solver_delta = 0.0;
     double worst_split = 0.0, worst_continuity = 0.0;
     for (arma::uword i = 0; i < ns; ++i) {
@@ -2664,8 +2249,7 @@ static void test_roe_local_face_flux_and_projection() {
     double rhs_scale = 0.0;
     for (arma::uword i = 1; i < ns; ++i) {
         const double produced =
-            static_cast<double>(rhs_roe(arma::sub2ind(sz,i,cons::RHO_I)))
-          + static_cast<double>(rhs_roe(arma::sub2ind(sz,i,cons::RHO_N)));
+            static_cast<double>(rhs_roe(arma::sub2ind(sz,i,mix::RHO)));
         const double from_faces = -(c.f_total[i]-c.f_total[i-1])/grid.ds_i(i)
                                 - c.eq_residual_mass[i];
         rhs_scale = std::max(rhs_scale,std::abs(c.f_total[i])/grid.ds_i(i));
@@ -2674,12 +2258,12 @@ static void test_roe_local_face_flux_and_projection() {
     }
     EXPECT_TRUE(worst_continuity < 1e-5);
 
-    // One real Gamma-mode Euler step must remain projectable onto the equilibrium
-    // manifold; this catches invalid total energy or carrier-lifting mistakes.
+    // One real release step must leave every cell decodable: this catches an
+    // invalid total energy or a state that has left the EOS caloric domain.
     grid.capture_face_flux = false;
-    const Vec after = advance_Euler_state(grid,state,dt);
+    const Vec after = mixture_advance(grid,state,dt,field);
     EXPECT_TRUE(!after.has_nan());
-    const DecodedMixtureField decoded_after = decode_mixture_field(grid,after);
+    const MixtureField decoded_after = mixture_decode(grid,after);
     EXPECT_TRUE(decoded_after.cells.size() == ns);
     for (const MixtureThermo& th : decoded_after.cells)
         EXPECT_TRUE(th.rho > 0.0 && th.T > 0.0 && std::isfinite(th.T));
@@ -2700,14 +2284,14 @@ static void test_outer_conduction_capture_matches_solver_face() {
     EXPECT_TRUE(grid.enable_conduction);
     EXPECT_TRUE(!grid.impose_outer_heat_flux);
     EXPECT_REL(grid.numerical_diffusivity_per_length, 0.0f, 0.0);
-    const Vec dt = cal_dt_i(grid, state);
-    const DecodedMixtureField decoded = decode_mixture_field(grid, state, 1);
+    const MixtureField decoded = mixture_decode(grid, state, 1);
+    const Vec dt = mixture_timestep(grid, state, decoded);
 
     // (a) flag off vs on: the advanced state must be bit-for-bit identical.
     EXPECT_TRUE(!grid.capture_outer_conduction);
-    const Vec after_off = advance_Euler_state(grid, state, dt, decoded);
+    const Vec after_off = mixture_advance(grid, state, dt, decoded);
     grid.capture_outer_conduction = true;
-    const Vec after_on = advance_Euler_state(grid, state, dt, decoded);
+    const Vec after_on = mixture_advance(grid, state, dt, decoded);
     grid.capture_outer_conduction = false;
     EXPECT_TRUE(arma::approx_equal(after_on, after_off, "absdiff", 0.0));
 
@@ -2722,8 +2306,8 @@ static void test_outer_conduction_capture_matches_solver_face() {
     EXPECT_REL(oc.area_ratio, 1.0, 1e-12);                    // straight column, B ≡ 1
 
     // Physical-face kappa: fixed external pressure, evaluated at T_face.
-    const MixtureThermo ghost = decode_outer_ghost(grid, grid.outer_boundary0_i);
-    const double p_face = ghost.p_i + ghost.p_n;
+    const MixtureThermo ghost = decode_outer_ghost(grid, grid.mix_outer_boundary0);
+    const double p_face = ghost.p;
     const double rho_face = equilibrium_density_from_pressure(p_face, oc.T_wall);
     const double n_h_face = rho_face/eos_constants::m_h;
     const double x_face = saha_ionization_fraction_n_h(n_h_face, oc.T_wall);
@@ -2749,7 +2333,10 @@ static void test_outer_conduction_capture_matches_solver_face() {
     model_column_update_bc(gd, sd);
     EXPECT_TRUE(gd.numerical_diffusivity_per_length > 0.0f);
     gd.capture_outer_conduction = true;
-    advance_Euler_state(gd, sd, cal_dt_i(gd, sd), decode_mixture_field(gd, sd, 1));
+    {
+        const MixtureField gf = mixture_decode(gd, sd, 1);
+        mixture_advance(gd, sd, mixture_timestep(gd, sd, gf), gf);
+    }
     gd.capture_outer_conduction = false;
     EXPECT_REL(gd.outer_conduction_capture.ds_face, 0.5*gd.ds_i(ns-1), 1e-12);
     EXPECT_TRUE(gd.outer_conduction_capture.q_num > 0.0);
@@ -2764,8 +2351,10 @@ static void test_outer_conduction_physical_face_is_mesh_independent() {
         Vec state = setup_decoupling_column(grid, true, ns);
         model_column_update_bc(grid, state);
         grid.capture_outer_conduction = true;
-        advance_Euler_state(grid, state, cal_dt_i(grid, state),
-                            decode_mixture_field(grid, state, 1));
+        {
+            const MixtureField gf = mixture_decode(grid, state, 1);
+            mixture_advance(grid, state, mixture_timestep(grid, state, gf), gf);
+        }
         grid.capture_outer_conduction = false;
         const OuterConductionCapture& oc = grid.outer_conduction_capture;
         EXPECT_TRUE(oc.valid);
@@ -2797,53 +2386,6 @@ static void test_model_column_gamma_ic_uses_cell_average_temperature() {
     EXPECT_REL(actual, expected, 2e-5);
     EXPECT_TRUE(std::abs(actual-centre_sample) > 1.0e-2);
     clear_decoupling_env();
-}
-
-static double gamma_predictor_drift_heat(Grid& grid, const Vec& state, float dt) {
-    Vec dt_i(grid.ns); dt_i.fill(dt);
-    grid.dt_state.zeros();
-    for (arma::uword k = 0; k < num_of_eq; ++k)
-        grid.dt_state += scalar_to(grid, dt_i, k);
-    const Vec predicted = state + grid.dt_state % rhs_explicit_state(grid, state);
-    const auto sz = arma::size(grid.ns, num_of_eq);
-    double heat = 0.0;
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        auto value = [&](const Vec& u, arma::uword k) -> double {
-            return static_cast<double>(u(arma::sub2ind(sz, i, k)));
-        };
-        const double ri = value(predicted, cons::RHO_I);
-        const double rn = value(predicted, cons::RHO_N);
-        const double vi = value(predicted, cons::MOM_I)/ri;
-        const double vn = value(predicted, cons::MOM_N)/rn;
-        const double relative_ke = 0.5*ri*rn/(ri+rn)*(vi-vn)*(vi-vn);
-        const MixtureThermo before = decode_equilibrium_mixture(
-            grid.eos_gamma_table, ri, rn,
-            value(predicted, cons::MOM_I), value(predicted, cons::MOM_N),
-            value(predicted, cons::E_I), value(predicted, cons::E_N), 0.0);
-        const ProjectedMixture after = project_equilibrium_single_fluid(
-            grid.eos_gamma_table, ri, rn,
-            value(predicted, cons::MOM_I), value(predicted, cons::MOM_N),
-            value(predicted, cons::E_I), value(predicted, cons::E_N), 0.0,
-            grid.eos_trace_fraction_floor);
-        EXPECT_NEAR(after.thermo.internal_energy-before.internal_energy, relative_ke,
-                    std::max(1.0e-15, 5e-6*relative_ke));
-        heat += relative_ke;
-    }
-    return heat;
-}
-
-static void test_stage6_projection_heating_dt_convergence() {
-    const std::string path = write_gamma_table_fixture("gamma_stage6_dt.dat");
-    const EosGammaTable table = EosGammaTable::load(path);
-    Grid grid;
-    const Vec state = setup_gamma_equilibrium(grid, table, 8, true);
-    const double h1 = gamma_predictor_drift_heat(grid, state, 2.0e-4f);
-    const double h2 = gamma_predictor_drift_heat(grid, state, 1.0e-4f);
-    const double h3 = gamma_predictor_drift_heat(grid, state, 5.0e-5f);
-    EXPECT_TRUE(h1 > h2 && h2 > h3 && h3 > 0.0);
-    EXPECT_NEAR(h2/h1, 0.25, 0.08);
-    EXPECT_NEAR(h3/h2, 0.25, 0.08);
-    std::remove(path.c_str());
 }
 
 static void test_flux_lim_mc3() {
@@ -5156,15 +4698,14 @@ int main() {
     RUN(test_final_serial_one_update_and_fallback_regression);
     RUN(test_openmp_thread_safety_contracts);
     RUN(test_stage3_equilibrium_mixture_closure);
-    RUN(test_stage4_conservative_equilibrium_projection);
+    RUN(test_mixture_state_round_trip_and_carrier_derivation);
     RUN(test_stage5_6_equilibrium_face_flux_and_sound_speed);
     RUN(test_stage9_acoustic_characteristic_speed);
-    RUN(test_stage9_storage_floor_transport_independence);
-    RUN(test_stage9_evaporation_vs_fixed_gamma);
-    RUN(test_stage5_production_table_boundary_reconstruction);
-    RUN(test_stage5_gamma_integrator_projection_and_guards);
-    RUN(test_stage7_gamma_total_energy_sources_and_conduction);
-    RUN(test_gamma_phase1_3_cache_and_known_temperature_pack);
+    RUN(test_mixture_roe_flux_and_rusanov_fallback);
+    RUN(test_release_production_table_domain_corners);
+    RUN(test_mixture_integrator_path_and_guards);
+    RUN(test_mixture_energy_sources_and_conduction);
+    RUN(test_mixture_field_cache_contract);
     RUN(test_stage8_gamma_model_column_saha_hse_and_ghosts);
     RUN(test_upper_bc_hydro_conduction_temperature_decoupling);
     RUN(test_face_flux_capture_matches_production_continuity);
@@ -5173,7 +4714,6 @@ RUN(test_roe_local_face_flux_and_projection);
     RUN(test_outer_conduction_capture_matches_solver_face);
     RUN(test_outer_conduction_physical_face_is_mesh_independent);
     RUN(test_model_column_gamma_ic_uses_cell_average_temperature);
-    RUN(test_stage6_projection_heating_dt_convergence);
     RUN(test_cons_prim_roundtrip);
 
     RUN(test_pressure_relation_eq38);

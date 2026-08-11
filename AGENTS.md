@@ -1,94 +1,12 @@
 # Chromosphere2026 — Agent Instructions
 
-## Writeup standards
+## Writeup maintenance
 
-The project writeup lives in `docs/writeup-overleaf/`. The primary sources are `main.tex` and `paper.tex`, with bibliography in `reference.bib`. They have deliberately different roles. Do **not** treat `paper.tex` as a shortened copy of `main.tex`, and do not automatically edit both files unless the task explicitly asks for both.
+`docs/writeup-overleaf/` is a separate Overleaf-linked Git repository, not part of the main repository's Git history. Before auditing, catching up, cleaning, or substantially editing `paper.tex` or `main.tex`, read the authoritative main-repository standard in `docs/writeup_standards.md` and inspect the two Git worktrees separately.
 
-### `main.tex` — engineering and development record
+Changes to release physics, governing equations, thermodynamics, numerics, boundary conditions, active update paths, canonical defaults/configuration, validation, limitations, or scientific interpretation trigger a writeup catch-up review. Current production code is the source of truth for active implementation behavior; existing TeX and older recaps are not.
 
-`main.tex` is the authoritative technical record of Chromosphere2026. It should explain both the current implementation and how the project reached it. It may contain substantially more detail than a paper, including:
-
-- the current release architecture and numerical workflow;
-- governing models and important derivations;
-- implementation details that materially affect correctness, stability, convergence, performance, or reproducibility;
-- validation and convergence evidence;
-- important design decisions and alternatives;
-- major failed approaches and what they taught us;
-- historical, experimental, inactive, and retired paths;
-- remaining limitations and future work.
-
-Preserve useful technical history, but do not turn `main.tex` into a raw change log, command transcript, code dump, or concatenation of recap files. Organize development history by the scientific or numerical question being answered rather than merely by date. When useful, label material clearly as **Active release path**, **Implemented but inactive**, **Experimental**, **Historical**, **Retired**, or **Planned** so a reader cannot confuse old capability with the current solver.
-
-### `paper.tex` — release scientific paper
-
-`paper.tex` is a concise academic paper describing only the latest implemented release capability, currently centered on `model_column`. It should read like a scientific article, not an engineering report or development diary.
-
-The paper should include only material needed to understand and assess the released calculation:
-
-- physical motivation and scientific context;
-- the active physical model and assumptions;
-- the important thermodynamic closure;
-- the numerical method at paper-appropriate depth;
-- initial and boundary conditions;
-- computational domain, grid, and material runtime settings;
-- focused verification needed to establish credibility;
-- the latest defensible preliminary results;
-- physical interpretation, limitations, and future coupling goals.
-
-Do not include obsolete implementation history, failed boundary experiments, full test inventories, low-level performance work, inactive model extensions, or detailed derivations that are not needed to understand the release result. In particular, do not present older two-fluid, kinetic-ionization, flare, beam-heating, three-temperature, loop, or multidimensional capabilities as active unless the current code path being reported actually uses them.
-
-### Code is the source of truth
-
-Before writing or revising **each substantive section**, inspect the current implementation that section describes. Do not write a section from memory and do not infer current behavior solely from an existing `.tex` file, an old recap, a plan, or source-code comments.
-
-For `model_column` work, inspect the relevant current code as needed, including:
-
-- `scenarios/model_column.cpp` / `.hpp`;
-- `scenarios/model_c7.cpp` / `.hpp`;
-- `scenarios/mesh.cpp` / `.hpp`;
-- `src/eos.cpp` and `eos.hpp`;
-- `src/rhs.cpp`, `src/flux.cpp`, `src/state.cpp`, `src/grid.cpp`, and `src/integrators.cpp`;
-- `chromosphere.hpp` and `chromo_main.cpp`;
-- the production run scripts and relevant tests.
-
-Use documents under `docs/` to recover motivation, validation evidence, measured results, and development history, but cross-check any statement about **current behavior, defaults, equations actually advanced, boundary semantics, grid settings, or runtime configuration** against the code. If code and documentation disagree, describe the code and fix the stale documentation rather than propagating the discrepancy.
-
-For quantitative results, identify the exact run/configuration that produced them. Never combine a numerical value from one configuration with prose describing another. Distinguish clearly between production defaults, controlled comparison settings, and historical settings.
-
-### Writing quality
-
-Write concise, precise academic English. Technical depth should be sufficient to make the model understandable and reproducible, but not exhaustive for its own sake.
-
-- Prefer direct sentences and compact paragraphs.
-- Give each paragraph one clear purpose.
-- Do not repeat the same explanation in several sections.
-- Avoid promotional or vague language such as "robust", "realistic", or "accurate" unless the surrounding text states what was actually validated.
-- Use equations when they define the physical model or clarify an important numerical method; do not reproduce algebra that adds little explanatory value.
-- Spend prose on choices that materially affect physics, correctness, stability, convergence, interpretation, performance, or reproducibility. Compress minor implementation details.
-- Use terminology consistently and distinguish concepts that are easy to conflate, such as physical versus numerical conduction, `gamma_E` versus `Gamma1`, hydrodynamic versus conductive boundary data, and coarse-equivalent versus actual refined cell count.
-- Distinguish a stable result from a converged result, and an apparently approaching-convergence trend from formal convergence.
-- Do not overclaim. If a result remains provisional because an input, boundary discretization, or observable is not converged, say so explicitly.
-
-The target is not maximum detail. The target is the **smallest amount of technical detail that accurately explains the important physics, numerics, evidence, and limitations**.
-
-### Citations and figures
-
-Physical claims should be supported by appropriate literature. Reference papers already stored in `docs/supporting-papers/` should be checked first. Do not invent citations.
-
-Before retaining or adding a numerical figure, verify its source output, run configuration, plotted quantity, and relevance to the current narrative. A figure should support a material conclusion rather than merely document that a diagnostic exists. New visualizations must follow the repository visualization rules below and be entered in `visualize_commands.md`.
-
-### Compiling the writeup
-
-When compiling LaTeX, always build inside `docs/writeup-overleaf/latex-build/` — never let auxiliary files (`.aux`, `.log`, `.fls`, `.pdf`, etc.) land next to the `.tex` sources.
-
-Examples:
-```bash
-cd docs/writeup-overleaf
-latexmk -xelatex -output-directory=latex-build main.tex
-latexmk -xelatex -output-directory=latex-build paper.tex
-```
-
-Resolve compilation errors, undefined citations, broken references, duplicate labels, and obsolete figure references. Do not spend substantial effort eliminating harmless warnings that do not affect the document.
+Keep `paper.tex` concise and current-release-only. Use `main.tex` for the deeper engineering record and clearly label inactive, experimental, historical, retired, and planned material. Update only the document or documents whose role is affected, avoid configuration mixing, and do not commit or push either repository unless explicitly requested.
 
 ## Output directories
 
@@ -129,9 +47,14 @@ Exceptions:
 - Do not assume 12 threads is optimal on different hardware; rerun thread scaling after changing machines.
 - Do not hard-code the thread count in C++, CMake, or the numerical algorithm.
 
-## `model_column` release numerical method
+## `model_column` release architecture and numerical method
 
-A normal `model_column` run uses 1D field-aligned hydrodynamics with Gamma/Saha equilibrium thermodynamics (ionization energy included, production `Gamma1` table), MUSCL reconstruction of **`(ln ρ, V, ln p)`** with the MC3/Koren limiter (β = 2), the **mixture Roe characteristic numerical flux**, equilibrium-reference well balancing, physical conduction only, and a 22,000 K external conductive reservoir at the physical outer face, on the coarse-equivalent N = 500 / R4 mesh (661 actual cells) at CFL 0.50.
+The release is a **single-fluid field-aligned equilibrium-mixture solver** whose conserved state is exactly `U = (rho, rho u, E)` (`mix::RHO/MOM/ENERGY`, `mixture.hpp` + `src/mixture*.cpp`). The ionization fraction `x`, the carrier densities `x*rho` / `(1-x)*rho`, `n_e`, `n_HI` and `p_e` are **derived** EOS diagnostics, never stored or advanced, so the release has no carrier-row storage and no equilibrium-projection stage. One step is
+`U^n -> MUSCL/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}`.
+
+A normal `model_column` run uses Gamma/Saha equilibrium thermodynamics (ionization energy included, production `Gamma1` table), MUSCL reconstruction of **`(ln rho, u, ln p)`** with the MC3/Koren limiter (β = 2), the **mixture Roe characteristic numerical flux** (face-local Rusanov fallback), equilibrium-reference well balancing, physical conduction only, and a 22,000 K external conductive reservoir at the physical outer face, on the coarse-equivalent N = 500 / R4 mesh (661 actual cells) at CFL 0.50.
+
+The historical **two-fluid / three-temperature / finite-rate-ionization** solver is a genuinely separate non-release path (`chromosphere.hpp` + `src/state.cpp`, `src/flux.cpp`, `src/rhs.cpp`, `src/integrators.cpp`) that keeps its own seven-row state and source stages. Loading a `Gamma1` table selects the release solver; each solver rejects the other's `Grid`. A release run also rejects `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID` and `ISO_IONIZATION` outright — a release user never needs them. Scenarios `model_gentle`, `model_c7`, `model_flare`, `analytic_canopy` and `pfss_field_line` use the two-fluid solver.
 
 **No environment variable is required to select the release solver or reconstruction.** `ISO_RIEMANN=rusanov` and `ISO_RECONSTRUCTION=lnrho-v-lnt` are reference-only overrides kept for regression and controlled numerical comparison; never use them in production. Full description and evidence: `docs/model_column_release_numerics_recap.md`. Release checks: `scripts/release_validation.sh`.
 

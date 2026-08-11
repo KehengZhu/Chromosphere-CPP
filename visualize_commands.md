@@ -1613,6 +1613,30 @@ Metrics at t = 1000 s over 2130--2150 km: `A_M = 0.0102`, `Q_M = 0.00184`,
 `mean(F_eff)` is +10.5% over the 500 s value -- still a provisional number, not
 a converged physical evaporation rate.
 
+### Release N=500 mesh and initial temperature
+
+`model_column_N500_mesh_temperature_initial.png` and `.pdf` -- exact cell width and
+EOS-aware initial (`t=0`) temperature versus height for the **release**
+coarse-equivalent N=500 column. The static x4 outer refinement above 500 km gives
+661 cells over 1600--2153 km: coarse 1104.768 m grading to fine 276.042 m, with the
+fine region starting at 2100 km. Initial temperature spans 6631.35--22674.60 K.
+
+Provenance is the release smoke run `release_roe_lnp_N500_100s`, which was launched
+with no environment overrides, so the mesh and initial state are the scenario's own
+release defaults (mixture Roe, `(ln rho,V,ln p)`, MC3 beta=2 -- confirmed by the
+console log's `flux=roe-local reconstruction=lnrho-v-lnp limiter=mc3 beta=2`). The
+script independently rebuilds the faces from `scenarios/mesh.cpp` and cross-checks
+them against the run header (max face error 4.995 m, within the float32
+six-significant-digit header rounding tolerance).
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
+  util/plot_model_column_mesh_temperature.py \
+  --run outputs/model_column/release_roe_lnp_N500_100s.txt \
+  --ns-coarse 500 \
+  --output visualization/model_column/model_column_N500_mesh_temperature_initial
+```
+
 ### Historical N=2000 previous-production mesh and initial temperature
 
 `model_column_ns2000_mesh_temperature_initial.png` and `.pdf` -- exact cell width
@@ -1760,4 +1784,66 @@ ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
 .venv/bin/python util/animate_isentropic.py \
   outputs/model_column/roe_N1000_4000s.txt \
   visualization/model_column/roe_N1000_4000s_evolution.mp4 25
+```
+
+### `lnp_roe_N1000_4000s_evolution.mp4` — N=1000 companion to `lnp_roe_N500_4000s_evolution.mp4`
+
+Same release solver as `lnp_roe_N500_4000s_evolution.mp4` — mixture Roe flux,
+`(ln rho, V, ln p)` MUSCL reconstruction with MC3/beta=2, Gamma/Saha EOS, R4 outer
+refinement, 22,000 K physical-face conductive boundary, hydro-T decoupling, physical
+conduction only, CFL=0.50 — with only the coarse-equivalent resolution raised from
+N=500 to N=1000 (1320 actual cells). Roe and lnP are now release defaults, so the run
+needs no `ISO_RIEMANN`/`ISO_RECONSTRUCTION` override. Run reached
+`termination=end_time` at 4000 s, step 1,455,143, in 1310.1 s wall (12 threads).
+Snapshot cadence 20 s gives 201 frames; standard 2x3 `animate_isentropic.py` panels
+(T, V [km/s], physical `q_par`, rho, p, rho*V vs height) at 25 fps, matching the N500
+version for direct comparison.
+
+```bash
+ISO_NS=1000 \
+CHROMO_T_END=4000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=20 \
+/usr/bin/time -p scripts/run_chromo_realtime.sh \
+  outputs/model_column/lnp_roe_N1000_4000s.txt \
+  full no-ionization model_column - 20.0 no-cooling \
+  > outputs/model_column/lnp_roe_N1000_4000s.console.log 2>&1
+
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/lnp_roe_N1000_4000s.txt \
+  visualization/model_column/lnp_roe_N1000_4000s_evolution.mp4 25
+```
+
+### `model_column/roe_n1000_lower_chromosphere_sloshing.png`
+
+Six-panel diagnosis figure for the broad low-chromosphere velocity / mass-flux oscillation
+in the Roe + `(ln rho, V, ln p)` N1000 4000 s run
+(`docs/roe_n1000_lower_chromosphere_sloshing_diagnosis.md`). Top row: `V(h, t)` space-time
+heatmaps for Roe N1000 and Roe N500 over 1600--2130 km, plus a high-cadence (2.8 s)
+`.faceflux` capture of the first 220 s that resolves the conduction-launched downgoing
+acoustic front (base arrival ~58 s, matching the integral of ds/c_s) and its reflection off
+the frozen `V = 0` inner wall. Bottom row: `V(t)` at 1800 km for Roe/Rusanov x N500/N1000
+(same mode, ~2x amplitude at N1000, Rusanov included -- the mode is not Roe-specific), mode
+amplitude vs height (near-node at the inner wall, peak at ~1830 km, all four runs collapse
+above ~2050 km), and the evaporation-window 2130--2150 km mean `rho*V` (uniformly positive,
+resolution-consistent). Generated from existing runs only; no new production run.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+python util/plot_column_sloshing.py \
+  --run "Roe+lnP N1000=outputs/model_column/lnp_roe_N1000_4000s.txt.gamma_diag" \
+  --run "Roe+lnP N500=outputs/model_column/lnp_roe_N500_4000s_opt.txt.gamma_diag" \
+  --run "Rusanov+lnP N1000=outputs/model_column/acc_lnp_N1000.txt.gamma_diag" \
+  --run "Rusanov+lnP N500=outputs/model_column/acc_lnp_N500.txt.gamma_diag" \
+  --faceflux outputs/model_column/lnp_roe_N1000_1000s.txt.faceflux \
+  --out visualization/model_column/roe_n1000_lower_chromosphere_sloshing.png
+```
+
+Supporting conduction-off control run used by the same diagnosis (no figure):
+
+```bash
+ISO_NS=1000 ISO_HEAT_FLUX=0 \
+CHROMO_T_END=1000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=20 \
+scripts/run_chromo_realtime.sh outputs/model_column/eqctl_lnp_roe_N1000_1000s.txt \
+  full no-ionization model_column - 20.0 no-cooling \
+  > outputs/model_column/eqctl_lnp_roe_N1000_1000s.console.log 2>&1
 ```

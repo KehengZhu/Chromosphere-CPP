@@ -13,43 +13,6 @@
 
 namespace chromosphere {
 
-namespace {
-
-struct GammaThermoFields {
-    Vec rho, temperature, n_e, n_hi, internal_energy;
-    std::vector<double> rho_exact, temperature_exact, internal_energy_exact;
-};
-
-GammaThermoFields decode_gamma_fields(const Grid& grid, const Vec& state) {
-    GammaThermoFields fields{
-        Vec(grid.ns), Vec(grid.ns), Vec(grid.ns), Vec(grid.ns), Vec(grid.ns),
-        std::vector<double>(grid.ns), std::vector<double>(grid.ns),
-        std::vector<double>(grid.ns)};
-    const auto sz = arma::size(grid.ns, num_of_eq);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        auto at = [&](arma::uword k) -> double {
-            return static_cast<double>(state(arma::sub2ind(sz, i, k)));
-        };
-        const double phi = 0.5*static_cast<double>(grid.phi_g_imh(i)+grid.phi_g_iph(i));
-        const MixtureThermo th = decode_equilibrium_mixture(
-            grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
-            at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
-            phi, grid.eos_temperature_hint(i), grid.eos_gamma_debug_clamp);
-        grid.store_eos_temperature_hint(i, th.T);
-        fields.rho(i) = static_cast<float>(th.rho);
-        fields.temperature(i) = static_cast<float>(th.T);
-        fields.n_e(i) = static_cast<float>(th.n_e);
-        fields.n_hi(i) = static_cast<float>(th.n_HI);
-        fields.internal_energy(i) = static_cast<float>(th.internal_energy);
-        fields.rho_exact[i] = th.rho;
-        fields.temperature_exact[i] = th.T;
-        fields.internal_energy_exact[i] = th.internal_energy;
-    }
-    return fields;
-}
-
-} // namespace
-
 // ============================================================================
 // Time-step calculation
 // ============================================================================
@@ -60,10 +23,10 @@ Vec cal_max_v_i(const Grid& grid, const Vec& xn_state) {
 }
 
 Vec cal_dt_i(const Grid& grid, const Vec& xn_state) {
-    if (!grid.eos_gamma_table.empty()) {
-        const DecodedMixtureField decoded = decode_mixture_field(grid, xn_state);
-        return cal_dt_i(grid, xn_state, decoded);
-    }
+    if (!grid.eos_gamma_table.empty())
+        throw std::logic_error(
+            "the legacy two-fluid timestep cannot size a Gamma1-table Grid; "
+            "use mixture_timestep");
     ProfileScope timer(ProfileRegion::Cfl);
     Vec dt_i = grid.CFL * grid.ds_i / cal_max_v_i(grid, xn_state);
     float dt_min_i = arma::min(dt_i);
@@ -75,18 +38,6 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state) {
     // then over-heats a cell in one step (ΔT ~ 10^5 K) and breaks. Cap dt so the
     // beam raises the total thermal energy by at most BEAM_HEAT_CFL per step.
     if (grid.enable_beam_heating) {
-        if (!grid.eos_gamma_table.empty()) {
-            const GammaThermoFields th = decode_gamma_fields(grid, xn_state);
-            const Vec Q = beam_heating_rate(grid, th.n_e, th.n_hi);
-            Vec tau = th.internal_energy / arma::clamp(Q, 1.0e-30f, arma::datum::inf);
-            for (arma::uword i = 0; i < grid.ns; ++i)
-                if (Q(i) <= 0.0f) tau(i) = arma::datum::inf;
-            const float dt_beam = 0.1f*arma::min(tau);
-            if (dt_beam < dt_min_i) {
-                dt_min_i = dt_beam;
-                active_limiter = TimestepLimiter::BeamHeating;
-            }
-        } else {
         const Vec prim  = cons2prim(grid, xn_state);
         const Vec rho_i = get_scalar(grid, prim, prim::RHO_I);
         const Vec rho_n = get_scalar(grid, prim, prim::RHO_N);
@@ -115,7 +66,6 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state) {
                 active_limiter = TimestepLimiter::BeamHeating;
             }
         }
-        }
     }
 
     // Coronal-heating timescale limit (same rationale as the beam guard). The
@@ -124,18 +74,6 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state) {
     // ramped/localized enhancement (Phase 3) can shorten it, so cap dt to a small
     // fractional energy gain per step where H > 0, exactly as for the beam.
     if (grid.enable_coronal_heating) {
-        if (!grid.eos_gamma_table.empty()) {
-            const GammaThermoFields th = decode_gamma_fields(grid, xn_state);
-            const Vec H = coronal_heating_rate(grid);
-            Vec tau = th.internal_energy / arma::clamp(H, 1.0e-30f, arma::datum::inf);
-            for (arma::uword i = 0; i < grid.ns; ++i)
-                if (H(i) <= 0.0f) tau(i) = arma::datum::inf;
-            const float dt_heat = 0.1f*arma::min(tau);
-            if (dt_heat < dt_min_i) {
-                dt_min_i = dt_heat;
-                active_limiter = TimestepLimiter::CoronalHeating;
-            }
-        } else {
         const Vec prim = cons2prim(grid, xn_state);
         const Vec p_i  = get_scalar(grid, prim, prim::P_I);
         const Vec p_n  = get_scalar(grid, prim, prim::P_N);
@@ -155,61 +93,9 @@ Vec cal_dt_i(const Grid& grid, const Vec& xn_state) {
                 active_limiter = TimestepLimiter::CoronalHeating;
             }
         }
-        }
     }
     profile_note_timestep_limiter(active_limiter);
     return dt_min_i * arma::ones<Vec>(grid.ns);
-}
-
-Vec cal_dt_i(const Grid& grid, const Vec& xn_state,
-             const DecodedMixtureField& decoded) {
-    if (grid.eos_gamma_table.empty()) return cal_dt_i(grid, xn_state);
-    ProfileScope timer(ProfileRegion::Cfl);
-    decoded.require_matches(grid, xn_state);
-    Vec dt_i(grid.ns);
-    const auto packed_size = arma::size(grid.ns, num_of_eq);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const MixtureThermo& th = decoded.cells[i];
-        const double momentum =
-            static_cast<double>(xn_state(arma::sub2ind(packed_size,i,cons::MOM_I)))
-           +static_cast<double>(xn_state(arma::sub2ind(packed_size,i,cons::MOM_N)));
-        const double speed = std::abs(momentum/th.rho)
-            +std::sqrt(th.gamma1*(th.p_i+th.p_n)/th.rho);
-        dt_i(i) = static_cast<float>(grid.CFL*grid.ds_i(i)/speed);
-    }
-    float dt_min = arma::min(dt_i);
-    TimestepLimiter limiter = TimestepLimiter::Acoustic;
-
-    if (grid.enable_beam_heating || grid.enable_coronal_heating) {
-        GammaThermoFields fields{
-            Vec(grid.ns), Vec(grid.ns), Vec(grid.ns), Vec(grid.ns), Vec(grid.ns),
-            std::vector<double>(grid.ns), std::vector<double>(grid.ns),
-            std::vector<double>(grid.ns)};
-        for (arma::uword i = 0; i < grid.ns; ++i) {
-            const MixtureThermo& th = decoded.cells[i];
-            fields.rho(i)=th.rho; fields.temperature(i)=th.T;
-            fields.n_e(i)=th.n_e; fields.n_hi(i)=th.n_HI;
-            fields.internal_energy(i)=th.internal_energy;
-            fields.rho_exact[i]=th.rho; fields.temperature_exact[i]=th.T;
-            fields.internal_energy_exact[i]=th.internal_energy;
-        }
-        if (grid.enable_beam_heating) {
-            const Vec Q = beam_heating_rate(grid, fields.n_e, fields.n_hi);
-            Vec tau = fields.internal_energy/arma::clamp(Q,1.0e-30f,arma::datum::inf);
-            for (arma::uword i=0;i<grid.ns;++i) if (Q(i)<=0.0f) tau(i)=arma::datum::inf;
-            const float cap = 0.1f*arma::min(tau);
-            if (cap < dt_min) { dt_min=cap; limiter=TimestepLimiter::BeamHeating; }
-        }
-        if (grid.enable_coronal_heating) {
-            const Vec H = coronal_heating_rate(grid);
-            Vec tau = fields.internal_energy/arma::clamp(H,1.0e-30f,arma::datum::inf);
-            for (arma::uword i=0;i<grid.ns;++i) if (H(i)<=0.0f) tau(i)=arma::datum::inf;
-            const float cap = 0.1f*arma::min(tau);
-            if (cap < dt_min) { dt_min=cap; limiter=TimestepLimiter::CoronalHeating; }
-        }
-    }
-    profile_note_timestep_limiter(limiter);
-    return dt_min*arma::ones<Vec>(grid.ns);
 }
 
 // ============================================================================
@@ -471,647 +357,6 @@ static Vec thomas_solve(const Vec& a, Vec b, const Vec& c, Vec d) {
         x[i - 1] = (d[i - 1] - c[i - 1] * x[i]) / b[i - 1];
     }
     return x;
-}
-
-static void thomas_solve_double_inplace(
-    const std::vector<double>& a, std::vector<double>& b,
-    const std::vector<double>& c, std::vector<double>& d,
-    std::vector<double>& x) {
-    const std::size_t n = b.size();
-    for (std::size_t i = 1; i < n; ++i) {
-        const double m = a[i]/b[i-1];
-        b[i] -= m*c[i-1];
-        d[i] -= m*d[i-1];
-    }
-    x[n-1] = d[n-1]/b[n-1];
-    for (std::size_t i = n-1; i > 0; --i)
-        x[i-1] = (d[i-1]-c[i-1]*x[i])/b[i-1];
-}
-
-static double gamma_kappa_e(double n_e, double n_hi, double temperature) {
-    return 9.2048e-12*n_e*std::pow(temperature, 2.5)
-         / (n_e + 2.836e-11*n_hi*temperature*temperature);
-}
-
-static double gamma_kappa_n(double n_e, double n_hi, double temperature) {
-    return 0.0342006*n_hi*temperature
-         / (1.20613*n_e*std::sqrt(2.0*temperature)
-            + 1.70573*n_hi*std::sqrt(temperature));
-}
-
-static double gamma_trac_factor(const Grid& grid, double temperature) {
-    if (!grid.enable_trac || !(grid.trac_cutoff_T > grid.trac_T_chrom)) return 1.0;
-    if (temperature >= grid.trac_T_chrom && temperature < grid.trac_cutoff_T)
-        return std::pow(static_cast<double>(grid.trac_cutoff_T)/temperature, 2.5);
-    return 1.0;
-}
-
-// Conduction-only outer Dirichlet temperature (chromosphere.hpp
-// ::outer_conduction_temperature_override). Returns the temperature the HYDRO
-// outer ghost carries unless the scenario has pinned the thermal wall
-// explicitly, in which case the hydro ghost temperature is free to float
-// (zero-gradient outflow) without changing the conductive driving.
-static double outer_conduction_wall_T(const Grid& grid, double ghost_T) {
-    return grid.outer_conduction_temperature_override
-        ? static_cast<double>(grid.outer_conduction_temperature)
-        : ghost_T;
-}
-
-// The outer state as the CONDUCTION rows see it. When the hydro/conduction
-// temperatures are decoupled, the imposed temperature lives at the PHYSICAL
-// boundary face, not at a fictitious ghost centre. Reconstruct the material
-// state at that face from the externally imposed hydro back-pressure and the
-// fixed face temperature, then evaluate kappa there. Without the override this
-// remains the legacy decoded hydro ghost state.
-struct OuterConductionGhost { double T, n_e, n_HI; };
-static OuterConductionGhost outer_conduction_ghost(
-    const Grid& grid, const CaloricMixtureThermo& ghost) {
-    if (!grid.outer_conduction_temperature_override)
-        return {ghost.T, ghost.n_e, ghost.n_HI};
-    const double T = static_cast<double>(grid.outer_conduction_temperature);
-    const double pressure = ghost.p_i + ghost.p_n;
-    const double rho = equilibrium_density_from_pressure(pressure, T);
-    const double n_h = rho/eos_constants::m_h;
-    const double x = saha_ionization_fraction_n_h(n_h, T);
-    return {T, x*n_h, (1.0-x)*n_h};
-}
-
-static CaloricMixtureThermo decode_gamma_ghost(
-    const Grid& grid, const Vec& ghost, double phi_face) {
-    return decode_equilibrium_caloric_mixture(
-        grid.eos_gamma_table, ghost(cons::RHO_I), ghost(cons::RHO_N),
-        ghost(cons::MOM_I), ghost(cons::MOM_N), ghost(cons::E_I), ghost(cons::E_N),
-        phi_face, std::numeric_limits<double>::quiet_NaN(),
-        grid.eos_gamma_debug_clamp);
-}
-
-static Vec set_gamma_internal_energy_and_project(
-    const Grid& grid, const Vec& state,
-    const std::vector<double>& target_internal_energy);
-
-static Vec pack_gamma_known_temperature(
-    const Grid& grid, const Vec& state,
-    const std::vector<double>& target_internal_energy,
-    const std::vector<double>& temperature) {
-    Vec packed(arma::size(state), arma::fill::zeros);
-    const auto sz = arma::size(grid.ns, num_of_eq);
-    parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
-        const arma::uword i = static_cast<arma::uword>(raw_i);
-        auto at = [&](arma::uword row) {
-            return static_cast<double>(state(arma::sub2ind(sz,i,row)));
-        };
-        const double rho = at(cons::RHO_I)+at(cons::RHO_N);
-        const double momentum = at(cons::MOM_I)+at(cons::MOM_N);
-        const double phi = 0.5*static_cast<double>(
-            grid.phi_g_imh(i)+grid.phi_g_iph(i));
-        const double carried = 0.5*momentum*momentum/rho+rho*phi;
-        const double authoritative_total = target_internal_energy[i]+carried;
-        // The nonlinear conduction gate scales its residual by e_old, while the
-        // known-T packer scales the same residual by the flux-updated target.
-        // Those denominators differ slightly whenever a cell cools.  Keep this
-        // second, assertion-only gate at twice the 2e-11 solve tolerance so a
-        // converged state is not rejected solely by that normalization change.
-        const ProjectedMixtureRows cell =
-            pack_equilibrium_rows_from_known_temperature(
-                grid.eos_gamma_table, rho, momentum, authoritative_total,
-                temperature[i], phi, grid.eos_trace_fraction_floor, 4.0e-11,
-                grid.eos_gamma_debug_clamp);
-        packed(arma::sub2ind(sz,i,cons::RHO_I)) = static_cast<float>(cell.rho_i);
-        packed(arma::sub2ind(sz,i,cons::RHO_N)) = static_cast<float>(cell.rho_n);
-        packed(arma::sub2ind(sz,i,cons::MOM_I)) = static_cast<float>(cell.momentum_i);
-        packed(arma::sub2ind(sz,i,cons::MOM_N)) = static_cast<float>(cell.momentum_n);
-        const float energy_i = static_cast<float>(cell.energy_i);
-        // Compute the final row from the authoritative conserved total after
-        // rounding E_I, retaining the same conservative remainder semantics as
-        // the general projection path.
-        const float energy_n = static_cast<float>(authoritative_total
-                                                 -static_cast<double>(energy_i));
-        packed(arma::sub2ind(sz,i,cons::E_I)) = energy_i;
-        packed(arma::sub2ind(sz,i,cons::E_N)) = energy_n;
-        packed(arma::sub2ind(sz,i,cons::E_E)) = static_cast<float>(cell.energy_e);
-    });
-    return packed;
-}
-
-// Stage-7 single-mixture nonlinear backward-Euler conduction solve. The
-// quasi-Newton matrix uses the analytic C_V^eff and lags only d(kappa)/dT.
-static Vec apply_gamma_conduction_stage(const Grid& grid, const Vec& state, double dt) {
-    if (!(dt > 0.0)) return state;
-    ProfileScope timer(ProfileRegion::Conduction);
-    const arma::uword ns = grid.ns;
-    GammaConductionScratch& s = grid.gamma_conduction_scratch;
-    s.resize(ns);
-    const auto sz = arma::size(grid.ns, num_of_eq);
-
-    ParallelFailure failure;
-    std::array<double, kMaximumParallelThreads> residual_max_slots{};
-    std::array<double, kMaximumParallelThreads> step_max_slots{};
-    int team_size = 1;
-    bool stop = false;
-    bool converged = false;
-    bool caloric_seeded = true;
-    bool previous_step_was_small = false;
-    int converged_after_updates = 0;
-    CaloricMixtureThermo inner{};
-    CaloricMixtureThermo outer{};
-    OuterConductionGhost wall{};
-    double k_inner = 0.0;
-    double k_outer = 0.0;
-    double diag_kr_top = 0.0;
-    double diag_cv_r_top = 0.0;
-    const int conduction_threads = std::min(
-        kMaximumConductionThreads, parallel_max_threads());
-
-    auto face_k = [&](double kh, double kt, double dh, double dtw) {
-        if (grid.uniform_mesh) return 0.5*(kh+kt);
-        kh = std::max(kh, 1.0e-30);
-        kt = std::max(kt, 1.0e-30);
-        return (dh+dtw)/(dh/kh+dtw/kt);
-    };
-
-    // One Grid owns one mutable conduction scratch set and is intentionally not
-    // concurrently reentrant. All physical-cell writes below are index-disjoint.
-#pragma omp parallel if(conduction_threads > 1) num_threads(conduction_threads) shared(stop,converged,caloric_seeded,previous_step_was_small,converged_after_updates,inner,outer,wall,k_inner,k_outer,diag_kr_top,diag_cv_r_top,team_size,failure,residual_max_slots,step_max_slots)
-    {
-        const int tid = parallel_thread_index();
-
-#pragma omp for schedule(static)
-        for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
-            const arma::uword i = static_cast<arma::uword>(raw_i);
-            try {
-                auto at = [&](arma::uword row) {
-                    return static_cast<double>(state(arma::sub2ind(sz,i,row)));
-                };
-                const double phi = 0.5*static_cast<double>(
-                    grid.phi_g_imh(i)+grid.phi_g_iph(i));
-                CaloricState seeded;
-                const CaloricMixtureThermo th = decode_equilibrium_caloric_mixture(
-                    grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
-                    at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N),
-                    phi, grid.eos_temperature_hint(i),
-                    grid.eos_gamma_debug_clamp, &seeded);
-                grid.store_eos_temperature_hint(i, th.T);
-                s.rho[i] = th.rho;
-                s.e_old[i] = th.internal_energy;
-                s.temperature[i] = th.T;
-                s.n_e[i] = seeded.n_e;
-                s.n_hi[i] = seeded.n_hi;
-                s.e_at_T[i] = seeded.internal_energy;
-                s.capacity[i] = seeded.heat_capacity;
-                s.x[i] = seeded.x;
-                s.pressure[i] = seeded.pressure;
-            } catch (...) {
-                failure.capture(i, std::current_exception());
-            }
-        }
-
-#pragma omp single
-        {
-            team_size = parallel_team_size();
-            if (failure.failed()) {
-                stop = true;
-            } else {
-                try {
-                    inner = decode_gamma_ghost(
-                        grid, grid.inner_boundary0_i, grid.phi_g_imh(0));
-                    outer = decode_gamma_ghost(
-                        grid, grid.outer_boundary0_i, grid.phi_g_iph(ns-1));
-                    wall = outer_conduction_ghost(grid, outer);
-                    k_inner = gamma_kappa_e(inner.n_e, inner.n_HI, inner.T)
-                            * gamma_trac_factor(grid, inner.T)
-                            + gamma_kappa_n(inner.n_e, inner.n_HI, inner.T);
-                    k_outer = gamma_kappa_e(wall.n_e, wall.n_HI, wall.T)
-                            * gamma_trac_factor(grid, wall.T)
-                            + gamma_kappa_n(wall.n_e, wall.n_HI, wall.T);
-                } catch (...) {
-                    failure.capture(ns, std::current_exception());
-                    stop = true;
-                }
-            }
-        }
-
-        if (!stop) {
-            for (int iteration = 0; iteration <= 40; ++iteration) {
-#pragma omp for schedule(static)
-                for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
-                    const arma::uword i = static_cast<arma::uword>(raw_i);
-                    try {
-                        if (!caloric_seeded) {
-                            const CaloricState cs = equilibrium_caloric_state(
-                                s.rho[i], s.temperature[i]);
-                            s.n_e[i] = cs.n_e;
-                            s.n_hi[i] = cs.n_hi;
-                            s.e_at_T[i] = cs.internal_energy;
-                            s.capacity[i] = cs.heat_capacity;
-                            s.x[i] = cs.x;
-                            s.pressure[i] = cs.pressure;
-                        }
-                        s.conductivity[i] =
-                            gamma_kappa_e(s.n_e[i],s.n_hi[i],s.temperature[i])
-                            *gamma_trac_factor(grid,s.temperature[i])
-                            +gamma_kappa_n(s.n_e[i],s.n_hi[i],s.temperature[i]);
-                    } catch (...) {
-                        failure.capture(i, std::current_exception());
-                    }
-                }
-
-#pragma omp single
-                {
-                    caloric_seeded = false;
-                    if (failure.failed()) stop = true;
-                }
-                if (stop) break;
-
-#pragma omp for schedule(static)
-                for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
-                    const arma::uword i = static_cast<arma::uword>(raw_i);
-                    try {
-                        const double kl = i == 0
-                            ? face_k(s.conductivity[i],k_inner,grid.ds_i(i),grid.ds_i(i))
-                            : face_k(s.conductivity[i],s.conductivity[i-1],
-                                     grid.ds_i(i),grid.ds_i(i-1));
-                        const bool physical_outer_face =
-                            i+1 == ns && grid.outer_conduction_temperature_override;
-                        const double kr = i+1 == ns
-                            ? (physical_outer_face
-                                ? k_outer
-                                : face_k(s.conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i)))
-                            : face_k(s.conductivity[i],s.conductivity[i+1],
-                                     grid.ds_i(i),grid.ds_i(i+1));
-                        double cv_l=s.capacity[i], cv_r=s.capacity[i];
-                        if (i>0) cv_l=0.5*(s.capacity[i]+s.capacity[i-1]);
-                        if (i+1<ns) cv_r=0.5*(s.capacity[i]+s.capacity[i+1]);
-                        const double k_num_l = numerical_diffusivity_at_face(
-                            grid, grid.ds_imh_i(i))*cv_l;
-                        const double ds_right = physical_outer_face
-                            ? 0.5*static_cast<double>(grid.ds_i(i))
-                            : static_cast<double>(grid.ds_iph_i(i));
-                        const double k_num_r = numerical_diffusivity_at_face(
-                            grid, ds_right)*cv_r;
-                        if (i+1 == ns) {
-                            diag_kr_top = kr;
-                            diag_cv_r_top = cv_r;
-                        }
-                        s.g_left[i] = grid.B_i(i)/grid.ds_i(i)
-                                  * (kl+k_num_l)/grid.B_imh(i)/grid.ds_imh_i(i);
-                        s.g_right[i] = grid.B_i(i)/grid.ds_i(i)
-                                   * (kr+k_num_r)/grid.B_iph(i)/ds_right;
-                    } catch (...) {
-                        failure.capture(i, std::current_exception());
-                    }
-                }
-
-#pragma omp single
-                {
-                    if (failure.failed()) stop = true;
-                }
-                if (stop) break;
-
-                double local_residual_max = 0.0;
-#pragma omp for schedule(static)
-                for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
-                    const arma::uword i = static_cast<arma::uword>(raw_i);
-                    try {
-                        const double tl = i==0 ? inner.T : s.temperature[i-1];
-                        const double tr = i+1==ns ? wall.T : s.temperature[i+1];
-                        double divergence = s.g_right[i]*(tr-s.temperature[i])
-                                          -s.g_left[i]*(s.temperature[i]-tl);
-                        if (i == 0 && grid.inner_conduction_neumann) {
-                            divergence += s.g_left[i]*(s.temperature[i]-tl);
-                            s.g_left[i] = 0.0;
-                        }
-                        if (i+1 == ns && grid.impose_outer_heat_flux) {
-                            divergence = -s.g_left[i]*(s.temperature[i]-tl)
-                                       + grid.outer_heat_flux/grid.ds_i(i);
-                            s.g_right[i] = 0.0;
-                        }
-                        s.target[i] = s.e_old[i]+dt*divergence;
-                        const double residual = s.e_at_T[i]-s.target[i];
-                        s.a[i] = -dt*s.g_left[i];
-                        s.b[i] = s.capacity[i]+dt*(s.g_left[i]+s.g_right[i]);
-                        s.c[i] = -dt*s.g_right[i];
-                        s.rhs[i] = -residual;
-                        local_residual_max = std::max(local_residual_max,
-                            std::abs(residual)/std::max(s.e_old[i],1.0e-30));
-                    } catch (...) {
-                        failure.capture(i, std::current_exception());
-                    }
-                }
-                residual_max_slots[static_cast<std::size_t>(tid)] = local_residual_max;
-#pragma omp barrier
-
-#pragma omp single
-                {
-                    if (failure.failed()) {
-                        stop = true;
-                    } else {
-                        s.a[0]=0.0;
-                        s.c[ns-1]=0.0;
-                        double max_scaled_residual = 0.0;
-                        for (int slot = 0; slot < team_size; ++slot)
-                            max_scaled_residual = std::max(
-                                max_scaled_residual,
-                                residual_max_slots[static_cast<std::size_t>(slot)]);
-                        if (max_scaled_residual < 2.0e-11) {
-                            converged = true;
-                            converged_after_updates = iteration;
-                            stop = true;
-                        } else if (previous_step_was_small) {
-                            failure.capture(ns, std::make_exception_ptr(std::runtime_error(
-                                "gamma-table mixture conduction stagnated before residual convergence: "
-                                "scaled_residual="+std::to_string(max_scaled_residual))));
-                            stop = true;
-                        } else if (iteration == 40) {
-                            stop = true;
-                        } else {
-                            try {
-                                thomas_solve_double_inplace(s.a,s.b,s.c,s.rhs,s.delta);
-                            } catch (...) {
-                                failure.capture(ns, std::current_exception());
-                                stop = true;
-                            }
-                        }
-                    }
-                }
-                if (stop) break;
-
-                double local_step_max = 0.0;
-#pragma omp for schedule(static)
-                for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
-                    const arma::uword i = static_cast<arma::uword>(raw_i);
-                    try {
-                        double candidate = s.temperature[i]+s.delta[i];
-                        if (!std::isfinite(candidate))
-                            throw std::runtime_error(
-                                "gamma-table mixture conduction Newton produced non-finite T");
-                        const double tmin = grid.eos_gamma_table.min_temperature();
-                        const double tmax = grid.eos_gamma_table.max_temperature();
-                        if (candidate<=tmin)
-                            candidate=0.5*(s.temperature[i]+tmin);
-                        if (candidate>=tmax)
-                            candidate=0.5*(s.temperature[i]+tmax);
-                        local_step_max = std::max(local_step_max,
-                            std::abs(candidate-s.temperature[i])/
-                            std::max(s.temperature[i],1.0));
-                        s.temperature[i]=candidate;
-                    } catch (...) {
-                        failure.capture(i, std::current_exception());
-                    }
-                }
-                step_max_slots[static_cast<std::size_t>(tid)] = local_step_max;
-#pragma omp barrier
-
-#pragma omp single
-                {
-                    if (failure.failed()) {
-                        stop = true;
-                    } else {
-                        double max_relative_step = 0.0;
-                        for (int slot = 0; slot < team_size; ++slot)
-                            max_relative_step = std::max(
-                                max_relative_step,
-                                step_max_slots[static_cast<std::size_t>(slot)]);
-                        previous_step_was_small = max_relative_step < 2.0e-11;
-                    }
-                }
-                if (stop) break;
-            }
-        }
-    }
-
-    failure.rethrow_lowest();
-    if (!converged)
-        throw std::runtime_error("gamma-table mixture conduction Newton did not converge");
-    profile_note_conduction_iterations(
-        static_cast<std::uint64_t>(converged_after_updates));
-
-    if (grid.capture_outer_conduction) {
-        OuterConductionCapture& oc = grid.outer_conduction_capture;
-        oc.T_top  = s.temperature[ns-1];
-        oc.T_wall = wall.T;
-        oc.kappa_phys_face = diag_kr_top;
-        oc.ds_face    = grid.outer_conduction_temperature_override
-            ? 0.5*static_cast<double>(grid.ds_i(ns-1))
-            : static_cast<double>(grid.ds_iph_i(ns-1));
-        oc.chi_num_face = numerical_diffusivity_at_face(grid, oc.ds_face);
-        oc.kappa_num_face  = oc.chi_num_face*diag_cv_r_top;
-        oc.area_ratio = grid.B_i(ns-1)/grid.B_iph(ns-1);
-        const double dT_over_ds = (oc.T_wall-oc.T_top)/oc.ds_face;
-        oc.q_phys = oc.kappa_phys_face*dT_over_ds;
-        oc.q_num  = oc.kappa_num_face*dT_over_ds;
-        oc.q_total = oc.q_phys+oc.q_num;
-        oc.imposed_neumann = grid.impose_outer_heat_flux;
-        oc.valid = true;
-    }
-
-    return pack_gamma_known_temperature(grid,state,s.target,s.temperature);
-}
-
-double gamma_conduction_residual_max(const Grid& grid, const Vec& before,
-                                     const Vec& after, double dt) {
-    if (grid.eos_gamma_table.empty())
-        throw std::logic_error("gamma conduction residual requires a Gamma1 table");
-    const GammaThermoFields old = decode_gamma_fields(grid, before);
-    const GammaThermoFields now = decode_gamma_fields(grid, after);
-    const arma::uword ns = grid.ns;
-    std::vector<double> conductivity(ns), capacity(ns);
-    for (arma::uword i = 0; i < ns; ++i) {
-        conductivity[i] = gamma_kappa_e(now.n_e(i), now.n_hi(i), now.temperature(i))
-                        * gamma_trac_factor(grid, now.temperature(i))
-                        + gamma_kappa_n(now.n_e(i), now.n_hi(i), now.temperature(i));
-        capacity[i] = equilibrium_heat_capacity(now.rho_exact[i], now.temperature_exact[i]);
-    }
-    const CaloricMixtureThermo inner = decode_gamma_ghost(
-        grid, grid.inner_boundary0_i, grid.phi_g_imh(0));
-    const CaloricMixtureThermo outer = decode_gamma_ghost(
-        grid, grid.outer_boundary0_i, grid.phi_g_iph(ns-1));
-    const double k_inner = gamma_kappa_e(inner.n_e, inner.n_HI, inner.T)
-                         * gamma_trac_factor(grid, inner.T)
-                         + gamma_kappa_n(inner.n_e, inner.n_HI, inner.T);
-    const OuterConductionGhost wall = outer_conduction_ghost(grid, outer);
-    const double k_outer = gamma_kappa_e(wall.n_e, wall.n_HI, wall.T)
-                         * gamma_trac_factor(grid, wall.T)
-                         + gamma_kappa_n(wall.n_e, wall.n_HI, wall.T);
-    auto face_k = [&](double kh, double kt, double dh, double dtw) {
-        if (grid.uniform_mesh) return 0.5*(kh+kt);
-        kh=std::max(kh,1.0e-30); kt=std::max(kt,1.0e-30);
-        return (dh+dtw)/(dh/kh+dtw/kt);
-    };
-    double maximum = 0.0;
-    for (arma::uword i = 0; i < ns; ++i) {
-        const double kl = i == 0
-            ? face_k(conductivity[i],k_inner,grid.ds_i(i),grid.ds_i(i))
-            : face_k(conductivity[i],conductivity[i-1],grid.ds_i(i),grid.ds_i(i-1));
-        const bool physical_outer_face =
-            i+1 == ns && grid.outer_conduction_temperature_override;
-        const double kr = i+1 == ns
-            ? (physical_outer_face
-                ? k_outer
-                : face_k(conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i)))
-            : face_k(conductivity[i],conductivity[i+1],grid.ds_i(i),grid.ds_i(i+1));
-        const double cv_l = i ? 0.5*(capacity[i]+capacity[i-1]) : capacity[i];
-        const double cv_r = i+1 < ns ? 0.5*(capacity[i]+capacity[i+1]) : capacity[i];
-        double gl = grid.B_i(i)/grid.ds_i(i)
-                  *(kl+numerical_diffusivity_at_face(grid,grid.ds_imh_i(i))*cv_l)
-                  /grid.B_imh(i)/grid.ds_imh_i(i);
-        const double ds_right = physical_outer_face
-            ? 0.5*static_cast<double>(grid.ds_i(i))
-            : static_cast<double>(grid.ds_iph_i(i));
-        double gr = grid.B_i(i)/grid.ds_i(i)
-                  *(kr+numerical_diffusivity_at_face(grid,ds_right)*cv_r)
-                  /grid.B_iph(i)/ds_right;
-        const double tl = i ? now.temperature(i-1) : inner.T;
-        const double tr = i+1 < ns ? now.temperature(i+1) : wall.T;
-        double divergence = gr*(tr-now.temperature(i))-gl*(now.temperature(i)-tl);
-        if (i == 0 && grid.inner_conduction_neumann)
-            divergence += gl*(now.temperature(i)-tl);
-        if (i+1 == ns && grid.impose_outer_heat_flux)
-            divergence = -gl*(now.temperature(i)-tl)+grid.outer_heat_flux/grid.ds_i(i);
-        const double e_old = old.internal_energy_exact[i];
-        const double residual = now.internal_energy_exact[i]
-                              - e_old-dt*divergence;
-        maximum = std::max(maximum,std::abs(residual)/std::max(e_old,1.0e-30));
-    }
-    return maximum;
-}
-
-static float compute_gamma_trac_cutoff_T(const Grid& grid, const Vec& state) {
-    const GammaThermoFields th = decode_gamma_fields(grid, state);
-    const Vec& T = th.temperature;
-    const float Tpeak = arma::max(T);
-    const float Tc_upper = std::max(grid.trac_Tc_max_frac*Tpeak, grid.trac_T_chrom);
-    float Tc = grid.trac_T_chrom;
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        float dTds;
-        if (grid.ns == 1) dTds = 0.0f;
-        else if (i == 0) dTds = (T(1)-T(0))/grid.ds_iph_i(0);
-        else if (i+1 == grid.ns) dTds = (T(i)-T(i-1))/grid.ds_imh_i(i);
-        else dTds = (T(i+1)-T(i-1))/(grid.ds_iph_i(i)+grid.ds_imh_i(i));
-        if (std::fabs(dTds)*grid.ds_i(i) > 0.5f*T(i)) Tc = std::max(Tc, T(i));
-    }
-    return std::min(Tc, Tc_upper);
-}
-
-static Vec set_gamma_internal_energy_and_project(
-        const Grid& grid, const Vec& state,
-        const std::vector<double>& target_internal_energy) {
-    if (target_internal_energy.size() != grid.ns)
-        throw std::invalid_argument("gamma internal-energy target has wrong size");
-    Vec updated = state;
-    const auto sz = arma::size(grid.ns, num_of_eq);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        auto at = [&](arma::uword k) -> double {
-            return static_cast<double>(state(arma::sub2ind(sz, i, k)));
-        };
-        const double rho = at(cons::RHO_I)+at(cons::RHO_N);
-        const double momentum = at(cons::MOM_I)+at(cons::MOM_N);
-        const double phi = 0.5*static_cast<double>(grid.phi_g_imh(i)+grid.phi_g_iph(i));
-        const double carried = 0.5*momentum*momentum/rho+rho*phi;
-        const double e_min = equilibrium_internal_energy(
-            rho, grid.eos_gamma_table.min_temperature());
-        const double e_max = equilibrium_internal_energy(
-            rho, grid.eos_gamma_table.max_temperature());
-        const double target = target_internal_energy[i];
-        if (!std::isfinite(target))
-            throw std::domain_error(
-                "non-finite gamma internal-energy target at cell "+std::to_string(i)
-                +", time="+std::to_string(grid.sim_time)+", rho="+std::to_string(rho));
-        const double tolerance = 64.0*std::numeric_limits<double>::epsilon()
-                               * std::max({std::abs(target), e_min, e_max});
-        if (target < e_min-tolerance || target > e_max+tolerance)
-            throw std::out_of_range(
-                "gamma source target outside EOS caloric domain at cell "
-                +std::to_string(i)+", time="+std::to_string(grid.sim_time)
-                +", rho="+std::to_string(rho)+", target_e="+std::to_string(target)
-                +", valid_e=["+std::to_string(e_min)+","+std::to_string(e_max)+"]"
-                +", T_range=["+std::to_string(grid.eos_gamma_table.min_temperature())
-                +","+std::to_string(grid.eos_gamma_table.max_temperature())+"]");
-        const float energy_i = state(arma::sub2ind(sz, i, cons::E_I));
-        float energy_n = static_cast<float>(target+carried-static_cast<double>(energy_i));
-        const double legal_min = e_min+carried;
-        const double legal_max = e_max+carried;
-        while (static_cast<double>(energy_i)+energy_n < legal_min)
-            energy_n = std::nextafter(energy_n, std::numeric_limits<float>::infinity());
-        while (static_cast<double>(energy_i)+energy_n > legal_max)
-            energy_n = std::nextafter(energy_n, -std::numeric_limits<float>::infinity());
-        if (!std::isfinite(energy_n)
-            || static_cast<double>(energy_i)+energy_n < legal_min
-            || static_cast<double>(energy_i)+energy_n > legal_max)
-            throw std::runtime_error("failed to pack gamma internal energy inside EOS domain");
-        updated(arma::sub2ind(sz, i, cons::E_N)) = energy_n;
-    }
-    Vec projected = project_equilibrium_single_fluid(grid, updated);
-    // The projection itself returns double rows which are then stored in Vec<float>.
-    // Re-check that final packed representation as well: independently rounding
-    // E_I and its conservative E_N remainder can otherwise cross a table edge.
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        auto at = [&](arma::uword k) -> double {
-            return static_cast<double>(projected(arma::sub2ind(sz, i, k)));
-        };
-        const double rho = at(cons::RHO_I)+at(cons::RHO_N);
-        const double momentum = at(cons::MOM_I)+at(cons::MOM_N);
-        const double phi = 0.5*static_cast<double>(grid.phi_g_imh(i)+grid.phi_g_iph(i));
-        const double carried = 0.5*momentum*momentum/rho+rho*phi;
-        const double legal_min = equilibrium_internal_energy(
-            rho, grid.eos_gamma_table.min_temperature())+carried;
-        const double legal_max = equilibrium_internal_energy(
-            rho, grid.eos_gamma_table.max_temperature())+carried;
-        const float energy_i = projected(arma::sub2ind(sz, i, cons::E_I));
-        float& energy_n = projected(arma::sub2ind(sz, i, cons::E_N));
-        while (static_cast<double>(energy_i)+energy_n < legal_min)
-            energy_n = std::nextafter(energy_n, std::numeric_limits<float>::infinity());
-        while (static_cast<double>(energy_i)+energy_n > legal_max)
-            energy_n = std::nextafter(energy_n, -std::numeric_limits<float>::infinity());
-        const MixtureThermo verified = decode_equilibrium_mixture(
-            grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
-            at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N), phi,
-            grid.eos_temperature_hint(i), grid.eos_gamma_debug_clamp);
-        grid.store_eos_temperature_hint(i, verified.T);
-        projected(arma::sub2ind(sz, i, cons::E_E)) = static_cast<float>(1.5*verified.p_e);
-    }
-    return projected;
-}
-
-static Vec apply_gamma_beam_heating_stage(const Grid& grid, const Vec& state, double dt) {
-    const GammaThermoFields th = decode_gamma_fields(grid, state);
-    Vec Q = beam_heating_rate(grid, th.n_e, th.n_hi);
-    if (grid.enable_trac) Q /= trac_broadening_factor(grid, th.temperature);
-    std::vector<double> target(grid.ns);
-    for (arma::uword i = 0; i < grid.ns; ++i)
-        target[i] = th.internal_energy_exact[i]+dt*Q(i);
-    return set_gamma_internal_energy_and_project(grid, state, target);
-}
-
-static Vec apply_gamma_coronal_heating_stage(const Grid& grid, const Vec& state, double dt) {
-    Vec Q = coronal_heating_rate(grid);
-    if (grid.enable_trac) {
-        const GammaThermoFields th = decode_gamma_fields(grid, state);
-        Q /= trac_broadening_factor(grid, th.temperature);
-    }
-    const GammaThermoFields th = decode_gamma_fields(grid, state);
-    std::vector<double> target(grid.ns);
-    for (arma::uword i = 0; i < grid.ns; ++i)
-        target[i] = th.internal_energy_exact[i]+dt*Q(i);
-    return set_gamma_internal_energy_and_project(grid, state, target);
-}
-
-static Vec apply_gamma_radiative_cooling_stage(const Grid& grid, const Vec& state,
-                                                double dt) {
-    const GammaThermoFields th = decode_gamma_fields(grid, state);
-    Vec Qthin = radiative_loss_thin(grid, th.n_e, th.n_hi, th.temperature);
-    if (grid.enable_trac) Qthin /= trac_broadening_factor(grid, th.temperature);
-    const Vec Q = radiative_loss_thick(grid, th.n_e, th.n_hi, th.temperature)+Qthin;
-    std::vector<double> target(grid.ns);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const double e_old = th.internal_energy_exact[i];
-        const double e_floor = equilibrium_internal_energy(
-            th.rho_exact[i], grid.eos_gamma_table.min_temperature());
-        const double denom = 1.0 + dt*std::max(0.0, static_cast<double>(Q(i)))
-                                   /std::max(e_old, 1.0e-30);
-        const double e_new = std::max(e_floor, e_old/denom);
-        target[i] = e_new;
-    }
-    return set_gamma_internal_energy_and_project(grid, state, target);
 }
 
 // ----------------------------------------------------------------------------
@@ -1963,10 +1208,10 @@ static void ensure_eq_residual(Grid& grid) {
 // RHS differentiates that updated pressure field.
 // ----------------------------------------------------------------------------
 Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
-    if (!grid.eos_gamma_table.empty()) {
-        const DecodedMixtureField decoded = decode_mixture_field(grid, xn_state);
-        return advance_Euler_state(grid, xn_state, dt_i, decoded);
-    }
+    if (!grid.eos_gamma_table.empty())
+        throw std::logic_error(
+            "the legacy two-fluid integrator cannot advance a Gamma1-table Grid; "
+            "use mixture_advance");
     broadcast_dt(grid, dt_i);
     ensure_eq_residual(grid);
 
@@ -2031,39 +1276,14 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     return prim2cons(grid, prim);
 }
 
-Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i,
-                        const DecodedMixtureField& decoded) {
-    if (grid.eos_gamma_table.empty())
-        return advance_Euler_state(grid, xn_state, dt_i);
-    decoded.require_matches(grid, xn_state);
-    if (!grid.single_fluid || grid.enable_Te || grid.enable_ionization)
-        throw std::logic_error(
-            "gamma-table Euler mode requires single_fluid=1, ENABLE_TE=0, and ionization disabled");
-    broadcast_dt(grid, dt_i);
-    ensure_eq_residual(grid);
-    const Vec U_star = xn_state+grid.dt_state%
-        rhs_explicit_state(grid,xn_state,decoded);
-    const double dt = dt_i(0);
-    Vec state = project_equilibrium_single_fluid(grid,U_star);
-    if (grid.enable_trac)
-        grid.trac_cutoff_T=compute_gamma_trac_cutoff_T(grid,state);
-    if (grid.enable_conduction)
-        state=apply_gamma_conduction_stage(grid,state,dt);
-    if (grid.enable_beam_heating)
-        state=apply_gamma_beam_heating_stage(grid,state,dt);
-    if (grid.enable_coronal_heating)
-        state=apply_gamma_coronal_heating_stage(grid,state,dt);
-    if (grid.enable_radiative_cooling)
-        state=apply_gamma_radiative_cooling_stage(grid,state,dt);
-    return state;
-}
-
 // Pure-explicit step: identical to the first half of advance_Euler_state with
 // the implicit drag / temperature / conduction stages omitted. Useful for
 // comparison runs that need R_I ≡ 0.
 Vec advance_Euler_explicit_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     if (!grid.eos_gamma_table.empty())
-        throw std::logic_error("advance_Euler_explicit_state is unsupported in gamma-table mode; use advance_Euler_state with projection");
+        throw std::logic_error(
+            "advance_Euler_explicit_state is a legacy two-fluid entry point and "
+            "cannot advance a Gamma1-table Grid");
     broadcast_dt(grid, dt_i);
     ensure_eq_residual(grid);
     return xn_state + grid.dt_state % rhs_explicit_state(grid, xn_state);
@@ -2071,7 +1291,9 @@ Vec advance_Euler_explicit_state(Grid& grid, const Vec& xn_state, const Vec& dt_
 
 Vec advance_RK4(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     if (!grid.eos_gamma_table.empty())
-        throw std::logic_error("advance_RK4 is unsupported in gamma-table mode; use advance_Euler_state with projection");
+        throw std::logic_error(
+            "advance_RK4 is a legacy two-fluid entry point and cannot advance a "
+            "Gamma1-table Grid");
     broadcast_dt(grid, dt_i);
     ensure_eq_residual(grid);
     const Vec k1 = grid.dt_state % rhs_explicit_state(grid, xn_state);

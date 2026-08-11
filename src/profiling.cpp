@@ -64,7 +64,6 @@ const char* region_name(ProfileRegion region) {
     case ProfileRegion::Cfl: return "cfl";
     case ProfileRegion::Decode: return "decode";
     case ProfileRegion::Rhs: return "rhs";
-    case ProfileRegion::Projection: return "projection";
     case ProfileRegion::Conduction: return "conduction";
     case ProfileRegion::Boundary: return "boundary";
     case ProfileRegion::Output: return "output";

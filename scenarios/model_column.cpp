@@ -1,4 +1,5 @@
 #include "model_column.hpp"
+#include "../mixture.hpp"
 #include "model_c7.hpp"   // c7_full_profile + c7_route_b_photoionization (C7 library)
 #include "mesh.hpp"       // shared static local-refinement mesh builder
 
@@ -88,27 +89,13 @@ double gamma_density_from_pressure(const Grid& grid, double pressure, double tem
     return equilibrium_density_from_pressure(pressure, temperature);
 }
 
-void store_mixture(Vec& ob, const MixtureFaceState& face) {
-    ob(cons::RHO_I) = face.conserved.rho_i;
-    ob(cons::RHO_N) = face.conserved.rho_n;
-    ob(cons::MOM_I) = face.conserved.momentum_i;
-    ob(cons::MOM_N) = face.conserved.momentum_n;
-    ob(cons::E_I) = face.conserved.energy_i;
-    ob(cons::E_N) = face.conserved.energy_n;
-    ob(cons::E_E) = face.conserved.energy_e;
-}
-
-// Pack a ghost cell from explicit ion/neutral densities, temperature, velocity and
-// the gravitational potential (p_i = 2 n_i k T incl. electrons, p_n = n_n k T,
-// ε_e = 3/2 p_e ⇒ T_e = T_i). Taking (rho_i, rho_n) explicitly lets each ghost
-// carry the LOCAL ionization fraction (ionized corona ↔ neutral chromosphere).
+// Pack a LEGACY two-fluid ghost cell from explicit ion/neutral densities,
+// temperature, velocity and the gravitational potential (p_i = 2 n_i k T incl.
+// electrons, p_n = n_n k T, ε_e = 3/2 p_e ⇒ T_e = T_i). Taking (rho_i, rho_n)
+// explicitly lets each ghost carry the LOCAL ionization fraction (ionized corona
+// ↔ neutral chromosphere). The release solver packs its ghosts through
+// mixture_pack_ghost instead, which needs only the total density.
 void pack_ghost(Vec& ob, const Grid& grid, float rho_i, float rho_n, float T, float V, float phi_g) {
-    if (!grid.eos_gamma_table.empty()) {
-        store_mixture(ob, equilibrium_mixture_face_state(
-            grid.eos_gamma_table, static_cast<double>(rho_i)+rho_n, V, T, phi_g,
-            grid.eos_trace_fraction_floor, grid.eos_gamma_debug_clamp));
-        return;
-    }
     const float n_i = rho_i / grid.m_i;
     const float n_n = rho_n / grid.m_n;
     const float p_i = 2.0f * n_i * grid.k_b * T;   // protons + electrons
@@ -181,11 +168,11 @@ Vec model_column_ic(Grid& grid) {
     // Stage 2b radiative sink. Gentle evaporation is the competition between the
     // downward conductive flux and radiative cooling (Antiochos & Sturrock 1978).
     const bool  cooling_on = heat_flux_on && (env_f("ISO_COOLING", 0.0f) != 0.0f);
-    // Full-physics opt-ins (default off ⇒ clean single-fluid, frozen-ionization):
-    const bool  two_fluid_on  = (env_f("ISO_TWO_FLUID", 0.0f) != 0.0f);
-    const bool  ionization_on = (env_f("ISO_IONIZATION", 0.0f) != 0.0f);
-    if (gamma_mode && (two_fluid_on || ionization_on))
-        throw std::logic_error("gamma-table model_column requires ISO_TWO_FLUID=0 and ISO_IONIZATION=0");
+    // LEGACY two-fluid research opt-ins (model_gentle). They are read only when
+    // no Gamma1 table is loaded: the release solver is a single-fluid equilibrium
+    // mixture and has neither a neutral fluid nor a finite-rate ionization stage.
+    const bool  two_fluid_on  = !gamma_mode && (env_f("ISO_TWO_FLUID", 0.0f) != 0.0f);
+    const bool  ionization_on = !gamma_mode && (env_f("ISO_IONIZATION", 0.0f) != 0.0f);
     kHeatFluxOn        = heat_flux_on;
     kAjump             = env_f("ISO_TJUMP_A", 1.0f);
     kBjump             = env_f("ISO_TJUMP_B", 1.0f);
@@ -200,7 +187,7 @@ Vec model_column_ic(Grid& grid) {
     // conduction-only experiment leaves out. Set BEFORE the IC/BC build.
     if (!gamma_mode) grid.gamma_mono = env_f("ISO_GAMMA", grid.gamma_mono);
     grid.single_fluid = gamma_mode || !two_fluid_on;
-    grid.enable_ionization = !gamma_mode && ionization_on;
+    grid.enable_ionization = ionization_on;
     grid.enable_Te = false;
 
     // --- geometry: straight field line, gravity on -----------------------
@@ -311,7 +298,8 @@ Vec model_column_ic(Grid& grid) {
         nn_c(i) = n_n;
     }
 
-    Vec xn = arma::zeros<Vec>(grid.n_state);
+    Vec xn = arma::zeros<Vec>(
+        gamma_mode ? grid.n_mixture_state : grid.n_state);
     const auto sz = arma::size(grid.ns, num_of_eq);
     for (arma::uword i = 0; i < grid.ns; ++i) {
         const float T     = T_c(i);
@@ -321,10 +309,8 @@ Vec model_column_ic(Grid& grid) {
         const float rho_i = n_i * grid.m_i;
         const float rho_n = n_n * grid.m_n;
         if (gamma_mode) {
-            Vec packed(num_of_eq, arma::fill::zeros);
-            pack_ghost(packed, grid, rho_i, rho_n, T, 0.0f, phi_g);
-            for (arma::uword k = 0; k < num_of_eq; ++k)
-                xn(arma::sub2ind(sz, i, k)) = packed(k);
+            mixture_pack_cell(grid, xn, i, static_cast<double>(rho_i)+rho_n,
+                              0.0, T, phi_g);
             continue;
         }
         const float p_i   = 2.0f * n_i * grid.k_b * T;
@@ -361,8 +347,8 @@ Vec model_column_ic(Grid& grid) {
         const float Tc = env_f("ISO_TBOOST_TC", 3.0e5f);   // selector center [K]
         const float Tw = env_f("ISO_TBOOST_W",  1.0e5f);   // selector width  [K]
         for (arma::uword i = 0; i < grid.ns; ++i) {
-            const float rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
-            const float rho_n = xn(arma::sub2ind(sz, i, cons::RHO_N));
+            const float rho_i = ni_c(i) * grid.m_i;
+            const float rho_n = nn_c(i) * grid.m_n;
             const float phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
             const float n_i = rho_i / grid.m_i;
             const float n_n = rho_n / grid.m_n;
@@ -370,10 +356,8 @@ Vec model_column_ic(Grid& grid) {
             const float w   = 0.5f * (1.0f + std::tanh((T - Tc) / Tw));   // ~0 chromo → ~1 corona
             const float Tb  = (1.0f + (T_boost - 1.0f) * w) * T;
             if (gamma_mode) {
-                Vec packed(num_of_eq, arma::fill::zeros);
-                pack_ghost(packed, grid, rho_i, rho_n, Tb, 0.0f, phi_g);
-                for (arma::uword k = 0; k < num_of_eq; ++k)
-                    xn(arma::sub2ind(sz, i, k)) = packed(k);
+                mixture_pack_cell(grid, xn, i, static_cast<double>(rho_i)+rho_n,
+                                  0.0, Tb, phi_g);
                 continue;
             }
             const float p_i_b = 2.0f * n_i * grid.k_b * Tb;               // protons + electrons
@@ -514,7 +498,7 @@ Vec model_column_ic(Grid& grid) {
 
     // --- runtime physics toggles ------------------------------------------
     grid.single_fluid             = gamma_mode || !two_fluid_on;
-    grid.enable_ionization        = !gamma_mode && ionization_on;
+    grid.enable_ionization        = ionization_on;
     grid.enable_radiative_cooling = cooling_on;
     grid.enable_beam_heating      = false;
     grid.enable_coronal_heating   = false;
@@ -643,8 +627,25 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
     // Decode total density / pressure / temperature / velocity / ionization fraction
     // x = ρ_i/ρ_tot of an interior cell (cons2prim convention). Single-fluid T uses
     // the LOCAL ionization (p = (2 n_i + n_n) k T).
-    auto cell_state = [&](arma::uword i, float& rho_tot, float& p_tot,
-                          float& T, float& V, float& x) {
+    // Release state: decode the mixture cell straight out of (rho, rho u, E).
+    auto mixture_cell_state = [&](arma::uword i, float& rho_tot, float& p_tot,
+                                  float& T, float& V, float& x) {
+        const auto msz = arma::size(grid.ns, num_of_mixture_eq);
+        const MixtureThermo th = decode_equilibrium_mixture(
+            grid.eos_gamma_table,
+            xn(arma::sub2ind(msz, i, mix::RHO)),
+            xn(arma::sub2ind(msz, i, mix::MOM)),
+            xn(arma::sub2ind(msz, i, mix::ENERGY)),
+            mixture_cell_phi(grid, i),
+            std::numeric_limits<double>::quiet_NaN(), grid.eos_gamma_debug_clamp);
+        rho_tot = th.rho; p_tot = th.p; T = th.T;
+        V = static_cast<double>(xn(arma::sub2ind(msz, i, mix::MOM)))/th.rho;
+        x = th.x;
+    };
+
+    // Legacy two-fluid state (single-fluid T from the local ionization).
+    auto two_fluid_cell_state = [&](arma::uword i, float& rho_tot, float& p_tot,
+                                    float& T, float& V, float& x) {
         const float rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
         const float rho_n = xn(arma::sub2ind(sz, i, cons::RHO_N));
         const float momI  = xn(arma::sub2ind(sz, i, cons::MOM_I));
@@ -652,14 +653,6 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         const float E_i   = xn(arma::sub2ind(sz, i, cons::E_I));
         const float E_n   = xn(arma::sub2ind(sz, i, cons::E_N));
         const float phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
-        if (!grid.eos_gamma_table.empty()) {
-            const MixtureThermo th = decode_equilibrium_mixture(
-                grid.eos_gamma_table, rho_i, rho_n, momI, momN, E_i, E_n, phi_g,
-                std::numeric_limits<double>::quiet_NaN(), grid.eos_gamma_debug_clamp);
-            rho_tot = th.rho; p_tot = th.p_i+th.p_n; T = th.T;
-            V = (momI+momN)/th.rho; x = th.x_eq;
-            return;
-        }
         const float Vi    = momI / rho_i;
         const float Un    = momN / rho_n;
         const float p_i   = grid.gm1() * E_i - grid.half_gm1() * rho_i * Vi * Vi - grid.gm1() * rho_i * phi_g;
@@ -671,6 +664,13 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         T       = p_tot / ((2.0f * n_i + n_n) * k_b);   // single-fluid T, local ionization
         V       = Vi;
         x       = rho_i / rho_tot;                      // ionization fraction
+    };
+
+    const bool release = !grid.eos_gamma_table.empty();
+    auto cell_state = [&](arma::uword i, float& rho_tot, float& p_tot,
+                          float& T, float& V, float& x) {
+        if (release) mixture_cell_state(i, rho_tot, p_tot, T, V, x);
+        else         two_fluid_cell_state(i, rho_tot, p_tot, T, V, x);
     };
 
     // --- imposed q(T) flux ramp (ISO_QFLUX) --------------------------------
@@ -766,9 +766,8 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         // against the interior, and is exactly hydrostatic at the V=0 IC by
         // construction. Physically: a corona of fixed pressure and T sits above 2153 km.
         auto ghost_density = [&](float p_gh, float T_gh) {
-            return grid.eos_gamma_table.empty()
-                ? p_gh*m_i/((1.0f+x_top)*k_b*T_gh)
-                : gamma_density_from_pressure(grid, p_gh, T_gh);
+            return release ? gamma_density_from_pressure(grid, p_gh, T_gh)
+                           : p_gh*m_i/((1.0f+x_top)*k_b*T_gh);
         };
         // ρ_ghost depends on p_ghost, so take one fixed-point pass seeded with the
         // rung below (the correction is O(Δs·Δρ/ρ) and converges in a single sweep).
@@ -814,19 +813,26 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         // prevents the ill-posed-inflow runaway.
         float V_g = 0.0f;
         if (kHeatFluxOn) {
-            const float c_s = grid.eos_gamma_table.empty()
-                ? std::sqrt(2.0f*grid.gamma_mono*k_b*T_top/m_i)
-                : std::sqrt(gamma_state(grid.eos_gamma_table, rho_top, T_top,
-                                        grid.eos_gamma_debug_clamp).gamma_sound*p_top/rho_top);
+            const float c_s = release
+                ? std::sqrt(gamma_state(grid.eos_gamma_table, rho_top, T_top,
+                                        grid.eos_gamma_debug_clamp).gamma_sound*p_top/rho_top)
+                : std::sqrt(2.0f*grid.gamma_mono*k_b*T_top/m_i);
             const float vcap = kVcapMach * c_s;
             V_g = V_top;
             if (V_g >  vcap) V_g =  vcap;
             if (V_g < -vcap) V_g = -vcap;
         }
-        pack_ghost(grid.outer_boundary0_i, grid, x_top * rho_g0, (1.0f - x_top) * rho_g0,
-                   T_g0, V_g, phi_g_out);
-        pack_ghost(grid.outer_boundary1_i, grid, x_top * rho_g1, (1.0f - x_top) * rho_g1,
-                   T_g1, V_g, phi_g_out);
+        if (release) {
+            mixture_pack_ghost(grid, grid.mix_outer_boundary0, rho_g0, V_g, T_g0,
+                               phi_g_out);
+            mixture_pack_ghost(grid, grid.mix_outer_boundary1, rho_g1, V_g, T_g1,
+                               phi_g_out);
+        } else {
+            pack_ghost(grid.outer_boundary0_i, grid, x_top * rho_g0,
+                       (1.0f - x_top) * rho_g0, T_g0, V_g, phi_g_out);
+            pack_ghost(grid.outer_boundary1_i, grid, x_top * rho_g1,
+                       (1.0f - x_top) * rho_g1, T_g1, V_g, phi_g_out);
+        }
     }
 
     // ====================================================================
@@ -839,11 +845,11 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
     // ====================================================================
     {
         const float phi_g_in = grid.phi_g_imh(0);
-        if (!grid.eos_gamma_table.empty()) {
-            pack_ghost(grid.inner_boundary0_i, grid, kInnerRhoIGh, kInnerRhoNGh,
-                       kInnerTRef, 0.0f, phi_g_in);
-            pack_ghost(grid.inner_boundary1_i, grid, kInnerRhoIGh2, kInnerRhoNGh2,
-                       kInnerTRef, 0.0f, phi_g_in);
+        if (release) {
+            mixture_pack_ghost(grid, grid.mix_inner_boundary0, kInnerRhoIGh, 0.0,
+                               kInnerTRef, phi_g_in);
+            mixture_pack_ghost(grid, grid.mix_inner_boundary1, kInnerRhoIGh2, 0.0,
+                               kInnerTRef, phi_g_in);
             grid.broadcast();
             return;
         }

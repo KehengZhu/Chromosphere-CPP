@@ -1,7 +1,7 @@
 file(REMOVE "${OUT}" "${OUT}.gamma_diag")
 execute_process(
     COMMAND ${CMAKE_COMMAND} -E env
-            GAMMA_TABLE=${TABLE} SINGLE_FLUID=1 ENABLE_TE=0 ISO_NS=48
+            GAMMA_TABLE=${TABLE} ISO_NS=48
             ${EXE} ${OUT} full no-ionization model_column - 0 no-cooling
     RESULT_VARIABLE STATUS
     OUTPUT_VARIABLE STDOUT
@@ -27,6 +27,13 @@ endforeach()
 string(REGEX MATCH "^([0-9]+) 10" HEADER_MATCH "${CONTENT}")
 if(NOT HEADER_MATCH)
     message(FATAL_ERROR "gamma sidecar data-width header is not the expected 10 columns")
+endif()
+# The raw snapshot carries the release conserved state: three rows per cell.
+file(READ "${OUT}" RAW_CONTENT)
+string(REGEX MATCH "^([0-9]+) 3\n" RAW_HEADER "${RAW_CONTENT}")
+if(NOT RAW_HEADER)
+    message(FATAL_ERROR
+        "release snapshot header is not the expected 3 conserved rows (rho, rho u, E)")
 endif()
 file(REMOVE "${OUT}" "${OUT}.gamma_diag")
 message(STATUS "gamma diagnostic sidecar contains physical fields and EOS provenance")

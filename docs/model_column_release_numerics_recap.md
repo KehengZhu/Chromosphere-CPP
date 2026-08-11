@@ -20,6 +20,8 @@ scenario supplies it and the `ISO_*` model/grid defaults itself.)
 | Element | Release setting |
 | --- | --- |
 | Model | 1D field-aligned hydrodynamics on a straight field line, gravity on, `B ≡ 1` |
+| Solver / state | single-fluid equilibrium mixture, `U = (rho, rho u, E)` (`mixture.hpp`); carrier quantities derived, never stored |
+| Update path | `U^n -> MUSCL/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}` (no projection stage) |
 | Thermodynamics | Gamma/Saha equilibrium closure with ionization energy, production `Gamma1` table |
 | Reconstruction | MUSCL on `(ln ρ, V, ln p)`, MC3/Koren limiter, β = 2 |
 | Face temperature | exact inversion of the same Saha closure, `T(ρ, p)` |
@@ -32,7 +34,24 @@ scenario supplies it and the `ISO_*` model/grid defaults itself.)
 
 Both release choices are set in `model_column_ic` (`scenarios/model_column.cpp`) from
 `gamma_mode`, so the code is the single source of truth. The `Grid` struct defaults stay
-false, which leaves the non-Gamma scenarios on Rusanov + `(ln ρ, V, ln T)` unchanged.
+false, which leaves the non-release two-fluid scenarios on Rusanov + `(ln ρ, V, ln T)` unchanged.
+
+## Architecture
+
+The release solver lives in `mixture.hpp`, `src/mixture.cpp` and `src/mixture_integrator.cpp`
+and advances **three** conserved rows per cell. `x`, `rho_i = x·rho`, `rho_n = (1-x)·rho`,
+`n_e`, `n_HI` and `p_e` are derived EOS diagnostics recomputed wherever needed.
+
+The historical seven-row two-fluid / three-temperature / finite-rate-ionization solver is a
+separate non-release path (`chromosphere.hpp`, `src/state.cpp`, `src/flux.cpp`, `src/rhs.cpp`,
+`src/integrators.cpp`) with its own state width, packing, boundaries and source stages. A
+`Gamma1` table selects the release solver; each solver rejects the other's `Grid`, and a
+release run rejects `SINGLE_FLUID` / `ENABLE_TE` / `ISO_TWO_FLUID` / `ISO_IONIZATION`.
+
+The former conservative equilibrium projection has been **removed**: it was the identity on
+`(rho, rho·u, E)` and existed only to repair the four redundant degrees of freedom of the
+carrier-row layout. Removing it also removes one caloric inversion per cell per step and the
+small spurious per-step drift heating it used to thermalize.
 
 ## Reference (non-production) overrides
 
@@ -66,6 +85,16 @@ Invalid values, and the Gamma-only choices requested off the Gamma/Saha path, th
   `Q_M` 7.3e-4, `Q_eff` 7.3e-4, `F_eff` 1.09e-9 kg m⁻² s⁻¹, `T_top` 21838 K,
   `p_top` 0.010288 Pa, `n(V<0) = 0`, mass drift −3.0e-4.
   Run `outputs/model_column/release_roe_lnp_N500_100s*`.
+- **Three-variable architecture.** After the state refactor the same smoke test gives
+  `eps_p max` 0.0002 %, `Q_V` 1.32e-3, `Q_M` 7.0e-4, `Q_eff` 6.88e-4,
+  `F_eff` 1.11e-9 kg m⁻² s⁻¹, `T_top` 21838.4 K, `p_top` 0.010288 Pa, `n(V<0) = 0`,
+  mass drift −2.84e-4, and the defaults-vs-explicit-override run is still bitwise identical.
+  A 60 s N500 comparison against the pre-refactor binary takes the identical step count
+  (10668) and end time; T and p agree to a median 1e-5 / max 1.4e-3 relative, the peak
+  evaporation velocity moves 40.97 → 40.51 m/s, and column mass agrees to 1.7e-5. That
+  residual is accumulated float32 representation round-off, not a systematic error: it does
+  not shrink with `dt` (it grows with step count at CFL 0.25) and it is **smaller** than the
+  solver's own CFL 0.50 → 0.25 discretization sensitivity (median |Δv| 0.26 vs 0.49 m/s).
 
 Re-run both checks with `scripts/release_validation.sh`.
 

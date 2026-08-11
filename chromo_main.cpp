@@ -1,4 +1,5 @@
 #include "chromosphere.hpp"
+#include "mixture.hpp"
 #include "physics.hpp"
 #include "profiling.hpp"
 #include "parallel.hpp"
@@ -128,7 +129,7 @@ int main(int argc, char** argv) {
     const bool write_gamma_diag     = env_enabled("CHROMO_GAMMA_DIAG", true);
     // Read-only face-flux diagnostic (default OFF). CHROMO_FACE_FLUX_DIAG=1 writes
     // a <out>.faceflux sidecar holding the PRODUCTION total-mass face flux
-    // and its central/diffusive split, taken straight out of rhs_explicit_mixture.
+    // and its central/diffusive split, taken straight out of mixture_rhs_explicit.
     // CHROMO_FACE_FLUX_TOP limits each record to the top N cells (0 = all cells);
     // CHROMO_FACE_FLUX_STRIDE sets the capture cadence in steps (default: the
     // snapshot stride). Enabling it changes no numerical result.
@@ -175,49 +176,53 @@ int main(int argc, char** argv) {
             gamma_table_sha256 = sha256_file(gamma_table_path);
             grid.eos_gamma_table = EosGammaTable::load(gamma_table_path);
             if (explicit_only)
-                throw std::logic_error("GAMMA_TABLE requires the full Euler integrator, not explicit mode");
+                throw std::logic_error("the release solver has no explicit-only mode");
             if (scenario_name != "model_column" && scenario_name != "model_isentropic")
-                throw std::logic_error("GAMMA_TABLE currently supports only model_column/model_isentropic");
+                throw std::logic_error("the release solver currently supports only model_column");
         } catch (const std::exception& e) {
-            std::cerr << "gamma-table mode error: " << e.what() << std::endl;
+            std::cerr << "release-solver error: " << e.what() << std::endl;
             return 1;
         }
     }
+    // A loaded Gamma1 table selects the RELEASE single-fluid solver; without it
+    // the driver runs the historical two-fluid research solver.
+    const bool release_mode = !grid.eos_gamma_table.empty();
     grid.enable_ionization = ionization_on;
     grid.enable_radiative_cooling = cooling_on;
-    // "neutrals off" experiment: SINGLE_FLUID=1 slaves neutrals to the ion fluid
-    // (single-fluid limit). Default (unset/0) is the full two-fluid model.
-    if (const char* e = std::getenv("SINGLE_FLUID")) {
-        try { grid.single_fluid = (std::stof(e) != 0.0f); } catch (...) {}
-    }
-    // Separate electron temperature T_e ≠ T_i (docs/electron_temperature_plan.md).
-    // ENABLE_TE=1 switches on the three-temperature model; default (unset/0) is
-    // the single-temperature baseline that reproduces the pre-T_e physics.
-    if (const char* e = std::getenv("ENABLE_TE")) {
-        try { grid.enable_Te = (std::stof(e) != 0.0f); } catch (...) {}
-    }
-    if (!grid.eos_gamma_table.empty()) {
+    // Legacy two-fluid research knobs. They have no meaning for the release
+    // solver, which is a single-fluid common-temperature equilibrium mixture.
+    if (!release_mode) {
+        // "neutrals off" experiment: SINGLE_FLUID=1 slaves neutrals to the ion
+        // fluid. Default (unset/0) is the full two-fluid model.
+        if (const char* e = std::getenv("SINGLE_FLUID")) {
+            try { grid.single_fluid = (std::stof(e) != 0.0f); } catch (...) {}
+        }
+        // Separate electron temperature T_e != T_i.
+        if (const char* e = std::getenv("ENABLE_TE")) {
+            try { grid.enable_Te = (std::stof(e) != 0.0f); } catch (...) {}
+        }
+    } else {
         if (ionization_on) {
-            std::cerr << "gamma-table mode error: finite-rate ionization was requested; "
-                         "pass no-ionization" << std::endl;
+            std::cerr << "release-solver error: finite-rate ionization was requested, "
+                         "but the release closure is Saha equilibrium; pass "
+                         "no-ionization" << std::endl;
             return 1;
         }
-        if (grid.enable_Te) {
-            std::cerr << "gamma-table mode error: ENABLE_TE=1 is incompatible with "
-                         "the common-temperature equilibrium closure" << std::endl;
-            return 1;
-        }
-        if (std::getenv("SINGLE_FLUID") && !grid.single_fluid) {
-            std::cerr << "gamma-table mode error: explicit SINGLE_FLUID=0 is incompatible "
-                         "with equilibrium projection" << std::endl;
-            return 1;
+        for (const char* legacy : {"SINGLE_FLUID", "ENABLE_TE", "ISO_TWO_FLUID",
+                                   "ISO_IONIZATION"}) {
+            if (std::getenv(legacy)) {
+                std::cerr << "release-solver error: " << legacy
+                          << " is a legacy two-fluid setting and has no meaning for "
+                             "the single-fluid release solver" << std::endl;
+                return 1;
+            }
         }
     }
     Vec xn = sc.ic(grid);
-    if (!grid.eos_gamma_table.empty()
-        && (!grid.single_fluid || grid.enable_Te || grid.enable_ionization)) {
-        std::cerr << "gamma-table mode error: scenario toggles must leave single_fluid=1, "
-                     "ENABLE_TE=0, and ionization disabled" << std::endl;
+    if (release_mode && xn.n_elem != grid.n_mixture_state) {
+        std::cerr << "release-solver error: the scenario returned a state of "
+                  << xn.n_elem << " elements, expected " << grid.n_mixture_state
+                  << " (rho, rho u, E per cell)" << std::endl;
         return 1;
     }
 
@@ -260,10 +265,13 @@ int main(int argc, char** argv) {
     //           the 1e-3 conversion)
     //   then, repeated: a "# t = T step = S" marker followed by ns lines of
     //   num_of_eq space-separated conserved-variable values.
+    const arma::uword state_rows = release_mode ? num_of_mixture_eq : num_of_eq;
     std::ofstream fout;
     if (write_output) fout.open(out_path);
-    if (fout) {
-        fout << grid.ns << " " << num_of_eq << '\n';
+    // NOTE: a default-constructed std::ofstream has goodbit, so `if (stream)` is
+    // TRUE even when nothing was ever opened. Always test is_open().
+    if (fout.is_open()) {
+        fout << grid.ns << " " << state_rows << '\n';
         float cum_km = 0.0f;
         for (arma::uword i = 0; i < grid.ns; ++i) {
             cum_km += grid.ds_i(i) * 1.0e-3f;
@@ -271,10 +279,10 @@ int main(int argc, char** argv) {
         }
         fout << '\n';
     }
-    if (fout && !grid.eos_gamma_table.empty() && write_gamma_diag)
+    if (fout.is_open() && release_mode && write_gamma_diag)
         fout << "# EOS_MODE=gamma_table diagnostics=" << out_path << ".gamma_diag\n";
     std::ofstream gamma_diag;
-    if (!grid.eos_gamma_table.empty() && write_gamma_diag) {
+    if (release_mode && write_gamma_diag) {
         gamma_diag.open(out_path+".gamma_diag");
         if (!gamma_diag) throw std::runtime_error("cannot open gamma diagnostic sidecar");
         gamma_diag << grid.ns << " 10\n";
@@ -292,32 +300,31 @@ int main(int argc, char** argv) {
 
     auto write_frame = [&](float t_now, long long step_now) {
         ProfileScope output_timer(ProfileRegion::Output);
-        if (fout) {
+        if (fout.is_open()) {
             fout << "# t = " << t_now << " step = " << step_now << '\n';
             for (arma::uword i = 0; i < grid.ns; ++i) {
-                for (arma::uword k = 0; k < num_of_eq; ++k) {
+                for (arma::uword k = 0; k < state_rows; ++k) {
                     fout << "  " << xn(arma::sub2ind(
-                        arma::size(grid.ns,num_of_eq),i,k));
+                        arma::size(grid.ns,state_rows),i,k));
                 }
                 fout << '\n';
             }
         }
-        if (gamma_diag) {
+        if (gamma_diag.is_open()) {
             gamma_diag << "# t = " << t_now << " step = " << step_now << '\n';
-            const auto sz = arma::size(grid.ns, num_of_eq);
+            const auto sz = arma::size(grid.ns, num_of_mixture_eq);
             for (arma::uword i = 0; i < grid.ns; ++i) {
                 auto at = [&](arma::uword k) -> double {
                     return static_cast<double>(xn(arma::sub2ind(sz, i, k)));
                 };
-                const double phi = 0.5*static_cast<double>(grid.phi_g_imh(i)+grid.phi_g_iph(i));
                 const MixtureThermo th = decode_equilibrium_mixture(
-                    grid.eos_gamma_table, at(cons::RHO_I), at(cons::RHO_N),
-                    at(cons::MOM_I), at(cons::MOM_N), at(cons::E_I), at(cons::E_N), phi,
+                    grid.eos_gamma_table, at(mix::RHO), at(mix::MOM),
+                    at(mix::ENERGY), mixture_cell_phi(grid, i),
                     std::numeric_limits<double>::quiet_NaN(), grid.eos_gamma_debug_clamp);
-                const double velocity = (at(cons::MOM_I)+at(cons::MOM_N))/th.rho;
+                const double velocity = at(mix::MOM)/th.rho;
                 gamma_diag << "  " << th.rho << "  " << velocity << "  " << th.T
-                           << "  " << th.x_eq << "  " << th.n_e << "  " << th.n_HI
-                           << "  " << (th.p_i+th.p_n) << "  " << th.gamma1
+                           << "  " << th.x << "  " << th.n_e << "  " << th.n_HI
+                           << "  " << th.p << "  " << th.gamma1
                            << "  " << physical_conductivity(th.n_e,th.n_HI,th.T)
                            << "  " << gamma_solver_conductivity(
                                   grid, th, grid.ds_i(i)) << '\n';
@@ -372,10 +379,10 @@ int main(int argc, char** argv) {
         try { face_flux_top = std::max(0L, std::stol(e)); } catch (...) {}
     }
     if (write_face_flux) {
-        if (grid.eos_gamma_table.empty())
+        if (!release_mode)
             throw std::runtime_error(
-                "CHROMO_FACE_FLUX_DIAG requires gamma-table mode (the capture lives "
-                "in rhs_explicit_mixture)");
+                "CHROMO_FACE_FLUX_DIAG requires the release solver (the capture "
+                "lives in mixture_rhs_explicit)");
         face_flux.open(out_path+".faceflux");
         if (!face_flux) throw std::runtime_error("cannot open face-flux sidecar");
         float cum_km = 0.0f;
@@ -389,7 +396,7 @@ int main(int argc, char** argv) {
         face_flux_lo = (face_flux_top > 0
             && static_cast<arma::uword>(face_flux_top) < grid.ns)
             ? grid.ns - static_cast<arma::uword>(face_flux_top) : 0;
-        face_flux << "# face-flux diagnostic (read-only capture of rhs_explicit_mixture)\n"
+        face_flux << "# face-flux diagnostic (read-only capture of mixture_rhs_explicit)\n"
                   << "# ns=" << grid.ns << " first_cell=" << face_flux_lo
                   << " uniform_mesh=" << grid.uniform_mesh
                   << " mc3=" << grid.mc3_limiter << " beta=" << grid.limiter_beta
@@ -415,14 +422,14 @@ int main(int argc, char** argv) {
         try { outer_cond_stride = std::max(1, std::stoi(e)); } catch (...) {}
     }
     if (write_outer_cond) {
-        if (grid.eos_gamma_table.empty())
+        if (!release_mode)
             throw std::runtime_error(
-                "CHROMO_OUTER_COND_DIAG requires gamma-table mode (the capture lives "
-                "in apply_gamma_conduction_stage)");
+                "CHROMO_OUTER_COND_DIAG requires the release solver (the capture "
+                "lives in mixture_apply_conduction)");
         outer_cond.open(out_path+".outercond");
         if (!outer_cond) throw std::runtime_error("cannot open outer-conduction sidecar");
         outer_cond << "# outer-face conduction diagnostic (read-only capture of the "
-                      "final converged apply_gamma_conduction_stage iteration)\n"
+                      "final converged mixture_apply_conduction iteration)\n"
                    << "# ns=" << grid.ns << " ds_km=" << (grid.ds_i(grid.ns-1)*1.0e-3f)
                    << " numerical_diffusivity_per_length="
                    << grid.numerical_diffusivity_per_length
@@ -438,7 +445,7 @@ int main(int argc, char** argv) {
 
     auto write_outer_cond_record = [&](float t_now, long long step_now) {
         const OuterConductionCapture& oc = grid.outer_conduction_capture;
-        if (!outer_cond || !oc.valid) return;
+        if (!outer_cond.is_open() || !oc.valid) return;
         outer_cond << t_now << ' ' << step_now << ' '
                    << oc.T_top << ' ' << oc.T_wall << ' '
                    << oc.kappa_phys_face << ' ' << oc.chi_num_face << ' '
@@ -448,8 +455,8 @@ int main(int argc, char** argv) {
     };
 
     auto write_face_record = [&](float t_now, long long step_now) {
-        const GammaFaceFluxCapture& c = grid.face_flux_capture;
-        if (!face_flux || !c.valid) return;
+        const MixtureFaceFluxCapture& c = grid.face_flux_capture;
+        if (!face_flux.is_open() || !c.valid) return;
         {
             face_flux << "# t = " << t_now << " step = " << step_now << '\n';
             for (arma::uword i = face_flux_lo; i < grid.ns; ++i) {
@@ -473,9 +480,9 @@ int main(int argc, char** argv) {
     float     time         = 0.0f;
     long long step         = 0;
     std::uint64_t state_generation = 0;
-    DecodedMixtureField decoded_storage[2];
-    DecodedMixtureField* decoded=&decoded_storage[0];
-    const DecodedMixtureField* previous_decoded=nullptr;
+    MixtureField decoded_storage[2];
+    MixtureField* decoded=&decoded_storage[0];
+    const MixtureField* previous_decoded=nullptr;
     if (schedule.due(step, time)) {
         write_frame(time, step);
         schedule.note_written(step, time);
@@ -488,10 +495,9 @@ int main(int argc, char** argv) {
             sc.update_bc(grid, xn);
         }
         Vec dt;
-        if (!grid.eos_gamma_table.empty()) {
-            decode_mixture_field_into(
-                grid,xn,*decoded,state_generation,previous_decoded);
-            dt = cal_dt_i(grid,xn,*decoded);
+        if (release_mode) {
+            mixture_decode_into(grid,xn,*decoded,state_generation,previous_decoded);
+            dt = mixture_timestep(grid,xn,*decoded);
         } else {
             dt = cal_dt_i(grid,xn);
         }
@@ -513,8 +519,8 @@ int main(int argc, char** argv) {
                       << "  T_c = " << grid.trac_cutoff_T << std::endl;
         }
 
-        if (!grid.eos_gamma_table.empty())
-            xn = advance_Euler_state(grid,xn,dt,*decoded);
+        if (release_mode)
+            xn = mixture_advance(grid,xn,dt,*decoded);
         else
             xn = explicit_only ? advance_Euler_explicit_state(grid,xn,dt)
                                : advance_Euler_state(grid,xn,dt);
@@ -529,7 +535,7 @@ int main(int argc, char** argv) {
         time += dt_avg;
         ++step;
         ++state_generation;
-        if (!grid.eos_gamma_table.empty()) {
+        if (release_mode) {
             previous_decoded=decoded;
             decoded = decoded == &decoded_storage[0]
                 ? &decoded_storage[1] : &decoded_storage[0];

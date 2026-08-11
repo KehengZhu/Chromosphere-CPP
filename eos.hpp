@@ -1,9 +1,12 @@
 /*! \file eos.hpp
- *  Classical pure-H Saha utility and the Stage-2 CRASH Gamma1 table loader.
+ *  Classical pure-H Saha equilibrium closure and the CRASH Gamma1 table loader.
  *
- *  Stages 0--4 establish the thermodynamic inputs, read-only mixture decode,
- *  and explicit conservative projection. Integrator/flux activation begins at
- *  Stage 5 and requires equilibrium-manifold reconstruction.
+ *  This is the thermodynamic closure of the release single-fluid field-aligned
+ *  model. The authoritative state of one cell or face is the three-component
+ *  mixture state (rho, rho u, E); every carrier quantity — the ionization
+ *  fraction x, the electron density n_e, the neutral density n_HI, the electron
+ *  partial pressure p_e — is DERIVED from it through Saha equilibrium and is a
+ *  diagnostic, never an independently advanced variable.
  */
 #pragma once
 
@@ -62,51 +65,48 @@ struct GammaState {
     double gamma_sound;
 };
 
-/// Read-only thermodynamic interpretation of the two stored carrier rows.
-/// x_eq drives physics; x_row records the stored mass split only.
+/// Equilibrium thermodynamics of one mixture state, decoded from (rho, rho u, E).
+/// Every carrier quantity below (x, n_e, n_HI, p_e) is derived from Saha
+/// equilibrium at (rho, T); none of them is an independent conserved variable.
 struct MixtureThermo {
     double rho;
     double T;
-    double x_eq;
-    double x_row;
+    double x;                 ///< Saha ionization fraction n_e/n_H
+    double n_H;
+    double n_e;               ///< = x n_H
+    double n_HI;              ///< = (1-x) n_H
+    double p;                 ///< total pressure (1+x) n_H k_B T
+    double p_e;               ///< electron partial pressure x n_H k_B T
+    double gamma1;            ///< CRASH adiabatic (acoustic) index
+    double internal_energy;   ///< e_int(rho,T) including the ionization energy
+};
+
+/// Caloric-only counterpart for stages that do not need the acoustic Gamma1.
+/// The returned object contains no partially-valid field.
+struct CaloricMixtureThermo {
+    double rho;
+    double T;
+    double x;
     double n_H;
     double n_e;
     double n_HI;
-    double p_i;
-    double p_n;
+    double p;
     double p_e;
-    double gamma1;
     double internal_energy;
 };
 
-/// Seven conserved carrier rows after a Stage-4 equilibrium projection.
-/// E_E is diagnostic and is not included in the conserved E_I+E_N total.
-struct ProjectedMixture {
-    double rho_i;
-    double rho_n;
-    double momentum_i;
-    double momentum_n;
-    double energy_i;
-    double energy_n;
-    double energy_e;
-    MixtureThermo thermo;
-};
-
-/// Primitive variables limited by the gamma-table MUSCL path. Density and
-/// temperature are stored linearly here; reconstruction uses their logarithms.
-struct MixturePrimitive {
+/// Fully decoded, on-manifold face state of the release solver. Flux and
+/// wave-speed evaluation use these fields directly, so no temperature inversion
+/// is needed after the numerical flux.
+struct MixtureFaceState {
     double rho;
     double velocity;
     double temperature;
-};
-
-/// Fully decoded, on-manifold face state. Flux and wave-speed evaluation use
-/// these fields directly, avoiding a temperature inversion after reconstruction.
-struct MixtureFaceState {
-    MixturePrimitive primitive;
-    ProjectedMixture conserved;
-    double p_total;
-    double sound_speed;
+    double pressure;          ///< total p
+    double internal_energy;   ///< e_int(rho,T)
+    double energy;            ///< E = e_int + 1/2 rho v^2 + rho phi
+    double sound_speed;       ///< sqrt(Gamma1 p / rho)
+    double gamma1;
     /// General-EOS pressure response at fixed total density,
     /// b = (\partial p / \partial e_int)_rho. This is distinct from Gamma1:
     /// Gamma1 fixes the isentropic acoustic speed, while b fixes the energy
@@ -184,36 +184,6 @@ struct CaloricState {
     double heat_capacity;
 };
 
-/// Equilibrium thermodynamics that are valid without a Gamma1 sound-speed query.
-/// This is deliberately separate from MixtureThermo, whose gamma1 field is always
-/// valid by contract.
-struct CaloricMixtureThermo {
-    double rho;
-    double T;
-    double x_eq;
-    double x_row;
-    double n_H;
-    double n_e;
-    double n_HI;
-    double p_i;
-    double p_n;
-    double p_e;
-    double internal_energy;
-};
-
-/// Conserved rows plus the solved temperature, for projection/packing callers
-/// that do not consume Gamma1 or the full MixtureThermo object.
-struct ProjectedMixtureRows {
-    double rho_i;
-    double rho_n;
-    double momentum_i;
-    double momentum_n;
-    double energy_i;
-    double energy_n;
-    double energy_e;
-    double temperature;
-};
-
 /// Fused caloric evaluation. Throws std::domain_error unless rho and T are
 /// positive and finite (same guards as the functions it fuses).
 CaloricState equilibrium_caloric_state(double rho_total, double temperature);
@@ -231,7 +201,7 @@ GammaState gamma_state(const EosGammaTable& table, double rho_total,
 /// Invert the equilibrium pressure closure p(rho,T) = (1+x(rho,T)) n_H k_B T for
 /// the temperature at a KNOWN total density. This is the counterpart of
 /// equilibrium_density_from_pressure and uses exactly the same authoritative
-/// pressure as MixtureFaceState::p_total (= p_i + p_n).
+/// pressure as MixtureFaceState::pressure.
 ///
 /// The closure supplies its own exact bracket: with T1 = p m_H/(rho k_B) the
 /// fully-neutral temperature, x in (0,1) gives T in (T1/2, T1] for every physical
@@ -251,15 +221,21 @@ double temperature_from_rho_eint(
     double temperature_guess = std::numeric_limits<double>::quiet_NaN(),
     bool debug_clamp = false);
 
-/// Read-only decode. It subtracts the two original kinetic energies and the
-/// state-carried gravitational potential; it never rewrites carrier rows.
+/// Total energy of a mixture state, E = e_int + 1/2 rho v^2 + rho phi.
+inline double mixture_total_energy(double rho, double momentum,
+                                   double internal_energy, double phi) {
+    return internal_energy + 0.5 * momentum * momentum / rho + rho * phi;
+}
+
+/// Read-only decode of one conserved mixture state (rho, rho u, E). It subtracts
+/// the kinetic energy and the state-carried gravitational potential, inverts the
+/// caloric EOS for T, and reports the derived Saha carrier quantities.
 /// When `caloric_at_temperature` is non-null it receives the caloric evaluation
 /// AT the decoded temperature — the one the inversion already performed. A
 /// nonlinear source stage whose first residual pass sits at exactly that
 /// (rho, T) can therefore start without repeating the Saha solve.
 MixtureThermo decode_equilibrium_mixture(
-    const EosGammaTable& table, double rho_i, double rho_n,
-    double momentum_i, double momentum_n, double energy_i, double energy_n,
+    const EosGammaTable& table, double rho, double momentum, double energy,
     double phi_of_this_state,
     double temperature_guess = std::numeric_limits<double>::quiet_NaN(),
     bool debug_clamp = false,
@@ -268,64 +244,24 @@ MixtureThermo decode_equilibrium_mixture(
 /// Caloric-only decode for internal source and predictor stages that do not use
 /// acoustic Gamma1. The returned object contains no partially-valid field.
 CaloricMixtureThermo decode_equilibrium_caloric_mixture(
-    const EosGammaTable& table, double rho_i, double rho_n,
-    double momentum_i, double momentum_n, double energy_i, double energy_n,
+    const EosGammaTable& table, double rho, double momentum, double energy,
     double phi_of_this_state,
     double temperature_guess = std::numeric_limits<double>::quiet_NaN(),
     bool debug_clamp = false,
     CaloricState* caloric_at_temperature = nullptr);
 
-/// Conservative equilibrium projection. It preserves total mass, momentum,
-/// and E_I+E_N, thermalizes relative drift through the center-of-mass kinetic
-/// energy, and uses trace_fraction_floor only for the carrier-row mass split.
-ProjectedMixture project_equilibrium_single_fluid(
-    const EosGammaTable& table, double rho_i, double rho_n,
-    double momentum_i, double momentum_n, double energy_i, double energy_n,
-    double phi_of_this_state, double trace_fraction_floor = 1.0e-8,
-    double temperature_guess = std::numeric_limits<double>::quiet_NaN(),
-    bool debug_clamp = false);
-
-/// Projection rows for the packed solver path, without a Gamma1 query.
-ProjectedMixtureRows project_equilibrium_rows(
-    const EosGammaTable& table, double rho_i, double rho_n,
-    double momentum_i, double momentum_n, double energy_i, double energy_n,
-    double phi_of_this_state, double trace_fraction_floor = 1.0e-8,
-    double temperature_guess = std::numeric_limits<double>::quiet_NaN(),
-    bool debug_clamp = false);
-
-/// Pack an equilibrium state when a nonlinear source solve already knows T.
-/// The supplied total energy remains authoritative and the neutral row is its
-/// conservative remainder after constructing the charged row.
-ProjectedMixture pack_equilibrium_from_known_temperature(
-    const EosGammaTable& table, double rho_total, double total_momentum,
-    double total_energy_authoritative, double temperature,
-    double phi_of_this_state, double trace_fraction_floor,
-    double residual_relative_tolerance = 2.0e-11,
-    bool debug_clamp = false);
-
-/// Known-temperature packing rows for the conduction solver. This performs one
-/// authoritative fused caloric evaluation and does not query Gamma1.
-ProjectedMixtureRows pack_equilibrium_rows_from_known_temperature(
-    const EosGammaTable& table, double rho_total, double total_momentum,
-    double total_energy_authoritative, double temperature,
-    double phi_of_this_state, double trace_fraction_floor,
-    double residual_relative_tolerance = 2.0e-11,
-    bool debug_clamp = false);
-
 /// Construct one equilibrium face state algebraically from reconstructed
 /// mixture variables. Both sides of an interface must pass the same face phi.
 MixtureFaceState equilibrium_mixture_face_state(
     const EosGammaTable& table, double rho_total, double velocity,
-    double temperature, double phi_of_face,
-    double trace_fraction_floor = 1.0e-8, bool debug_clamp = false);
+    double temperature, double phi_of_face, bool debug_clamp = false);
 
 /// Log-aware face construction for MUSCL, which already carries log(rho) and
 /// log(T). The physical values are reconstructed once and the supplied log(T)
 /// is reused by Saha and Gamma1 interpolation.
 MixtureFaceState equilibrium_mixture_face_state_from_logs(
     const EosGammaTable& table, double log_rho_total, double velocity,
-    double log_temperature, double phi_of_face,
-    double trace_fraction_floor = 1.0e-8, bool debug_clamp = false);
+    double log_temperature, double phi_of_face, bool debug_clamp = false);
 
 /// Pressure-based counterpart of equilibrium_mixture_face_state_from_logs, used
 /// by the (log rho, V, log p) MUSCL reconstruction. The face temperature is
@@ -342,11 +278,11 @@ MixtureFaceState equilibrium_mixture_face_state_from_logs(
 /// is independent of the hint.
 MixtureFaceState equilibrium_mixture_face_state_from_log_pressure(
     const EosGammaTable& table, double log_rho_total, double velocity,
-    double log_pressure, double phi_of_face,
-    double trace_fraction_floor = 1.0e-8, bool debug_clamp = false,
+    double log_pressure, double phi_of_face, bool debug_clamp = false,
     double temperature_guess = std::numeric_limits<double>::quiet_NaN());
 
-/// Physical seven-row flux of a predecoded equilibrium face state.
-std::array<double, 7> equilibrium_mixture_flux(const MixtureFaceState& face);
+/// Physical field-aligned flux (rho u, rho u^2 + p, (E + p) u) of a predecoded
+/// equilibrium face state, in the (rho, rho u, E) row order of the release state.
+std::array<double, 3> equilibrium_mixture_flux(const MixtureFaceState& face);
 
 } // namespace chromosphere

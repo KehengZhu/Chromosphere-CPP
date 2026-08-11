@@ -205,8 +205,7 @@ def _render(k, tmpdir, h_km, prim, t, t_on, ramp, enhance,
     a_q.axhline(0, color=INK, lw=0.7)
     a_q.set_ylabel(r"$q_\parallel$  [W m$^{-2}$]   (+ up)"); a_q.set_ylim(*ylims["q"])
     a_q.set_xlabel("height  [Mm]")
-    a_q.set_title(r"physical $q_\parallel=-(\kappa_e+\kappa_n)dT/ds$"
-                  "  (TRAC + numerical diffusion excluded)")
+    a_q.set_title(r"$q_\parallel=-(\kappa_e+\kappa_n)dT/ds$")
 
     # ---- shared split x-axis, region bands, panel tags ----
     tags = "abcdefg"

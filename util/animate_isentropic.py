@@ -145,8 +145,7 @@ def _render_frame(k, tmpdir, h, V, T, rho, p, q, mflux, t, nF, ylims, title,
     ax[0, 2].plot(h, q / 1e3, lw=1.4, color="C1")
     ax[0, 2].axhline(0, c="k", lw=0.5)
     ax[0, 2].set_ylabel(r"$q$ [kW/m²]")
-    ax[0, 2].set_title(r"Physical $q_\parallel=-(\kappa_e+\kappa_n)dT/ds$"
-                       "\n(no TRAC or numerical diffusion)")
+    ax[0, 2].set_title(r"$q_\parallel=-(\kappa_e+\kappa_n)dT/ds$")
     ax[0, 2].set_ylim(*ylims["q"])
     if q_boundary_clipped:
         ax[0, 2].text(0.98, 0.05, "right-boundary spike clipped",

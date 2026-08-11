@@ -32,7 +32,27 @@ reconstruction and the Rusanov / local Lax–Friedrichs flux. Semi-implicit Eule
 currently disabled at [src/integrators.cpp:57](src/integrators.cpp#L57). RK4 is
 also available ([advance_RK4](src/integrators.cpp#L67)) for the explicit-only path.
 
-The 6 conserved variables per cell (writeup eq 61):
+### Release conserved state (single-fluid equilibrium mixture)
+
+The released `model_column` solver (`mixture.hpp`, `src/mixture*.cpp`) stores **three**
+conserved rows per cell:
+
+| Index | Symbol | Meaning |
+| --- | --- | --- |
+| `mix::RHO`    | `ρ`   | total mass density |
+| `mix::MOM`    | `ρ u` | field-aligned momentum density |
+| `mix::ENERGY` | `E`   | total energy `e_int(ρ,T) + ½ρu² + ρφ_g`, ionization energy included |
+
+The ionization fraction `x`, the carrier densities `xρ` / `(1-x)ρ`, `n_e`, `n_HI` and `p_e`
+are **derived** equilibrium diagnostics of `(ρ, e_int)` — the solver never stores or advances
+them, and there is no equilibrium-projection stage.
+
+### Legacy two-fluid conserved state (non-release)
+
+The historical two-fluid / three-temperature / finite-rate-ionization solver
+(`chromosphere.hpp`, `src/state.cpp`, `src/flux.cpp`, `src/rhs.cpp`, `src/integrators.cpp`)
+keeps its own seven-row state (writeup eq 61). Loading a `Gamma1` table selects the release
+solver; each solver rejects the other's `Grid`.
 
 | Index | Symbol | Meaning |
 | --- | --- | --- |
@@ -46,14 +66,17 @@ The 6 conserved variables per cell (writeup eq 61):
 ## File layout
 
 ```
-chromosphere.hpp         Public API: Grid struct, cons::/prim:: indices, function decls
-eos.hpp                  Stage-1–4 EOS closure, mixture decode, conservative projection
+chromosphere.hpp         Shared Grid struct + LEGACY two-fluid API (cons::/prim:: indices)
+mixture.hpp              RELEASE single-fluid solver API (mix:: indices, U = (rho, rho u, E))
+eos.hpp                  Saha/Gamma1 EOS closure, mixture decode, equilibrium face states
 data/eos/                Versioned Gamma1 production table, checksum, and provenance
 physics.hpp              Inline collision frequency (nu_in), conductivities (kappa_e, kappa_n),
                          Stage E ionization/recombination rates (Voronov 1997, Hummer 1994)
 chromo_main.cpp          Main entry point — CLI dispatcher
 src/
-  eos.cpp                Gamma1 loader + caloric inversion/decode/projection physics
+  eos.cpp                Gamma1 loader + caloric inversion / mixture decode / face states
+  mixture.cpp            RELEASE: decode, MUSCL reconstruction, mixture Roe flux, source, dt
+  mixture_integrator.cpp RELEASE: implicit physical conduction, energy stages, timestep path
   grid.cpp               Grid::init, Grid::broadcast
   state.cpp              cons2prim, prim2cons, get_scalar, scalar_to, ip1/im1/ip2/im2, flux_lim
   flux.cpp               cal_flux_state, cal_spectral_radius_state, cal_source_state
@@ -505,25 +528,33 @@ layers:
 - Stage-8 density-anchored Saha-HSE Model C7 initialization, four EOS-packed
   ghost states, boundary energy identities, and a controlled Euler step
 - Stage-9 neutral/ionized monatomic limits, all-grid-line interpolation
-  continuity, small-amplitude adiabatic acoustic characteristics across the
-  10%, 50%, and 90% ionization transition plus the ionized limit, a matched
-  fixed-5/3 versus gamma-table evaporation response, and strict three-floor
-  invariance in both trace-ion and trace-neutral limits after float packing and
-  runtime decoding of mass/energy/flux, thermodynamics, conductivities, and
-  radiation
+  continuity, and small-amplitude adiabatic acoustic characteristics across the
+  10%, 50%, and 90% ionization transition plus the ionized limit
+- Release-state round trips: `(ρ, u, T)` packed into `(ρ, ρu, E)` and decoded back
+  recovers `T`, `e_int`, `p`, `x`, `n_e`, `n_HI` and the ionization-energy identity
+  `e_int − 3p/2 = x n_H χ_H`; non-physical states and out-of-table densities throw
+- Three-variable Roe flux: consistency on a uniform state, the stationary-contact
+  property (mass RHS < 1e-3 × Rusanov at uniform pressure and `u = 0`), and the
+  face-local Rusanov fallback on an inadmissible characteristic average
+- Solver isolation: the legacy two-fluid entry points reject a `Gamma1` Grid and the
+  release entry points reject a Grid without one
 - Independent analytic-Saha `Gamma1` versus raw CRASH `GammaS` at all 28,557
   production nodes, including reported worst-case coordinates
 - Offline Stage-9 CRASH validation on a 2x-refined grid at all 28,000
   production-cell midpoints (`bash util/eos/build_and_run.sh`)
 
-Gamma-table mode is activated by `GAMMA_TABLE=/path/to/table` for the
-`model_column` scenario (and its `model_isentropic` compatibility alias) with the
-full semi-implicit Euler integrator. It requires single-fluid equilibrium,
-`ENABLE_TE=0`, and an explicit `no-ionization` command-line selection. Explicit
-`ENABLE_TE=1` and `SINGLE_FLUID=0` requests are rejected before scenario IC.
-Other scenarios, the explicit-only
-driver, and RK4 remain fail-closed until separately converted. `GAMMA_TABLE` and
-an explicitly supplied `ISO_GAMMA` are mutually exclusive.
+The release solver is selected by `GAMMA_TABLE=/path/to/table` for the `model_column`
+scenario (and its `model_isentropic` alias) with the full semi-implicit Euler integrator; the
+scenario supplies the production table as an override-preserving default, so a normal release
+run needs no environment variable at all. It requires an explicit `no-ionization` command-line
+selection, and it **rejects** every legacy two-fluid setting outright — `SINGLE_FLUID`,
+`ENABLE_TE`, `ISO_TWO_FLUID`, `ISO_IONIZATION` — because none of them has meaning for a
+single-fluid common-temperature equilibrium mixture. Other scenarios, the explicit-only
+driver, and RK4 stay on the legacy two-fluid solver. `GAMMA_TABLE` and an explicitly supplied
+`ISO_GAMMA` are mutually exclusive.
+
+A release snapshot carries the three conserved rows (`ns 3` header); a legacy two-fluid
+snapshot carries seven.
 
 Each gamma snapshot has an EOS-aware `.gamma_diag` sidecar containing
 `rho_total`, `v_cm`, `T`, `x_eq`, `n_e`, `n_HI`, `p_total`, `Gamma1`, and the
@@ -532,7 +563,7 @@ the table path, its runtime SHA-256, and the gravitational-potential convention.
 `util/animate_gentle_column.py` automatically prefers this sidecar and computes
 conductive flux from the decoded physical electron and neutral densities.
 
-The gamma Euler path decodes each immutable conserved state once into a
+The release Euler path decodes each immutable conserved state once into a
 two-ghost-layer `DecodedMixtureField`. CFL, source evaluation, and MUSCL
 reconstruction share that state-bound field; predicted and post-source states
 receive separate cache generations. Ghosts retain their boundary-face

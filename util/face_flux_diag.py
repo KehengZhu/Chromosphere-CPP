@@ -3,7 +3,7 @@
 
 Reads the `<run>.faceflux` sidecar written by `chromo_main` with
 `CHROMO_FACE_FLUX_DIAG=1`. That sidecar is a read-only copy-out of the PRODUCTION
-`rhs_explicit_mixture` arrays, so nothing here re-derives the reconstruction: the
+`mixture_rhs_explicit` arrays, so nothing here re-derives the reconstruction: the
 Rusanov total-mass face flux, its central/diffusive split, the one-sided
 reconstructed face states, the spectral radius and the limiter ratios/values are
 all the numbers the solver actually used.

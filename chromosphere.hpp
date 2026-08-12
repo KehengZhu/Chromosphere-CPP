@@ -1,21 +1,31 @@
 /*!
- * Chromosphere model — shared solver infrastructure.
+ * Chromosphere model — SHARED solver infrastructure only.
  *
- * The project carries TWO solvers over one shared field-aligned mesh:
+ * The project carries TWO solvers over one shared field-aligned mesh, each in
+ * its own source directory:
  *
- *   * the RELEASE solver (`mixture.hpp`), a single-fluid equilibrium-mixture
- *     model whose conserved state is the three-component vector
- *     U = (rho, rho u, E). This is what the canonical `model_column`
- *     production configuration advances;
+ *   * the RELEASE solver, `src/single_fluid/` (`single_fluid/mixture.hpp`): a
+ *     single-fluid equilibrium-mixture model whose conserved state is the
+ *     three-component vector U = (rho, rho u, E). This is what the canonical
+ *     `model_column` production configuration advances;
  *
  *   * the HISTORICAL two-fluid / multi-temperature / finite-rate-ionization
- *     research solver declared below, whose conserved state is the seven-row
- *     ion/neutral/electron carrier vector. It is NOT the release path.
+ *     research solver, `src/two_fluid/` (`two_fluid/two_fluid.hpp`), whose
+ *     conserved state is the seven-row ion/neutral/electron carrier vector.
+ *     It is NOT the release path.
  *
- * The two solvers share only generic infrastructure: the Grid (mesh geometry,
- * prescribed magnetic field, gravity, physical constants, runtime toggles) and
- * the equilibrium EOS in `eos.hpp`. They do NOT share a conserved-state width,
- * a packing convention, or a timestep path.
+ * This header declares only what BOTH sides share: the Grid (mesh geometry,
+ * prescribed magnetic field, gravity, physical constants, runtime toggles),
+ * the two solvers' state-row index sets, and the reusable scratch/diagnostic
+ * structures the Grid owns. Neither solver's entry points are declared here,
+ * and neither solver includes the other's header. The dependency direction is
+ *
+ *     chromosphere.hpp + eos.hpp  (shared)
+ *            ^                ^
+ *      single_fluid        two_fluid
+ *
+ * The two solvers do NOT share a conserved-state width, a packing convention,
+ * or a timestep path.
  *
  * All solver state lives in a Grid struct that the caller owns; functions
  * take `const Grid&` (or `Grid&` for those that mutate scratch buffers).
@@ -53,7 +63,7 @@ typedef arma::Col<float> Vec;
 /// e_int is the equilibrium internal energy INCLUDING the hydrogen ionization
 /// energy, so the ionization fraction x, the electron density n_e and the
 /// neutral density n_HI are derived thermodynamic quantities of (rho, e_int),
-/// not independent conserved variables. See mixture.hpp.
+/// not independent conserved variables. See single_fluid/mixture.hpp.
 namespace mix {
     const arma::uword RHO    = 0;
     const arma::uword MOM    = 1;
@@ -102,15 +112,6 @@ namespace prim {
     const arma::uword P_E   = 6;  // electron partial pressure p_e
 }
 
-// Used by ip1/im1/...: SLICE means "treat input as one scalar field of length ns",
-// CUBE means "treat input as the packed state of length ns*num_of_eq".
-const arma::uword SLICE = 1;
-const arma::uword CUBE  = num_of_eq;
-
-// Outer/inner ghost-cell handling for ip2/im2: copy interior (Neumann) when true,
-// otherwise pull from the ghost buffers in Grid.
-const bool USE_NEUMANN_BC = false;
-
 /// Per-Grid reusable storage for the release nonlinear conduction solve. This is
 /// scratch only, never a thermodynamic cache; keeping it on the owning Grid
 /// preserves reentrancy and avoids function-static state.
@@ -120,7 +121,7 @@ struct MixtureConductionScratch {
     // ionization fraction, the heat capacity, the conductivity inputs and this
     // residual energy all come from one fused Saha evaluation per cell per pass
     // (they used to be three independent Saha solves).
-    std::vector<double> conductivity, capacity, n_e, n_hi, e_at_T, x, pressure;
+    std::vector<double> conductivity, capacity, n_e, n_hi, e_at_T;
     std::vector<double> g_left, g_right;
     std::vector<double> a, b, c, rhs, delta;
 
@@ -232,22 +233,25 @@ struct MixtureFaceFluxCapture {
 /// Grid::capture_outer_conduction is true and never read back by any solver
 /// stage, so enabling it cannot change a numerical result.
 ///
-/// The production outer-face conductive flux INTO the top cell is
-///     q_total = (kappa_phys_face + kappa_num_face) * (T_wall - T_top)/ds_face,
-/// with kappa_phys_face the face average of the top-cell and wall-ghost
-/// (kappa_e*TRAC + kappa_n), chi_num_face = C_num*ds_face, and
-/// kappa_num_face = chi_num_face*C_V(face),
-/// ds_face = ds_iph_i(ns-1) (top-cell CENTRE to ghost CENTRE, = ds on a uniform
-/// mesh), and area_ratio = B_i/B_iph the flux-tube factor that converts this face
-/// flux into the cell's volumetric divergence. Positive = heating the top cell.
+/// The release outer-face conductive flux INTO the top cell is
+///     q_face = kappa_face * (T_wall - T_top)/ds_face,
+/// with kappa_face the PHYSICAL conductivity (kappa_e + kappa_n) — the release
+/// conduction operator carries no TRAC broadening and no artificial diffusivity.
+/// When the scenario imposes an external conductive reservoir temperature, that
+/// datum sits at the PHYSICAL outer face, so
+///     T_wall  = the imposed face temperature (e.g. 22 000 K),
+///     kappa_face = kappa evaluated at that face state, and
+///     ds_face = 1/2 ds_i(ns-1), the top-cell CENTRE-to-FACE distance.
+/// Without the override the datum is the hydro ghost CENTRE and
+/// ds_face = ds_iph_i(ns-1). area_ratio = B_i/B_iph is the flux-tube factor that
+/// converts the face flux into the cell's volumetric divergence.
+/// Positive q_face = heating the top cell.
 struct OuterConductionCapture {
-    double T_top = 0.0, T_wall = 0.0;   // [K] top-cell centre / Dirichlet ghost datum
-    double kappa_phys_face = 0.0;       // [W m^-1 K^-1]
-    double chi_num_face    = 0.0;       // [m^2 s^-1] C_num * ds_face
-    double kappa_num_face  = 0.0;       // [W m^-1 K^-1] chi_num_face * C_V(face)
-    double ds_face = 0.0;               // [m]
+    double T_top = 0.0, T_wall = 0.0;   // [K] top-cell centre / imposed thermal datum
+    double kappa_face = 0.0;            // [W m^-1 K^-1] physical conductivity
+    double ds_face = 0.0;               // [m] top-cell centre to the thermal datum
     double area_ratio = 0.0;            // B_i(ns-1)/B_iph(ns-1)
-    double q_phys = 0.0, q_num = 0.0, q_total = 0.0;  // [W m^-2], into the top cell
+    double q_face = 0.0;                // [W m^-2], into the top cell
     bool   imposed_neumann = false;     // impose_outer_heat_flux replaced the above
     bool   valid = false;
 };
@@ -348,10 +352,11 @@ struct Grid {
     bool enable_direct_collisional_ionization = true;
     bool enable_threebody_recombination       = true;
 
-    // Enable optically-thick chromospheric radiative cooling (CL2012 recipe,
-    // writeup §2.4) as Stage R in the operator-split integrator. Default off
-    // so the existing test suite remains a clean regression baseline; flip
-    // to true to activate.
+    // TWO-FLUID ONLY. Enable optically-thick chromospheric radiative cooling
+    // (CL2012 recipe, writeup §2.4) as Stage R in the operator-split two-fluid
+    // integrator. The single-fluid release timestep has no radiative stage and
+    // ignores this flag entirely. Default off so the existing test suite remains
+    // a clean regression baseline; flip to true to activate.
     bool enable_radiative_cooling = false;
 
     // LEGACY TWO-FLUID ONLY. Single-fluid limit ("neutrals off"). When true, the ion-neutral drag
@@ -494,24 +499,23 @@ struct Grid {
     // model_c7_ic / model_c7_update_bc — and the 5950-test baseline unchanged.
     bool c7_tr_jump_bc = false;
 
-    // Enable Stage D (field-aligned heat conduction) in advance_Euler_state.
-    // Default ON so the existing scenarios / test suite are byte-for-byte
-    // unchanged. The isentropic single-fluid relaxation experiment
-    // (docs/gentle_evaporation_downflow.md, model_column Stage 1) sets this
-    // false to switch OFF all heat flux — the adiabatic atmosphere T(z) ∝ (1 −
-    // z/H_ad) is then an exact steady state of the (conduction-free) Euler
-    // equations, so the relaxation should hold the linear T profile with V ≈ 0.
-    // Stage 2 flips it back on, with the imposed top temperature jump (the
-    // ghost-cell Dirichlet BC) supplying the downward conductive flux. NOTE: the
-    // isotropic numerical diffusivity below is folded into the Stage D operator,
-    // so it is also disabled when conduction is off.
+    // BOTH solvers. Enable field-aligned heat conduction: the implicit physical
+    // conduction stage of the release timestep, and Stage D of the two-fluid
+    // advance_Euler_state. Default ON so the existing scenarios / test suite are
+    // byte-for-byte unchanged. A relaxation phase
+    // (docs/gentle_evaporation_downflow.md, model_column Stage 1) sets this false
+    // to switch OFF all heat flux, so the relaxation holds its profile with
+    // V ≈ 0; Stage 2 flips it back on, with the imposed top temperature supplying
+    // the downward conductive flux.
     bool enable_conduction = true;
 
-    // Mesh-independent isotropic numerical-diffusion coefficient C_num [m/s].
-    // Stage D constructs the actual diffusivity independently at each face as
-    // chi_num,f = C_num*Delta_s_f, using the real centre-to-centre face distance,
-    // then adds K_num,f = chi_num,f*C_V,f to the physical face conductivity.
-    // Default 0 keeps numerical conduction disabled unless a scenario requests it.
+    // TWO-FLUID ONLY. Mesh-independent isotropic numerical-diffusion coefficient
+    // C_num [m/s]. The two-fluid Stage D constructs the actual diffusivity
+    // independently at each face as chi_num,f = C_num*Delta_s_f, using the real
+    // centre-to-centre face distance, then adds K_num,f = chi_num,f*C_V,f to the
+    // physical face conductivity, so it is also disabled when conduction is off.
+    // The release conduction operator is structurally PHYSICAL-only: it has no
+    // such term and never reads this field. Default 0.
     float numerical_diffusivity_per_length = 0.0f;
 
     // Upper-boundary coronal conductive heat flux q(T) [W/m²], imposed as a
@@ -526,19 +530,22 @@ struct Grid {
     bool  impose_outer_heat_flux = false;
     float outer_heat_flux        = 0.0f;
 
-    // Conduction-only OUTER Dirichlet temperature override. Normally the Stage-D
-    // outer Dirichlet datum is whatever temperature the HYDRO outer ghost happens
-    // to carry (grid.outer_boundary0_i decoded), so one ghost state serves two
-    // roles at once: the hydro Riemann/reconstruction state AND the thermal wall
-    // that drives conduction. When outer_conduction_temperature_override is true
-    // the conduction rows instead use the explicit outer_conduction_temperature
-    // [K], letting a scenario relax the hydro ghost temperature (e.g. zero-gradient
-    // extrapolation from the live top cell) while the conductive driving stays the
-    // unchanged fixed hot wall. Affects the outer Dirichlet value AND the outer
-    // ghost conductivity temperature on every active conduction row (charged and
-    // neutral, gamma-mixture and fixed-gamma paths). The ghost DENSITY is still the
-    // hydro ghost's, so κ_outer keeps its ghost n_e / n_HI. No effect when
-    // impose_outer_heat_flux is true (that path has no outer Dirichlet datum).
+    // Conduction-only OUTER temperature override. Normally the outer thermal
+    // datum is whatever temperature the HYDRO outer ghost happens to carry, so one
+    // ghost state serves two roles at once: the hydro Riemann/reconstruction state
+    // AND the thermal wall that drives conduction. When
+    // outer_conduction_temperature_override is true the conduction rows instead
+    // use the explicit outer_conduction_temperature [K], letting a scenario relax
+    // the hydro ghost temperature (e.g. zero-gradient extrapolation from the live
+    // top cell) while the conductive driving stays the unchanged fixed hot wall.
+    //
+    // IMPORTANT — this also relocates the datum. The imposed temperature is a
+    // PHYSICAL-BOUNDARY-FACE value, not a ghost-centre value, so the release
+    // conduction operator uses the half-cell distance d = 1/2 ds_top and evaluates
+    // kappa at the face state reconstructed from the imposed external pressure and
+    // that face temperature. Without the override the datum stays at the ghost
+    // CENTRE, distance ds_iph_i(ns-1), with the ghost's own n_e / n_HI. No effect
+    // when impose_outer_heat_flux is true (that path has no outer Dirichlet datum).
     // Default false ⇒ byte-identical to the pre-existing behaviour.
     bool  outer_conduction_temperature_override = false;
     float outer_conduction_temperature          = 0.0f;
@@ -579,7 +586,9 @@ struct Grid {
     // sets it to its actual base (0 km for the photosphere-anchored C7 IC).
     float out_base_km             = 1003.0f;
 
-    // Transition-Region Adaptive Conduction (TRAC; Johnston et al. 2019, 2020).
+    // TWO-FLUID ONLY. Transition-Region Adaptive Conduction (TRAC; Johnston et al.
+    // 2019, 2020). The single-fluid release conduction operator has no TRAC factor
+    // and ignores these fields entirely.
     // When enabled, an adaptive cutoff temperature T_c is recomputed each step
     // (the highest temperature where the TR is under-resolved, L_R/L_T > 1/2,
     // bounded by [trac_T_chrom, 0.2 T_peak]); below T_c the parallel conductivity
@@ -631,7 +640,8 @@ struct Grid {
     // beam_flux above the Fisher threshold F_crit ≈ 7×10⁶ W m⁻² AND the
     // radiative sink (Stage R) active, since the threshold is the competition
     // between deposited heating and the upper-chromosphere radiative loss.
-    // Heating is added to the electron/ion thermal pool (p_i). Default off so
+    // Heating is added to the electron/ion thermal pool (p_i). TWO-FLUID ONLY:
+    // the release timestep has no beam stage and ignores this flag. Default off so
     // existing scenarios/tests are unaffected.
     bool  enable_beam_heating     = false;
     float beam_flux               = 0.0f;    // F_e [W/m²]
@@ -681,6 +691,8 @@ struct Grid {
     // Heating is deposited into the charged thermal pool exactly like the beam
     // (apply_coronal_heating_stage): shared with neutrals by heat capacity in the
     // single-T baseline, into the electron pool when enable_Te (electrons conduct).
+    // TWO-FLUID ONLY: the release timestep has no volumetric heating stage and
+    // ignores this flag.
     // Default off so existing scenarios / the test suite are byte-for-byte unchanged.
     bool  enable_coronal_heating  = false;
     float coronal_heat_E0         = 0.0f;     // E_H0 [W/m³], footpoint heating amplitude
@@ -848,142 +860,5 @@ private:
 
     bool static_metrics_current() const;
 };
-
-
-// ============================================================================
-// LEGACY TWO-FLUID SOLVER (non-release)
-//
-// Everything below advances the seven-row ion/neutral/electron carrier state.
-// It is the historical research path (two-fluid drift, three-temperature
-// electrons, finite-rate ionization) and is NOT used by the canonical
-// `model_column` release, which runs the single-fluid solver in `mixture.hpp`.
-// These entry points reject a Grid that carries a Gamma1 table.
-// ============================================================================
-
-// ----------------------------------------------------------------------------
-// Packed-state helpers
-// ----------------------------------------------------------------------------
-
-/// Extract one scalar field (length ns) from a packed state.
-Vec get_scalar(const Grid& grid, const Vec& xn_state, arma::uword index);
-
-/// Insert a scalar field (length ns) into the given slot of a packed state
-/// (length n_state, other slots zero).
-Vec scalar_to(const Grid& grid, const Vec& xn_i, arma::uword index);
-
-/// Index shifts. `nk = CUBE` treats the input as packed state; `nk = SLICE`
-/// treats it as one scalar field of length ns.
-Vec ip1(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
-Vec im1(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
-Vec ip2(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
-Vec im2(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
-
-// ============================================================================
-// Equation of state
-// ============================================================================
-
-Vec cons2prim(const Grid& grid, const Vec& cons_state);
-Vec prim2cons(const Grid& grid, const Vec& prim_state);
-
-// ============================================================================
-// Numerics: flux, source, spectral radius, MUSCL limiter
-// ============================================================================
-
-/// Minmod limiter (writeup eq 15): φ(r) = max(0, min(1, r)).
-Vec flux_lim(const Vec& r);
-
-/// MC3 / Koren limiter (BATSRUS ModFaceValue 'mc3') — the ASYMMETRIC third-order
-/// (κ=1/3) monotonized-central limiter. In the code's ratio form r = Δ₋/Δ₊ the two
-/// faces of a cell take DIFFERENT limited slopes (unlike the symmetric minmod):
-///   '+' faces (Lxn = u_i + ½φΔ₊):  φ₊(r) = max(0, min(β r, β, (2r+1)/3))
-///   '−' faces (Rxn = u_i − ½φΔ₊):  φ₋(r) = max(0, min(β r, β, (r+2)/3))
-/// β = grid.limiter_beta (2 ⇒ classic Koren). Non-finite r ⇒ 0 (first order at
-/// flats/extrema, matching flux_lim). Selected by grid.mc3_limiter in rhs.
-Vec flux_lim_mc3_plus (const Vec& r, float beta);
-Vec flux_lim_mc3_minus(const Vec& r, float beta);
-
-/// Cell-centered flux F(U).
-Vec cal_flux_state(const Grid& grid, const Vec& xn_state);
-
-/// Per-cell spectral radius ρ(∂F/∂U) broadcast across all num_of_eq equations.
-Vec cal_spectral_radius_state(const Grid& grid, const Vec& xn_state);
-
-/// Explicit source term (pressure-area + gravity).
-Vec cal_source_state(const Grid& grid, const Vec& xn_state);
-
-// ============================================================================
-// RHS of the conservation laws (writeup §4)
-// ============================================================================
-
-/// Explicit RHS: TVD-MUSCL + Rusanov flux differencing + cal_source_state.
-Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state);
-
-/// Implicit RHS: ion-neutral drag, collisional + frictional heating, and
-/// field-aligned heat conduction (writeup §4.3–4.4).
-Vec rhs_implicit_state(const Grid& grid, const Vec& xn_state);
-
-// ============================================================================
-// Time stepping
-// ============================================================================
-
-/// Per-cell maximum signal speed (extracted from the spectral radius broadcast).
-Vec cal_max_v_i(const Grid& grid, const Vec& xn_state);
-
-/// Uniform CFL-limited timestep.
-Vec cal_dt_i(const Grid& grid, const Vec& xn_state);
-
-/// Semi-implicit (backward-Euler) integrator. Explicit MUSCL+Rusanov step
-/// for R_E, then point-implicit drag + frictional heating, point-implicit
-/// ion–neutral temperature equilibration, a tridiagonal heat-conduction
-/// solve per species, and (if grid.enable_ionization) the point-implicit
-/// ionization Stage E (writeup §3.7, §5.3). Mutates grid.dt_state.
-Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
-
-/// Stage E: backward-Euler ionization / recombination on a single cell, scalar
-/// quadratic solve in ionization fraction f = ρ_i / (ρ_i + ρ_n). Operates on
-/// primitive state in place; intended for the operator-split integrator but
-/// exposed for direct testing. (writeup §5.3.)
-void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt);
-
-/// Stage R (writeup §2.4): backward-Euler optically-thick chromospheric
-/// radiative cooling on the folded ion+electron thermal pressure. Carlsson
-/// & Leenaarts 2012 recipe summed over H I + Ca II + Mg II; tables in
-/// physics.hpp::cl2012. Activated by Grid::enable_radiative_cooling.
-void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt);
-
-/// Flare beam-heating stage: deposits grid.beam_flux into the upper-chromosphere
-/// electron/ion thermal pool (p_i) over a finite layer, gated by the temporal
-/// window around grid.sim_time, to drive chromospheric evaporation (Fisher et
-/// al. 1985). No-op unless grid.enable_beam_heating. Mutates p_i in place.
-void apply_beam_heating_stage(const Grid& grid, Vec& prim_state, float dt);
-
-/// Ambient coronal heating stage: deposits the steady footpoint-anchored
-/// volumetric heating H(s) (physics.hpp::coronal_heating_rate) into the charged
-/// thermal pool (shared with neutrals by heat capacity; electrons when
-/// enable_Te), driving the conductive flux that sustains the corona and, when
-/// ramped up (coronal_heat_enhance > 1), gentle chromospheric evaporation
-/// (Antiochos & Sturrock 1978). No-op unless grid.enable_coronal_heating.
-void apply_coronal_heating_stage(const Grid& grid, Vec& prim_state, float dt);
-
-/// TRAC adaptive cutoff temperature T_c (Johnston et al. 2020 Eq. 8): the
-/// maximum temperature among grid cells where the charged-fluid TR is
-/// under-resolved (L_R/L_T > 1/2, with L_T = T/|dT/ds|, L_R = Δs), clamped to
-/// [grid.trac_T_chrom, 0.2 T_peak]. Used by the conduction and cooling stages to
-/// broaden the unresolved TR. Exposed for testing.
-float compute_trac_cutoff_T(const Grid& grid, const Vec& prim_state);
-
-/// Pure-explicit forward-Euler step — only the MUSCL+Rusanov R_E predictor of
-/// advance_Euler_state, with the implicit drag / temperature / conduction
-/// stages skipped (equivalent to R_I ≡ 0). Mutates grid.dt_state.
-Vec advance_Euler_explicit_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
-
-/// Explicit RK4. Mutates grid.dt_state.
-Vec advance_RK4(Grid& grid, const Vec& xn_state, const Vec& dt_i);
-
-// ============================================================================
-// Debug
-// ============================================================================
-
-void print_xn(const Grid& grid, const Vec& xn);
 
 } // namespace chromosphere

@@ -44,7 +44,7 @@ export CHROMO_PROGRESS_STRIDE="${CHROMO_PROGRESS_STRIDE:-10000}"
 # N=500/R4, 661-cell physical-conduction-only model_column release. Other
 # scenarios retain the solver's conservative CHROMO_CFL=0.25 fallback unless
 # CHROMO_CFL is explicitly supplied.
-if [[ "${4:-}" == "model_column" || "${4:-}" == "model_isentropic" ]]; then
+if [[ "${4:-}" == "model_column" ]]; then
     export CHROMO_CFL="${CHROMO_CFL:-0.50}"
 fi
 

@@ -244,6 +244,16 @@ def stream_faceflux(base: Path, targets) -> tuple[dict, dict]:
     return meta, near.result()
 
 
+# `.outercond` layouts. The RELEASE sidecar has 8 columns
+#   t step T_top T_wall kappa_face ds_face area_ratio q_face
+# because release conduction is physical-only. The historical 12-column layout
+#   t step T_top T_wall kappa_phys_face chi_num_face kappa_num_face ds_face
+#   area_ratio q_phys q_num q_total
+# split the flux into a physical and an artificial part; it is still read so old
+# runs remain analysable.
+_OUTER_Q_INDEX = {8: (7, 7), 12: (9, 11)}   # ncol -> (q_physical, q_total)
+
+
 def stream_outercond(base: Path, targets) -> dict:
     """Interpolate the outer conductive flux and integrate it to each target."""
     path = Path(str(base) + ".outercond")
@@ -252,6 +262,7 @@ def stream_outercond(base: Path, targets) -> dict:
     out: dict = {}
     prev = None
     last_row = None
+    last_idx = None
     integral = 0.0
     remaining = sorted(targets)
     with path.open() as fh:
@@ -259,9 +270,11 @@ def stream_outercond(base: Path, targets) -> dict:
             if line.startswith("#"):
                 continue
             v = np.fromstring(line, sep=" ")
-            if v.size < 12:
+            idx = _OUTER_Q_INDEX.get(int(v.size))
+            if idx is None:
                 continue
-            t, q_phys, q_total = float(v[0]), float(v[9]), float(v[11])
+            i_phys, i_total = idx
+            t, q_phys, q_total = float(v[0]), float(v[i_phys]), float(v[i_total])
             if prev is not None:
                 t0, q0 = prev[0], prev[1]
                 while remaining and remaining[0] <= t:
@@ -276,6 +289,7 @@ def stream_outercond(base: Path, targets) -> dict:
                 integral += 0.5 * (q0 + q_phys) * (t - t0)
             prev = (t, q_phys)
             last_row = v
+            last_idx = idx
     # A target that falls between the last captured record and the run's end time
     # (the capture stride rarely lands exactly on it) is reported at that record.
     if remaining and prev is not None:
@@ -284,7 +298,7 @@ def stream_outercond(base: Path, targets) -> dict:
                 out[target] = {"q_phys_W_m2": prev[1],
                                "cumulative_phys_J_m2": integral,
                                "T_top_bc_K": float(last_row[2]),
-                               "q_total_W_m2": float(last_row[11]),
+                               "q_total_W_m2": float(last_row[last_idx[1]]),
                                "cumulative_at_t_s": prev[0]}
     return out
 

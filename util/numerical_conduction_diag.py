@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
-"""Is `numerical_diffusivity = 2000 * Delta h` the reason the evaporation mass flux
-does not converge under mesh refinement?
+"""HISTORICAL diagnostic — RETIRED subject, kept only to re-read archived runs.
+
+The single-fluid release conduction operator is PHYSICAL only: the mesh-scaled
+artificial diffusivity was removed from it, and the release `model_column`
+scenario now rejects `ISO_NUMERICAL_DIFFUSIVITY_MULT` outright. Release
+`.outercond` sidecars therefore carry the 8-column physical-only layout and no
+longer have a q_num / q_total split for this script to report. The 12-column
+layouts below occur only in archived runs. The term still exists in the
+historical two-fluid Stage-D conduction operator (src/two_fluid/integrators.cpp).
+
+Original question: is `numerical_diffusivity = 2000 * Delta h` the reason the
+evaporation mass flux does not converge under mesh refinement?
 
 Reads the 2x2 set of runs (ns = 1000, 2000) x (production numerical conduction,
 ISO_NUMERICAL_DIFFUSIVITY_MULT=0) and reports, at each requested time:

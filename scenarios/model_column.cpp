@@ -1,5 +1,5 @@
 #include "model_column.hpp"
-#include "../mixture.hpp"
+#include "single_fluid/mixture.hpp"
 #include "model_c7.hpp"   // c7_full_profile + c7_route_b_photoionization (C7 library)
 #include "mesh.hpp"       // shared static local-refinement mesh builder
 
@@ -146,7 +146,33 @@ Vec model_column_ic(Grid& grid) {
             throw std::logic_error("GAMMA_TABLE and ISO_GAMMA are mutually exclusive");
         if (grid.eos_gamma_table.empty()) grid.eos_gamma_table = EosGammaTable::load(gamma_path);
     }
+    // A loaded Gamma1 table means the single-fluid RELEASE solver; an empty one
+    // means the historical two-fluid research solver (scenario `model_gentle`).
+    // `model_column` always supplies the table, so it always lands here as a
+    // release run.
     const bool gamma_mode = !grid.eos_gamma_table.empty();
+
+    // Release configuration surface. Everything below is historical two-fluid
+    // research physics that the single-fluid release timestep does not contain:
+    // a fixed adiabatic index, a neutral fluid, finite-rate ionization, a
+    // radiative sink, TRAC broadening, volumetric coronal heating, an imposed
+    // Neumann coronal flux, an IC coronal superheat, and the mesh-scaled
+    // artificial conduction term. Rejecting them outright is what keeps
+    // `model_column` a single unambiguous production identity — a release run
+    // can never be silently reconfigured into something else.
+    if (gamma_mode) {
+        static const char* const kNonReleaseKnobs[] = {
+            "ISO_GAMMA", "ISO_TWO_FLUID", "ISO_IONIZATION", "ISO_COOLING",
+            "ISO_TRAC", "ISO_CORONA", "ISO_CHEAT", "ISO_QFLUX", "ISO_TBOOST",
+            "ISO_NUMERICAL_DIFFUSIVITY_MULT"};
+        for (const char* knob : kNonReleaseKnobs) {
+            if (std::getenv(knob))
+                throw std::runtime_error(
+                    std::string(knob) + " is historical two-fluid research "
+                    "configuration and has no meaning for the single-fluid "
+                    "release solver; run the model_gentle scenario for that path");
+        }
+    }
 
     // --- IC mode ----------------------------------------------------------
     // The IC is ALWAYS the real Model C7 profile with the density re-integrated
@@ -337,6 +363,7 @@ Vec model_column_ic(Grid& grid) {
     if (kTtopFixedAbs) kTtopRef = t_top_abs;
 
     // --- one-time IC coronal superheat (ISO_TBOOST > 1) -------------------
+    // HISTORICAL two-fluid option (rejected in release mode).
     // Heat-flux-driven evaporation with NO heating ramp: raise the IC coronal
     // temperature above its own conduction+radiation balance so its own Spitzer
     // flux conducts down the TR and drives evaporation from t=0 (Antiochos &
@@ -497,24 +524,33 @@ Vec model_column_ic(Grid& grid) {
               << " beta=" << grid.limiter_beta << std::endl;
 
     // --- runtime physics toggles ------------------------------------------
+    // The RELEASE branch is deliberately a straight line: hydro plus physical
+    // conduction, nothing else. The optional stages below it exist only for the
+    // historical two-fluid research path, and the release rejects their env
+    // knobs above, so none of them can be reached from a model_column run.
     grid.single_fluid             = gamma_mode || !two_fluid_on;
     grid.enable_ionization        = ionization_on;
     grid.enable_radiative_cooling = cooling_on;
     grid.enable_beam_heating      = false;
     grid.enable_coronal_heating   = false;
-    // TRAC broadens the unresolved TR. ISO_TRAC force-enables it independent of
-    // cooling/corona (auto = cooling || corona). ISO_TRAC_TCHROM sets the region base
-    // T_b; ISO_TRAC_TCMAXFRAC lifts Johnston's 0.2·T_peak cap (needed on a capped
-    // low-T domain where 0.2·T_peak < T_b would pin T_c to the floor).
-    const float iso_trac = env_f("ISO_TRAC", -1.0f);   // -1 = auto (cooling||corona)
-    grid.enable_trac              = (iso_trac >= 0.0f) ? (iso_trac != 0.0f)
-                                                       : (cooling_on || kCorona);
-    grid.trac_T_chrom             = env_f("ISO_TRAC_TCHROM", 2.0e4f);
-    grid.trac_Tc_max_frac         = env_f("ISO_TRAC_TCMAXFRAC", 0.2f);
-    grid.trac_cutoff_T            = grid.trac_T_chrom;
-    grid.enable_vacuum_floor      = !gamma_mode && (cooling_on || kCorona || ionization_on);
     grid.impose_outer_heat_flux   = false;   // default: heat enters via the ghost-T jump
     grid.enable_Te                = false;    // two-fluid (ion/neutral), NOT three-temperature
+    if (gamma_mode) {
+        grid.enable_trac         = false;    // no TRAC stage in the release solver
+        grid.enable_vacuum_floor = false;
+    } else {
+        // TRAC broadens the unresolved TR. ISO_TRAC force-enables it independent of
+        // cooling/corona (auto = cooling || corona). ISO_TRAC_TCHROM sets the region base
+        // T_b; ISO_TRAC_TCMAXFRAC lifts Johnston's 0.2·T_peak cap (needed on a capped
+        // low-T domain where 0.2·T_peak < T_b would pin T_c to the floor).
+        const float iso_trac = env_f("ISO_TRAC", -1.0f);   // -1 = auto (cooling||corona)
+        grid.enable_trac         = (iso_trac >= 0.0f) ? (iso_trac != 0.0f)
+                                                      : (cooling_on || kCorona);
+        grid.trac_T_chrom        = env_f("ISO_TRAC_TCHROM", 2.0e4f);
+        grid.trac_Tc_max_frac    = env_f("ISO_TRAC_TCMAXFRAC", 0.2f);
+        grid.trac_cutoff_T       = grid.trac_T_chrom;
+        grid.enable_vacuum_floor = cooling_on || kCorona || ionization_on;
+    }
 
     // --- Route-B photoionization closure (only when the network is on) ----
     // Invert the local ionization-equilibrium balance of the active Stage-E network
@@ -527,6 +563,7 @@ Vec model_column_ic(Grid& grid) {
     }
 
     // --- imposed Neumann coronal flux q(T) + ramp (ISO_QFLUX*) ------------
+    // HISTORICAL two-fluid option (rejected in release mode).
     // Alternative to the ghost-T jump: impose the downward coronal conductive flux
     // as a Stage-D Neumann outer BC (RTV 1978 / model_c7 closure), optionally ramped
     // up to drive gentle evaporation (Antiochos & Sturrock 1978). The base is C7's
@@ -549,6 +586,7 @@ Vec model_column_ic(Grid& grid) {
     }
 
     // --- ambient volumetric coronal heating H(s) (ISO_CHEAT=1) ------------
+    // HISTORICAL two-fluid option (rejected in release mode).
     // The RTV (1978) static-balance term the resolved corona otherwise lacks:
     //   H(s) = E_H0 · exp(−(s−s0)/s_H)  [W/m³]  (Aschwanden & Schrijver 2002),
     // deposited through the corona so it balances the radiative loss locally and
@@ -595,15 +633,21 @@ Vec model_column_ic(Grid& grid) {
     // Stage 1: conduction OFF (adiabatic Euler steady state). Stage 2: ON, driven
     // by the top T jump (or the imposed q(T) flux / coronal heating).
     grid.enable_conduction        = relaxing0 ? false : heat_flux_on;
-    // Production model_column uses PHYSICAL conduction only. Keep the old
-    // mesh-scaled artificial diffusivity behind an explicit diagnostic multiplier
-    // for controlled legacy comparisons, but never enable it implicitly.
+    // The release conduction operator is structurally physical-only and never
+    // reads this field. The historical two-fluid Stage D still folds a
+    // mesh-scaled artificial diffusivity into its conduction operator; keep it
+    // there behind an explicit diagnostic multiplier for controlled legacy
+    // comparisons, but never enable it implicitly.
     // ISO_NUMERICAL_DIFFUSIVITY_MULT=1 restores the historical C_num=2000 m/s
-    // (4x in the resolved-corona testbed); unset/0 is the production baseline.
-    const float diff_mult = (kCorona ? 4.0f : 1.0f)
-                          * env_f("ISO_NUMERICAL_DIFFUSIVITY_MULT", 0.0f);
-    grid.numerical_diffusivity_per_length = heat_flux_on
-        ? (diff_mult * 2.0e3f) : 0.0f;
+    // (4x in the resolved-corona testbed); unset/0 is the two-fluid baseline.
+    if (gamma_mode) {
+        grid.numerical_diffusivity_per_length = 0.0f;
+    } else {
+        const float diff_mult = (kCorona ? 4.0f : 1.0f)
+                              * env_f("ISO_NUMERICAL_DIFFUSIVITY_MULT", 0.0f);
+        grid.numerical_diffusivity_per_length = heat_flux_on
+            ? (diff_mult * 2.0e3f) : 0.0f;
+    }
 
     model_column_update_bc(grid, xn);
     grid.broadcast();

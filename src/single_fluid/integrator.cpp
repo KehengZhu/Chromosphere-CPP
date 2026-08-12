@@ -1,14 +1,16 @@
-// Release solver: implicit physical conduction, the optional volumetric energy
-// stages, and the timestep path.
+// Release solver: implicit physical conduction and the release timestep.
 //
 //     U^n  --MUSCL/Roe hydro-->  U*  --implicit physical conduction-->  U^{n+1}
 //
-// There is no equilibrium projection between the stages: U = (rho, rho u, E) is
-// already the authoritative state, and Saha equilibrium enters only through the
-// EOS closure that decodes it.
+// Those are the only two stages. There is no equilibrium projection between
+// them (U = (rho, rho u, E) is already the authoritative state, and Saha
+// equilibrium enters only through the EOS closure that decodes it), and there
+// are no volumetric energy stages: TRAC, nonthermal beam heating, volumetric
+// coronal heating, radiative cooling and artificial/numerical conduction are
+// NOT part of the release and live only in the historical two-fluid research
+// solver (src/two_fluid/).
 
-#include "mixture.hpp"
-#include "physics.hpp"
+#include "single_fluid/mixture.hpp"
 #include "profiling.hpp"
 #include "parallel.hpp"
 
@@ -25,7 +27,7 @@ namespace chromosphere {
 void MixtureConductionScratch::resize(std::size_t n) {
     rho.resize(n); e_old.resize(n); temperature.resize(n); target.resize(n);
     conductivity.resize(n); capacity.resize(n); n_e.resize(n); n_hi.resize(n);
-    e_at_T.resize(n); x.resize(n); pressure.resize(n);
+    e_at_T.resize(n);
     g_left.resize(n); g_right.resize(n);
     a.resize(n); b.resize(n); c.resize(n); rhs.resize(n); delta.resize(n);
 }
@@ -47,17 +49,11 @@ double mixture_kappa_n(double n_e, double n_hi, double temperature) {
             + 1.70573*n_hi*std::sqrt(temperature));
 }
 
-double mixture_trac_factor(const Grid& grid, double temperature) {
-    if (!grid.enable_trac || !(grid.trac_cutoff_T > grid.trac_T_chrom)) return 1.0;
-    if (temperature >= grid.trac_T_chrom && temperature < grid.trac_cutoff_T)
-        return std::pow(static_cast<double>(grid.trac_cutoff_T)/temperature, 2.5);
-    return 1.0;
-}
-
-double mixture_conductivity(const Grid& grid, double n_e, double n_hi,
-                            double temperature) {
+// The release conductivity is PHYSICAL only: Spitzer electron conduction plus
+// neutral-hydrogen conduction. No TRAC broadening and no mesh-scaled artificial
+// diffusivity enter the release operator anywhere.
+double mixture_conductivity(double n_e, double n_hi, double temperature) {
     return mixture_kappa_e(n_e, n_hi, temperature)
-             * mixture_trac_factor(grid, temperature)
          + mixture_kappa_n(n_e, n_hi, temperature);
 }
 
@@ -106,8 +102,11 @@ OuterConductionWall outer_conduction_wall(const Grid& grid,
 } // namespace
 
 // ============================================================================
-// Energy replacement (used by conduction and the volumetric source stages)
+// Energy replacement: the accepted conduction temperature written back into the
+// energy row, keeping rho and rho u untouched.
 // ============================================================================
+
+namespace {
 
 Vec mixture_set_internal_energy(
     const Grid& grid, const Vec& state,
@@ -158,6 +157,8 @@ Vec mixture_set_internal_energy(
     return updated;
 }
 
+} // namespace
+
 // ============================================================================
 // Nonlinear backward-Euler physical conduction
 // ============================================================================
@@ -194,7 +195,6 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
     double k_inner = 0.0;
     double k_outer = 0.0;
     double diag_kr_top = 0.0;
-    double diag_cv_r_top = 0.0;
     const int conduction_threads = std::min(
         kMaximumConductionThreads, parallel_max_threads());
 
@@ -207,7 +207,7 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
 
     // One Grid owns one mutable conduction scratch set and is intentionally not
     // concurrently reentrant. All physical-cell writes below are index-disjoint.
-#pragma omp parallel if(conduction_threads > 1) num_threads(conduction_threads) shared(stop,converged,caloric_seeded,previous_step_was_small,converged_after_updates,inner,outer,wall,k_inner,k_outer,diag_kr_top,diag_cv_r_top,team_size,failure,residual_max_slots,step_max_slots)
+#pragma omp parallel if(conduction_threads > 1) num_threads(conduction_threads) shared(stop,converged,caloric_seeded,previous_step_was_small,converged_after_updates,inner,outer,wall,k_inner,k_outer,diag_kr_top,team_size,failure,residual_max_slots,step_max_slots)
     {
         const int tid = parallel_thread_index();
 
@@ -232,8 +232,6 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
                 s.n_hi[i] = seeded.n_hi;
                 s.e_at_T[i] = seeded.internal_energy;
                 s.capacity[i] = seeded.heat_capacity;
-                s.x[i] = seeded.x;
-                s.pressure[i] = seeded.pressure;
             } catch (...) {
                 failure.capture(i, std::current_exception());
             }
@@ -251,8 +249,8 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
                     outer = decode_ghost(grid, grid.mix_outer_boundary0,
                                          grid.phi_g_iph(ns-1));
                     wall = outer_conduction_wall(grid, outer);
-                    k_inner = mixture_conductivity(grid, inner.n_e, inner.n_HI, inner.T);
-                    k_outer = mixture_conductivity(grid, wall.n_e, wall.n_HI, wall.T);
+                    k_inner = mixture_conductivity(inner.n_e, inner.n_HI, inner.T);
+                    k_outer = mixture_conductivity(wall.n_e, wall.n_HI, wall.T);
                 } catch (...) {
                     failure.capture(ns, std::current_exception());
                     stop = true;
@@ -273,11 +271,9 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
                             s.n_hi[i] = cs.n_hi;
                             s.e_at_T[i] = cs.internal_energy;
                             s.capacity[i] = cs.heat_capacity;
-                            s.x[i] = cs.x;
-                            s.pressure[i] = cs.pressure;
                         }
                         s.conductivity[i] = mixture_conductivity(
-                            grid, s.n_e[i], s.n_hi[i], s.temperature[i]);
+                            s.n_e[i], s.n_hi[i], s.temperature[i]);
                     } catch (...) {
                         failure.capture(i, std::current_exception());
                     }
@@ -309,24 +305,14 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
                                 : face_k(s.conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i)))
                             : face_k(s.conductivity[i],s.conductivity[i+1],
                                      grid.ds_i(i),grid.ds_i(i+1));
-                        double cv_l=s.capacity[i], cv_r=s.capacity[i];
-                        if (i>0) cv_l=0.5*(s.capacity[i]+s.capacity[i-1]);
-                        if (i+1<ns) cv_r=0.5*(s.capacity[i]+s.capacity[i+1]);
-                        const double k_num_l = numerical_diffusivity_at_face(
-                            grid, grid.ds_imh_i(i))*cv_l;
                         const double ds_right = physical_outer_face
                             ? 0.5*static_cast<double>(grid.ds_i(i))
                             : static_cast<double>(grid.ds_iph_i(i));
-                        const double k_num_r = numerical_diffusivity_at_face(
-                            grid, ds_right)*cv_r;
-                        if (i+1 == ns) {
-                            diag_kr_top = kr;
-                            diag_cv_r_top = cv_r;
-                        }
+                        if (i+1 == ns) diag_kr_top = kr;
                         s.g_left[i] = grid.B_i(i)/grid.ds_i(i)
-                                  * (kl+k_num_l)/grid.B_imh(i)/grid.ds_imh_i(i);
+                                  * kl/grid.B_imh(i)/grid.ds_imh_i(i);
                         s.g_right[i] = grid.B_i(i)/grid.ds_i(i)
-                                   * (kr+k_num_r)/grid.B_iph(i)/ds_right;
+                                   * kr/grid.B_iph(i)/ds_right;
                     } catch (...) {
                         failure.capture(i, std::current_exception());
                     }
@@ -460,17 +446,12 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
         OuterConductionCapture& oc = grid.outer_conduction_capture;
         oc.T_top  = s.temperature[ns-1];
         oc.T_wall = wall.T;
-        oc.kappa_phys_face = diag_kr_top;
+        oc.kappa_face = diag_kr_top;
         oc.ds_face    = grid.outer_conduction_temperature_override
             ? 0.5*static_cast<double>(grid.ds_i(ns-1))
             : static_cast<double>(grid.ds_iph_i(ns-1));
-        oc.chi_num_face = numerical_diffusivity_at_face(grid, oc.ds_face);
-        oc.kappa_num_face  = oc.chi_num_face*diag_cv_r_top;
         oc.area_ratio = grid.B_i(ns-1)/grid.B_iph(ns-1);
-        const double dT_over_ds = (oc.T_wall-oc.T_top)/oc.ds_face;
-        oc.q_phys = oc.kappa_phys_face*dT_over_ds;
-        oc.q_num  = oc.kappa_num_face*dT_over_ds;
-        oc.q_total = oc.q_phys+oc.q_num;
+        oc.q_face = oc.kappa_face*(oc.T_wall-oc.T_top)/oc.ds_face;
         oc.imposed_neumann = grid.impose_outer_heat_flux;
         oc.valid = true;
     }
@@ -484,8 +465,7 @@ double mixture_conduction_residual_max(const Grid& grid, const Vec& before,
         throw std::logic_error("mixture conduction residual requires a Gamma1 table");
     const arma::uword ns = grid.ns;
     const auto sz = state_size(grid);
-    std::vector<double> conductivity(ns), capacity(ns), e_old(ns), e_now(ns),
-        temperature(ns);
+    std::vector<double> conductivity(ns), e_old(ns), e_now(ns), temperature(ns);
     for (arma::uword i = 0; i < ns; ++i) {
         const double phi = mixture_cell_phi(grid, i);
         auto decode = [&](const Vec& st) {
@@ -500,17 +480,16 @@ double mixture_conduction_residual_max(const Grid& grid, const Vec& before,
         e_old[i] = old_th.internal_energy;
         e_now[i] = new_th.internal_energy;
         temperature[i] = new_th.T;
-        conductivity[i] = mixture_conductivity(grid, new_th.n_e, new_th.n_HI,
+        conductivity[i] = mixture_conductivity(new_th.n_e, new_th.n_HI,
                                                new_th.T);
-        capacity[i] = equilibrium_heat_capacity(new_th.rho, new_th.T);
     }
     const CaloricMixtureThermo inner = decode_ghost(
         grid, grid.mix_inner_boundary0, grid.phi_g_imh(0));
     const CaloricMixtureThermo outer = decode_ghost(
         grid, grid.mix_outer_boundary0, grid.phi_g_iph(ns-1));
-    const double k_inner = mixture_conductivity(grid, inner.n_e, inner.n_HI, inner.T);
+    const double k_inner = mixture_conductivity(inner.n_e, inner.n_HI, inner.T);
     const OuterConductionWall wall = outer_conduction_wall(grid, outer);
-    const double k_outer = mixture_conductivity(grid, wall.n_e, wall.n_HI, wall.T);
+    const double k_outer = mixture_conductivity(wall.n_e, wall.n_HI, wall.T);
     auto face_k = [&](double kh, double kt, double dh, double dtw) {
         if (grid.uniform_mesh) return 0.5*(kh+kt);
         kh=std::max(kh,1.0e-30); kt=std::max(kt,1.0e-30);
@@ -528,17 +507,11 @@ double mixture_conduction_residual_max(const Grid& grid, const Vec& before,
                 ? k_outer
                 : face_k(conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i)))
             : face_k(conductivity[i],conductivity[i+1],grid.ds_i(i),grid.ds_i(i+1));
-        const double cv_l = i ? 0.5*(capacity[i]+capacity[i-1]) : capacity[i];
-        const double cv_r = i+1 < ns ? 0.5*(capacity[i]+capacity[i+1]) : capacity[i];
-        double gl = grid.B_i(i)/grid.ds_i(i)
-                  *(kl+numerical_diffusivity_at_face(grid,grid.ds_imh_i(i))*cv_l)
-                  /grid.B_imh(i)/grid.ds_imh_i(i);
+        double gl = grid.B_i(i)/grid.ds_i(i)*kl/grid.B_imh(i)/grid.ds_imh_i(i);
         const double ds_right = physical_outer_face
             ? 0.5*static_cast<double>(grid.ds_i(i))
             : static_cast<double>(grid.ds_iph_i(i));
-        double gr = grid.B_i(i)/grid.ds_i(i)
-                  *(kr+numerical_diffusivity_at_face(grid,ds_right)*cv_r)
-                  /grid.B_iph(i)/ds_right;
+        double gr = grid.B_i(i)/grid.ds_i(i)*kr/grid.B_iph(i)/ds_right;
         const double tl = i ? temperature[i-1] : inner.T;
         const double tr = i+1 < ns ? temperature[i+1] : wall.T;
         double divergence = gr*(tr-temperature[i])-gl*(temperature[i]-tl);
@@ -552,93 +525,7 @@ double mixture_conduction_residual_max(const Grid& grid, const Vec& before,
     return maximum;
 }
 
-float mixture_trac_cutoff_T(const Grid& grid, const Vec& state) {
-    const auto sz = state_size(grid);
-    Vec T(grid.ns);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const CaloricMixtureThermo th = decode_equilibrium_caloric_mixture(
-            grid.eos_gamma_table,
-            static_cast<double>(state(arma::sub2ind(sz, i, mix::RHO))),
-            static_cast<double>(state(arma::sub2ind(sz, i, mix::MOM))),
-            static_cast<double>(state(arma::sub2ind(sz, i, mix::ENERGY))),
-            mixture_cell_phi(grid, i), grid.eos_temperature_hint(i),
-            grid.eos_gamma_debug_clamp);
-        grid.store_eos_temperature_hint(i, th.T);
-        T(i) = static_cast<float>(th.T);
-    }
-    const float Tpeak = arma::max(T);
-    const float Tc_upper = std::max(grid.trac_Tc_max_frac*Tpeak, grid.trac_T_chrom);
-    float Tc = grid.trac_T_chrom;
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        float dTds;
-        if (grid.ns == 1) dTds = 0.0f;
-        else if (i == 0) dTds = (T(1)-T(0))/grid.ds_iph_i(0);
-        else if (i+1 == grid.ns) dTds = (T(i)-T(i-1))/grid.ds_imh_i(i);
-        else dTds = (T(i+1)-T(i-1))/(grid.ds_iph_i(i)+grid.ds_imh_i(i));
-        if (std::fabs(dTds)*grid.ds_i(i) > 0.5f*T(i)) Tc = std::max(Tc, T(i));
-    }
-    return std::min(Tc, Tc_upper);
-}
-
-// ============================================================================
-// Optional volumetric energy stages
-// ============================================================================
-
 namespace {
-
-struct MixtureCellFields {
-    Vec n_e, n_hi, temperature;
-    std::vector<double> rho, internal_energy;
-};
-
-MixtureCellFields decode_cell_fields(const Grid& grid, const Vec& state) {
-    MixtureCellFields f{Vec(grid.ns), Vec(grid.ns), Vec(grid.ns),
-                        std::vector<double>(grid.ns), std::vector<double>(grid.ns)};
-    const auto sz = state_size(grid);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const CaloricMixtureThermo th = decode_equilibrium_caloric_mixture(
-            grid.eos_gamma_table,
-            static_cast<double>(state(arma::sub2ind(sz, i, mix::RHO))),
-            static_cast<double>(state(arma::sub2ind(sz, i, mix::MOM))),
-            static_cast<double>(state(arma::sub2ind(sz, i, mix::ENERGY))),
-            mixture_cell_phi(grid, i), grid.eos_temperature_hint(i),
-            grid.eos_gamma_debug_clamp);
-        grid.store_eos_temperature_hint(i, th.T);
-        f.n_e(i) = static_cast<float>(th.n_e);
-        f.n_hi(i) = static_cast<float>(th.n_HI);
-        f.temperature(i) = static_cast<float>(th.T);
-        f.rho[i] = th.rho;
-        f.internal_energy[i] = th.internal_energy;
-    }
-    return f;
-}
-
-Vec apply_heating(const Grid& grid, const Vec& state, const Vec& Q_in, double dt,
-                  const MixtureCellFields& f) {
-    Vec Q = Q_in;
-    if (grid.enable_trac) Q /= trac_broadening_factor(grid, f.temperature);
-    std::vector<double> target(grid.ns);
-    for (arma::uword i = 0; i < grid.ns; ++i)
-        target[i] = f.internal_energy[i] + dt*Q(i);
-    return mixture_set_internal_energy(grid, state, target);
-}
-
-Vec apply_radiative_cooling(const Grid& grid, const Vec& state, double dt) {
-    const MixtureCellFields f = decode_cell_fields(grid, state);
-    Vec thin = radiative_loss_thin(grid, f.n_e, f.n_hi, f.temperature);
-    if (grid.enable_trac) thin /= trac_broadening_factor(grid, f.temperature);
-    const Vec Q = radiative_loss_thick(grid, f.n_e, f.n_hi, f.temperature) + thin;
-    std::vector<double> target(grid.ns);
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const double e_old = f.internal_energy[i];
-        const double e_floor = equilibrium_internal_energy(
-            f.rho[i], grid.eos_gamma_table.min_temperature());
-        const double denom = 1.0 + dt*std::max(0.0, static_cast<double>(Q(i)))
-                                   /std::max(e_old, 1.0e-30);
-        target[i] = std::max(e_floor, e_old/denom);
-    }
-    return mixture_set_internal_energy(grid, state, target);
-}
 
 // Equilibrium-reference well-balancing: on the first step cache
 // R_eq = RHS(eq_state) so it can be subtracted every step, making eq_state an
@@ -676,21 +563,8 @@ Vec mixture_advance(Grid& grid, const Vec& state, const Vec& dt_i,
                 next(k) = state(k) + dt_i(i)*rhs(k);
             }
     }
-    if (grid.enable_trac)
-        grid.trac_cutoff_T = mixture_trac_cutoff_T(grid, next);
     if (grid.enable_conduction)
         next = mixture_apply_conduction(grid, next, dt);
-    if (grid.enable_beam_heating) {
-        const MixtureCellFields f = decode_cell_fields(grid, next);
-        next = apply_heating(grid, next, beam_heating_rate(grid, f.n_e, f.n_hi),
-                             dt, f);
-    }
-    if (grid.enable_coronal_heating) {
-        const MixtureCellFields f = decode_cell_fields(grid, next);
-        next = apply_heating(grid, next, coronal_heating_rate(grid), dt, f);
-    }
-    if (grid.enable_radiative_cooling)
-        next = apply_radiative_cooling(grid, next, dt);
     return next;
 }
 

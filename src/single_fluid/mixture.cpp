@@ -1,8 +1,8 @@
 // Release solver: decode, MUSCL reconstruction, mixture Roe flux, source.
-// See mixture.hpp for the governing equations and the software contract.
+// See single_fluid/mixture.hpp for the governing equations and the software
+// contract. Nothing here reaches into the two-fluid research solver.
 
-#include "mixture.hpp"
-#include "physics.hpp"
+#include "single_fluid/mixture.hpp"
 #include "profiling.hpp"
 #include "parallel.hpp"
 
@@ -33,6 +33,27 @@ using Work = arma::Col<double>;
 
 inline arma::SizeMat state_size(const Grid& grid) {
     return arma::size(grid.ns, num_of_mixture_eq);
+}
+
+// Neumann-mirrored neighbour shift of a cell-centred STATIC mesh metric:
+// shift_up(v)(i) = v(i+1) in the interior and v(ns-1) at the top face;
+// shift_down mirrors at the base. Only mesh metrics are ever shifted this way,
+// so no ghost data is involved and the release solver needs none of the
+// two-fluid packed-state helpers.
+Vec shift_up(const Vec& v) {
+    Vec out(arma::size(v));
+    const arma::uword n = v.n_elem;
+    for (arma::uword i = 0; i + 1 < n; ++i) out(i) = v(i + 1);
+    out(n - 1) = v(n - 1);
+    return out;
+}
+
+Vec shift_down(const Vec& v) {
+    Vec out(arma::size(v));
+    const arma::uword n = v.n_elem;
+    for (arma::uword i = 1; i < n; ++i) out(i) = v(i - 1);
+    out(0) = v(0);
+    return out;
 }
 
 } // namespace
@@ -541,12 +562,12 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
             || scratch.W1.n_elem != grid.ns*num_of_mixture_eq) {
             const Vec w1_i = 0.5f*grid.ds_i/grid.ds_iph_i;
             broadcast_slots(grid, w1_i, scratch.W1);
-            broadcast_slots(grid, ip1(grid, w1_i, SLICE), scratch.W3);
-            broadcast_slots(grid, im1(grid, w1_i, SLICE), scratch.W4);
+            broadcast_slots(grid, shift_up(w1_i), scratch.W3);
+            broadcast_slots(grid, shift_down(w1_i), scratch.W4);
             broadcast_slots(grid, grid.ds_iph_i/grid.ds_imh_i, scratch.metric_r);
-            broadcast_slots(grid, ip1(grid, grid.ds_iph_i, SLICE)/grid.ds_iph_i,
+            broadcast_slots(grid, shift_up(grid.ds_iph_i)/grid.ds_iph_i,
                             scratch.metric_r_ip1);
-            broadcast_slots(grid, grid.ds_imh_i/im1(grid, grid.ds_imh_i, SLICE),
+            broadcast_slots(grid, grid.ds_imh_i/shift_down(grid.ds_imh_i),
                             scratch.metric_r_im1);
             scratch.weights_generation = grid.metrics_generation();
             scratch.weights_valid = true;
@@ -686,6 +707,9 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
 // Timestep
 // ============================================================================
 
+// The release has no volumetric energy source, so the acoustic CFL condition is
+// the only timestep constraint: the implicit conduction stage is unconditionally
+// stable and imposes none.
 Vec mixture_timestep(const Grid& grid, const Vec& state,
                      const MixtureField& decoded) {
     ProfileScope timer(ProfileRegion::Cfl);
@@ -700,33 +724,8 @@ Vec mixture_timestep(const Grid& grid, const Vec& state,
                            + std::sqrt(th.gamma1*th.p/th.rho);
         dt_i(i) = static_cast<float>(grid.CFL*grid.ds_i(i)/speed);
     }
-    float dt_min = arma::min(dt_i);
-    TimestepLimiter limiter = TimestepLimiter::Acoustic;
-
-    // Heating-timescale caps. In the tenuous upper chromosphere the heat capacity
-    // is small enough that tau_heat = e_int/Q can fall below the acoustic step,
-    // and operator splitting would then overheat a cell in one step.
-    if (grid.enable_beam_heating || grid.enable_coronal_heating) {
-        Vec n_e(grid.ns), n_hi(grid.ns), e_int(grid.ns);
-        for (arma::uword i = 0; i < grid.ns; ++i) {
-            n_e(i) = static_cast<float>(decoded.cells[i].n_e);
-            n_hi(i) = static_cast<float>(decoded.cells[i].n_HI);
-            e_int(i) = static_cast<float>(decoded.cells[i].internal_energy);
-        }
-        auto cap_from = [&](const Vec& Q, TimestepLimiter which) {
-            Vec tau = e_int/arma::clamp(Q, 1.0e-30f, arma::datum::inf);
-            for (arma::uword i = 0; i < grid.ns; ++i)
-                if (Q(i) <= 0.0f) tau(i) = arma::datum::inf;
-            const float cap = 0.1f*arma::min(tau);
-            if (cap < dt_min) { dt_min = cap; limiter = which; }
-        };
-        if (grid.enable_beam_heating)
-            cap_from(beam_heating_rate(grid, n_e, n_hi), TimestepLimiter::BeamHeating);
-        if (grid.enable_coronal_heating)
-            cap_from(coronal_heating_rate(grid), TimestepLimiter::CoronalHeating);
-    }
-    profile_note_timestep_limiter(limiter);
-    return dt_min*arma::ones<Vec>(grid.ns);
+    profile_note_timestep_limiter(TimestepLimiter::Acoustic);
+    return arma::min(dt_i)*arma::ones<Vec>(grid.ns);
 }
 
 } // namespace chromosphere

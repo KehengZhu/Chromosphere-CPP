@@ -16,8 +16,9 @@ void set_env_default(const char* key, const char* value) {
     setenv(key, value, /*overwrite=*/0);
 }
 
-// Grid resolution for the unified column scenario: a resolved corona (ISO_CORONA)
-// needs more cells than the chromosphere-only default. ISO_NS overrides.
+// Grid resolution for the column scenarios: a resolved corona (ISO_CORONA, a
+// two-fluid-only option) needs more cells than the chromosphere-only default.
+// ISO_NS overrides, and the model_column release preset pins it to 500.
 arma::uword column_peek_ns() {
     auto set = [](const char* k) {
         const char* e = std::getenv(k);
@@ -59,24 +60,32 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
         sc.update_bc = [](Grid& g, const Vec& xn) { model_flare_update_bc(g, xn); };
         return sc;
     }
-    // The unified field-aligned chromosphere→corona column scenario (the DEFAULT).
-    // "model_isentropic" is a backward-compatibility alias for the old name.
-    // "model_gentle" is a preset: the documented stable full-physics resolved-corona
-    //   gentle conduction-driven evaporation configuration (iso_corona_full) —
-    //   resolved corona + radiative sink + two-fluid + ionization, conduction on. The
-    //   base is raised to h = 1003 km (model_c7's validated floor): the Stage-E n²
-    //   channel counts and the radiative loss overflow float32 at photospheric density
-    //   (n ~ 1e23 ⇒ n² ≫ FLT_MAX). All are env defaults the user can still override.
-    if (name == "model_column" || name == "model_isentropic" || name == "model_gentle") {
-        if (name == "model_column" || name == "model_isentropic") {
+    // The canonical field-aligned chromosphere→corona column (the DEFAULT
+    // scenario) and its historical two-fluid sibling. They share one IC/BC
+    // implementation but NOT a solver: `model_column` always runs the
+    // single-fluid release solver, `model_gentle` always runs the historical
+    // two-fluid research solver. Nothing a user can set moves either one across
+    // that line.
+    if (name == "model_column" || name == "model_gentle") {
+        if (name == "model_column") {
             // Canonical release model: the validated Saha/Gamma1 N=500/R4
-            // physical-conduction-only single-fluid column. These are
-            // override-preserving scenario defaults, so selecting model_column
-            // means the release configuration without a launcher-specific
-            // collection of ISO_* assignments. No two-fluid or finite-rate
-            // ionization knob appears here: the release solver has neither.
-            if (!std::getenv("GAMMA_TABLE") && !std::getenv("ISO_GAMMA"))
-                set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
+            // physical-conduction-only single-fluid column. The Gamma1 table is
+            // supplied UNCONDITIONALLY (only the path is overridable), so
+            // `model_column` names exactly one solver. The remaining entries are
+            // override-preserving defaults for the release model/grid, so
+            // selecting model_column means the release configuration without a
+            // launcher-specific collection of ISO_* assignments. No two-fluid,
+            // fixed-gamma, finite-rate-ionization, cooling, TRAC or artificial-
+            // conduction knob appears here: the release solver has none of them,
+            // and model_column_ic rejects them outright if they are set.
+            if (std::getenv("ISO_GAMMA"))
+                throw std::runtime_error(
+                    "make_scenario: model_column is the single-fluid release "
+                    "scenario and derives every thermodynamic index from the "
+                    "Saha/Gamma1 closure; ISO_GAMMA (the historical fixed-gamma "
+                    "two-fluid index) has no meaning here. Use model_gentle for "
+                    "the historical fixed-gamma column.");
+            set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
             set_env_default("ISO_H_BASE",                     "1600");
             set_env_default("ISO_DH",                         "553");
             set_env_default("ISO_NS",                         "500");
@@ -87,11 +96,15 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
             set_env_default("ISO_REFINE_FACTOR",              "4");
             set_env_default("ISO_REFINE_S_LO_KM",             "500");
             set_env_default("ISO_REFINE_TRANSITION_KM",       "20");
-            set_env_default("ISO_NUMERICAL_DIFFUSIVITY_MULT", "0");
-            set_env_default("ISO_COOLING",                    "0");
-            set_env_default("ISO_TRAC",                       "0");
-            set_env_default("ISO_CORONA",                     "0");
         }
+        // HISTORICAL two-fluid research preset (NOT the release): the documented
+        // stable full-physics resolved-corona gentle conduction-driven
+        // evaporation configuration — resolved corona + radiative sink +
+        // two-fluid + finite-rate ionization, conduction on. The base is raised
+        // to h = 1003 km (model_c7's validated floor): the Stage-E n² channel
+        // counts and the radiative loss overflow float32 at photospheric density
+        // (n ~ 1e23 ⇒ n² ≫ FLT_MAX). It never loads a Gamma1 table, so it always
+        // selects the seven-row two-fluid solver.
         if (name == "model_gentle") {
             set_env_default("ISO_CORONA",     "1");
             set_env_default("ISO_H_BASE",     "1003");

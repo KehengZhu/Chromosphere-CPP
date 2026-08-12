@@ -107,7 +107,8 @@ Both writeups must satisfy the following contract. It exists because a release r
 3. **Numerical-method sections are not the source of the model.** Discretization sections may refine or specialize the governing equations, but the equations themselves must be stated first, in a physics section.
 4. **Prescribed field-aligned geometry must be explicit.** For a field-aligned model, the general governing equations must show the prescribed `B(s)` (or equivalently `A(s)`, with `A(s)B(s) = const`) and the resulting geometric source terms, *even when the reported run uses constant `B`*. State the constant-`B` specialization explicitly and separately. Do not present prescribed geometry as though the field were evolved, and do not add induction or Lorentz-force terms the release does not solve.
 5. **Historical architecture must not read as active.** A superseded state representation, stage, or update path may be documented, but only under an explicit non-active label (`main.tex`) or not at all (`paper.tex`). Removing a solver stage means removing it from the active update sequence, the abstract, the configuration tables, the verification section, and the conclusions — not only from the section that defined it.
-6. **Current code is the source of truth.** Verify every one of the above directly against the production implementation, not against an earlier revision of the writeup or a recap document.
+6. **Only structurally present physics may be documented as release physics.** Describe a stage as part of the release update path only if it is actually implemented inside the canonical release integrator. A stage that exists elsewhere, or that would run only behind a default-off flag, is not release physics and must carry a non-active label (`main.tex`) or be absent (`paper.tex`). This mirrors the code-side rule that the canonical release integrator should contain only physics the production timestep actually performs; inactive experimental stages belong in the research solver, not embedded in the release path behind flags.
+7. **Current code is the source of truth.** Verify every one of the above directly against the production implementation, not against an earlier revision of the writeup or a recap document.
 
 ## 7. Numerical and physical accuracy
 
@@ -149,8 +150,10 @@ Every catch-up must remove or reclassify superseded active-release statements. C
 - old canonical resolution or actual cell count;
 - old Riemann solver or reconstruction;
 - obsolete boundary placement or distance;
-- artificial or numerical terms no longer active;
-- optional source modules no longer in the release flow;
+- artificial or numerical terms no longer active, or removed from the operator entirely;
+- optional source modules no longer in the release flow, or no longer implemented in the release solver at all;
+- a solver-source layout or module list that no longer matches the source tree;
+- a scenario name documented as selecting a solver it can no longer select;
 - limitations that later work resolved;
 - convergence claims invalidated by later evidence;
 - a superseded conserved-state representation or a removed solver stage still described as active.

@@ -20,8 +20,16 @@ FF_COLUMNS = ("cell_km face_km rho_cell v_cell T_cell rho_L rho_R v_L v_R T_L T_
               "cs_L cs_R a_face f_central f_diff f_total eq_residual_mass "
               "r_rho phi_plus_rho r_ip1_rho phi_minus_rho r_v phi_plus_v "
               "r_T phi_plus_T").split()
-OUTER_COLS = ["t", "step", "T_top", "T_wall", "kappa_phys_face", "chi_num_face",
-              "kappa_num_face", "ds_face", "area_ratio", "q_phys", "q_num", "q_total"]
+# RELEASE `.outercond` layout (physical conduction only).
+OUTER_COLS = ["t", "step", "T_top", "T_wall", "kappa_face", "ds_face",
+              "area_ratio", "q_face"]
+# Historical layout, when the conduction operator still carried an artificial
+# diffusivity. Rows in this shape are mapped onto the release names so old runs
+# stay analysable: kappa_face <- kappa_phys_face, q_face <- q_total.
+LEGACY_OUTER_COLS = ["t", "step", "T_top", "T_wall", "kappa_phys_face",
+                     "chi_num_face", "kappa_num_face", "ds_face", "area_ratio",
+                     "q_phys", "q_num", "q_total"]
+LEGACY_TO_RELEASE = [0, 1, 2, 3, 4, 7, 8, 11]
 
 
 def roughness(x: np.ndarray) -> float:
@@ -191,7 +199,7 @@ def stream_faceflux(base: Path) -> tuple[dict, dict, dict]:
 
 
 def stream_outercond(base: Path) -> dict:
-    """Interpolate boundary quantities and integrate q_phys to exact target times."""
+    """Interpolate boundary quantities and integrate q_face to exact target times."""
     path = Path(str(base) + ".outercond")
     out = {}
     prev = None
@@ -201,14 +209,16 @@ def stream_outercond(base: Path) -> dict:
             if line.startswith("#"):
                 continue
             vals = np.fromstring(line, sep=" ")
-            if vals.size != len(OUTER_COLS):
+            if vals.size == len(LEGACY_OUTER_COLS):
+                vals = vals[LEGACY_TO_RELEASE]
+            elif vals.size != len(OUTER_COLS):
                 continue
             row = dict(zip(OUTER_COLS, map(float, vals)))
             if prev is None:
                 prev = row
                 continue
             t0, t1 = prev["t"], row["t"]
-            q0, q1 = prev["q_phys"], row["q_phys"]
+            q0, q1 = prev["q_face"], row["q_face"]
             dt = t1 - t0
             if dt <= 0:
                 prev = row
@@ -219,12 +229,10 @@ def stream_outercond(base: Path) -> dict:
                 a = (target - t0) / dt
                 interp = {name: float(prev[name] + a * (row[name] - prev[name]))
                           for name in OUTER_COLS}
-                q_target = interp["q_phys"]
+                q_target = interp["q_face"]
                 interp["t"] = float(target)
                 interp["E_phys_Jm2"] = float(
                     integral + 0.5 * (q0 + q_target) * (target - t0))
-                interp["q_num_frac"] = (float(interp["q_num"] / interp["q_total"])
-                                         if interp["q_total"] else math.nan)
                 out[target] = interp
             integral += 0.5 * (q0 + q1) * dt
             prev = row
@@ -232,8 +240,6 @@ def stream_outercond(base: Path) -> dict:
         if target not in out and prev is not None and abs(prev["t"] - target) <= 1.0:
             tail = dict(prev)
             tail["E_phys_Jm2"] = float(integral)
-            tail["q_num_frac"] = (float(tail["q_num"] / tail["q_total"])
-                                   if tail["q_total"] else math.nan)
             out[target] = tail
     missing = [t for t in TARGETS if t not in out]
     if missing:

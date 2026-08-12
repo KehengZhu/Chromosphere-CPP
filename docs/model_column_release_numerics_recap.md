@@ -20,14 +20,14 @@ scenario supplies it and the `ISO_*` model/grid defaults itself.)
 | Element | Release setting |
 | --- | --- |
 | Model | 1D field-aligned hydrodynamics on a straight field line, gravity on, `B ≡ 1` |
-| Solver / state | single-fluid equilibrium mixture, `U = (rho, rho u, E)` (`mixture.hpp`); carrier quantities derived, never stored |
+| Solver / state | single-fluid equilibrium mixture, `U = (rho, rho u, E)` (`src/single_fluid/`); carrier quantities derived, never stored |
 | Update path | `U^n -> MUSCL/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}` (no projection stage) |
 | Thermodynamics | Gamma/Saha equilibrium closure with ionization energy, production `Gamma1` table |
 | Reconstruction | MUSCL on `(ln ρ, V, ln p)`, MC3/Koren limiter, β = 2 |
 | Face temperature | exact inversion of the same Saha closure, `T(ρ, p)` |
 | Numerical flux | mixture **Roe characteristic** flux (3×3 local linearization) |
 | Well balancing | equilibrium-reference (δ-form), plus inner discrete-HSE ghosts (p and ρ) |
-| Conduction | physical only (no artificial mesh-scaled diffusivity) |
+| Conduction | physical only, **structurally**: the operator has no TRAC factor and no artificial mesh-scaled diffusivity term at all |
 | Upper boundary | 22,000 K external conductive reservoir at the physical face |
 | Mesh | coarse-equivalent N = 500 with R4 outer refinement → 661 actual cells |
 | CFL | 0.50 (validated for this configuration; the hard-coded solver default remains 0.25) |
@@ -38,15 +38,32 @@ false, which leaves the non-release two-fluid scenarios on Rusanov + `(ln ρ, V,
 
 ## Architecture
 
-The release solver lives in `mixture.hpp`, `src/mixture.cpp` and `src/mixture_integrator.cpp`
-and advances **three** conserved rows per cell. `x`, `rho_i = x·rho`, `rho_n = (1-x)·rho`,
-`n_e`, `n_HI` and `p_e` are derived EOS diagnostics recomputed wherever needed.
+The release solver lives in `src/single_fluid/` (`mixture.hpp`, `mixture.cpp`,
+`integrator.cpp`) and advances **three** conserved rows per cell. `x`, `rho_i = x·rho`,
+`rho_n = (1-x)·rho`, `n_e`, `n_HI` and `p_e` are derived EOS diagnostics recomputed wherever
+needed. `mixture_advance` contains exactly two stages — the explicit MUSCL/Roe hydro update
+and the implicit physical conduction solve. There is no TRAC stage, no beam heating, no
+volumetric coronal heating, no radiative cooling and no artificial conduction anywhere in
+that path; those are two-fluid research physics, not release physics disabled by a flag.
 
 The historical seven-row two-fluid / three-temperature / finite-rate-ionization solver is a
-separate non-release path (`chromosphere.hpp`, `src/state.cpp`, `src/flux.cpp`, `src/rhs.cpp`,
-`src/integrators.cpp`) with its own state width, packing, boundaries and source stages. A
-`Gamma1` table selects the release solver; each solver rejects the other's `Grid`, and a
-release run rejects `SINGLE_FLUID` / `ENABLE_TE` / `ISO_TWO_FLUID` / `ISO_IONIZATION`.
+separate non-release path (`src/two_fluid/`: `two_fluid.hpp`, `state.cpp`, `flux.cpp`,
+`rhs.cpp`, `integrators.cpp`) with its own state width, packing, boundaries and source
+stages. The two directories share only `chromosphere.hpp` (the Grid) and `eos.hpp`; neither
+includes or calls the other. A `Gamma1` table selects the release solver; each solver rejects
+the other's `Grid`, and a release run rejects `SINGLE_FLUID` / `ENABLE_TE` / `ISO_TWO_FLUID`
+/ `ISO_IONIZATION`.
+
+## Solver identity of `model_column`
+
+`model_column` names exactly one production model. `make_scenario` supplies the production
+`Gamma1` table unconditionally, so the scenario always selects the release solver, and it
+refuses `ISO_GAMMA` outright. `model_column_ic` additionally rejects every historical
+two-fluid research knob — `ISO_GAMMA`, `ISO_TWO_FLUID`, `ISO_IONIZATION`, `ISO_COOLING`,
+`ISO_TRAC`, `ISO_CORONA`, `ISO_CHEAT`, `ISO_QFLUX`, `ISO_TBOOST`,
+`ISO_NUMERICAL_DIFFUSIVITY_MULT` — rather than silently accepting them. The retired
+`model_isentropic` alias has been removed. The historical two-fluid column is reached through
+the separate `model_gentle` scenario, which never loads a `Gamma1` table.
 
 The former conservative equilibrium projection has been **removed**: it was the identity on
 `(rho, rho·u, E)` and existed only to repair the four redundant degrees of freedom of the

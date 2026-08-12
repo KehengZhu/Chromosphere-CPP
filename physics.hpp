@@ -78,8 +78,9 @@ inline Vec kappa_n(const Vec& n_i, const Vec& n_n, const Vec& T_i, const Vec& T_
           + 1.70573f * n_n % arma::sqrt(T_n));
 }
 
-/// Scalar common-temperature conductivity components used by EOS diagnostics.
-/// These deliberately contain no TRAC or numerical-diffusion contribution.
+/// Scalar common-temperature conductivity components used by EOS diagnostics and
+/// by the single-fluid release conduction operator, which is PHYSICAL only:
+/// these deliberately contain no TRAC and no numerical-diffusion contribution.
 inline double physical_kappa_e(double n_e, double n_n, double temperature) {
     return 9.2048e-12*n_e*std::pow(temperature, 2.5)
          / (n_e + 2.836e-11*n_n*temperature*temperature);
@@ -94,22 +95,6 @@ inline double physical_kappa_n(double n_i, double n_n, double temperature) {
 inline double physical_conductivity(double n_e, double n_n, double temperature) {
     return physical_kappa_e(n_e, n_n, temperature)
          + physical_kappa_n(n_e, n_n, temperature);
-}
-
-/// Solver-effective conductivity estimate for diagnostic comparison only.
-/// The nonlinear conduction solve uses face conductivities; this is its
-/// cell-centred coefficient before face averaging.
-inline double solver_effective_conductivity(const Grid& grid, double n_e,
-                                            double n_n, double temperature,
-                                            double heat_capacity,
-                                            double local_spacing) {
-    double trac = 1.0;
-    if (grid.enable_trac && grid.trac_cutoff_T > grid.trac_T_chrom
-        && temperature >= grid.trac_T_chrom && temperature < grid.trac_cutoff_T)
-        trac = std::pow(static_cast<double>(grid.trac_cutoff_T)/temperature, 2.5);
-    return trac*physical_kappa_e(n_e, n_n, temperature)
-         + physical_kappa_n(n_e, n_n, temperature)
-         + numerical_diffusivity_at_face(grid, local_spacing)*heat_capacity;
 }
 
 /// Ion-neutral collision frequency, target-density form (writeup eq 57):

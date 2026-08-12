@@ -1,5 +1,6 @@
 #include "chromosphere.hpp"
-#include "mixture.hpp"
+#include "single_fluid/mixture.hpp"
+#include "two_fluid/two_fluid.hpp"
 #include "physics.hpp"
 #include "profiling.hpp"
 #include "parallel.hpp"
@@ -82,14 +83,6 @@ std::string sha256_file(const std::string& path) {
     return out.str();
 }
 
-double gamma_solver_conductivity(const chromosphere::Grid& grid,
-                                 const chromosphere::MixtureThermo& th,
-                                 double local_spacing) {
-    return chromosphere::solver_effective_conductivity(
-        grid, th.n_e, th.n_HI, th.T,
-        chromosphere::equilibrium_heat_capacity(th.rho, th.T), local_spacing);
-}
-
 } // namespace
 
 int main(int argc, char** argv) {
@@ -100,9 +93,9 @@ int main(int argc, char** argv) {
     //   mode:         "full" (semi-implicit, default) or "explicit" (R_I ≡ 0)
     //   ionization:   "ionization" or "no-ionization" (default: no-ionization for
     //                 the default model_column release, ionization otherwise)
-    //   scenario:     "model_column" (default — the unified chromosphere→corona column;
-    //                 accepts "model_isentropic" / "model_gentle" as aliases) |
-    //                 "model_c7" | "model_flare" | "pfss_field_line" | "analytic_canopy"
+    //   scenario:     "model_column" (default — the single-fluid RELEASE column) |
+    //                 "model_gentle" | "model_c7" | "model_flare" |
+    //                 "pfss_field_line" | "analytic_canopy"  (all two-fluid)
     //   data_path:    required for tabulated scenarios (e.g. pfss_field_line);
     //                 ignored otherwise (pass "-" or "" for scenarios that don't use it)
     //   time_mult:    multiplier on the default total_time (default 1.0). Step
@@ -112,8 +105,7 @@ int main(int argc, char** argv) {
     const std::string out_path      = (argc > 1) ? argv[1] : "outputs/output.txt";
     const std::string mode          = (argc > 2) ? argv[2] : "full";
     const std::string scenario_name = (argc > 4) ? argv[4] : "model_column";
-    const bool release_column = scenario_name == "model_column"
-                             || scenario_name == "model_isentropic";
+    const bool release_column = scenario_name == "model_column";
     const std::string ioniz_arg     = (argc > 3) ? argv[3]
                                                  : (release_column ? "no-ionization" : "ionization");
     const std::string data_path     = (argc > 5) ? argv[5] : "";
@@ -177,7 +169,7 @@ int main(int argc, char** argv) {
             grid.eos_gamma_table = EosGammaTable::load(gamma_table_path);
             if (explicit_only)
                 throw std::logic_error("the release solver has no explicit-only mode");
-            if (scenario_name != "model_column" && scenario_name != "model_isentropic")
+            if (scenario_name != "model_column")
                 throw std::logic_error("the release solver currently supports only model_column");
         } catch (const std::exception& e) {
             std::cerr << "release-solver error: " << e.what() << std::endl;
@@ -261,7 +253,7 @@ int main(int argc, char** argv) {
     //   line 1: "ns num_of_eq"
     //   line 2: ns cumulative cell heights in km (offset by grid.out_base_km, the
     //           domain base — 1003 km for C7-based scenarios, 0 km for the
-    //           photosphere-anchored model_isentropic C7 IC; ds_i is in m, hence
+    //           photosphere-anchored model_column C7 IC; ds_i is in m, hence
     //           the 1e-3 conversion)
     //   then, repeated: a "# t = T step = S" marker followed by ns lines of
     //   num_of_eq space-separated conserved-variable values.
@@ -295,6 +287,9 @@ int main(int argc, char** argv) {
                    << "# GAMMA_TABLE=" << gamma_table_path << "\n"
                    << "# GAMMA_TABLE_SHA256=" << gamma_table_sha256 << "\n"
                    << "# potential=cell_center_mean_of_phi_g_imh_phi_g_iph\n"
+                   << "# release conduction is PHYSICAL only, so kappa_solver is\n"
+                      "# identically kappa_physical; the column is kept for format\n"
+                      "# stability with existing analysis scripts.\n"
                    << "# columns=rho_total v_cm T x_eq n_e n_HI p_total Gamma1 kappa_physical kappa_solver\n";
     }
 
@@ -326,8 +321,8 @@ int main(int argc, char** argv) {
                            << "  " << th.x << "  " << th.n_e << "  " << th.n_HI
                            << "  " << th.p << "  " << th.gamma1
                            << "  " << physical_conductivity(th.n_e,th.n_HI,th.T)
-                           << "  " << gamma_solver_conductivity(
-                                  grid, th, grid.ds_i(i)) << '\n';
+                           << "  " << physical_conductivity(th.n_e,th.n_HI,th.T)
+                           << '\n';
             }
         }
     };
@@ -403,7 +398,8 @@ int main(int argc, char** argv) {
                   << " roe=" << grid.roe_characteristic_flux
                   << " pressure_reconstruct=" << grid.pressure_reconstruct
                   << " eq_wb=" << grid.eq_wb << " ds_km=" << (grid.ds_i(0)*1.0e-3f)
-                  << "\n# mass flux = RHO_I row + RHO_N row (the conserved total)\n"
+                  << "\n# mass flux = the mix::RHO continuity row (total mass "
+                     "density; the release state has no carrier rows)\n"
                   << "# columns=cell_km face_km rho_cell v_cell T_cell "
                      "rho_L rho_R v_L v_R T_L T_R cs_L cs_R a_face "
                      "f_central f_diff f_total eq_residual_mass "
@@ -431,15 +427,16 @@ int main(int argc, char** argv) {
         outer_cond << "# outer-face conduction diagnostic (read-only capture of the "
                       "final converged mixture_apply_conduction iteration)\n"
                    << "# ns=" << grid.ns << " ds_km=" << (grid.ds_i(grid.ns-1)*1.0e-3f)
-                   << " numerical_diffusivity_per_length="
-                   << grid.numerical_diffusivity_per_length
                    << " uniform_mesh=" << grid.uniform_mesh
                    << " impose_outer_heat_flux=" << grid.impose_outer_heat_flux << '\n'
-                   << "# q = (kappa_phys_face + kappa_num_face)*(T_wall - T_top)/ds_face"
+                   << "# release conduction is PHYSICAL only (kappa_e + kappa_n; no "
+                      "TRAC, no artificial diffusivity)\n"
+                   << "# ds_face = half the top cell when an external face "
+                      "temperature is imposed, else the centre-to-ghost-centre span\n"
+                   << "# q_face = kappa_face*(T_wall - T_top)/ds_face"
                       "  [W m^-2, positive = into the top cell]\n"
-                   << "# columns=t step T_top T_wall kappa_phys_face chi_num_face "
-                      "kappa_num_face "
-                      "ds_face area_ratio q_phys q_num q_total\n";
+                   << "# columns=t step T_top T_wall kappa_face "
+                      "ds_face area_ratio q_face\n";
         outer_cond.precision(10);
     }
 
@@ -448,10 +445,9 @@ int main(int argc, char** argv) {
         if (!outer_cond.is_open() || !oc.valid) return;
         outer_cond << t_now << ' ' << step_now << ' '
                    << oc.T_top << ' ' << oc.T_wall << ' '
-                   << oc.kappa_phys_face << ' ' << oc.chi_num_face << ' '
-                   << oc.kappa_num_face << ' '
+                   << oc.kappa_face << ' '
                    << oc.ds_face << ' ' << oc.area_ratio << ' '
-                   << oc.q_phys << ' ' << oc.q_num << ' ' << oc.q_total << '\n';
+                   << oc.q_face << '\n';
     };
 
     auto write_face_record = [&](float t_now, long long step_now) {

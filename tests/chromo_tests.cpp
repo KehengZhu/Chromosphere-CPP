@@ -15,7 +15,8 @@
 //   - Uniform, motionless, gravity-free state is a fixed point of advance_Euler_state
 
 #include "../chromosphere.hpp"
-#include "../mixture.hpp"
+#include "../src/single_fluid/mixture.hpp"
+#include "../src/two_fluid/two_fluid.hpp"
 #include "../physics.hpp"
 #include "../profiling.hpp"
 #include "../parallel.hpp"
@@ -818,22 +819,12 @@ static Vec setup_gamma_equilibrium(Grid& grid, const EosGammaTable& table,
     grid.init(ns, 0.25f);
     grid.eos_gamma_table = table;
     grid.enable_conduction = false;
-    grid.enable_radiative_cooling = false;
-    grid.enable_beam_heating = false;
-    grid.enable_coronal_heating = false;
-    grid.enable_trac = false;
     grid.eq_wb = false;
     grid.eq_state.reset();
     grid.eq_residual.reset();
     grid.impose_outer_heat_flux = false;
     grid.inner_conduction_neumann = false;
     grid.outer_conduction_temperature_override = false;
-    grid.numerical_diffusivity_per_length = 0.0f;
-    grid.enable_radiative_cooling = false;
-    grid.enable_beam_heating = false;
-    grid.enable_coronal_heating = false;
-    grid.enable_trac = false;
-    grid.enable_vacuum_floor = false;
     grid.ds_i.fill(1.0e4f);
     grid.B_i.ones(); grid.B_imh.ones(); grid.B_iph.ones();
     grid.dinvB_ds_i.zeros();
@@ -990,7 +981,7 @@ static void clear_model_column_release_defaults_env() {
         "ISO_REFINE_PROFILE", "ISO_REFINE_FACTOR", "ISO_REFINE_S_LO_KM",
         "ISO_REFINE_TRANSITION_KM", "ISO_NUMERICAL_DIFFUSIVITY_MULT",
         "ISO_COOLING", "ISO_TRAC", "ISO_CORONA", "ISO_TWO_FLUID",
-        "ISO_IONIZATION"
+        "ISO_IONIZATION", "ISO_CHEAT", "ISO_QFLUX", "ISO_TBOOST"
     };
     for (const char* key : keys) unsetenv(key);
 }
@@ -1010,25 +1001,59 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_FACTOR")) == "4");
     EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_S_LO_KM")) == "500");
     EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_TRANSITION_KM")) == "20");
-    EXPECT_TRUE(std::string(std::getenv("ISO_NUMERICAL_DIFFUSIVITY_MULT")) == "0");
-    EXPECT_TRUE(std::string(std::getenv("ISO_COOLING")) == "0");
-    EXPECT_TRUE(std::string(std::getenv("ISO_TRAC")) == "0");
-    EXPECT_TRUE(std::string(std::getenv("ISO_CORONA")) == "0");
-    // The release preset must not mention the legacy two-fluid research knobs at
-    // all: the single-fluid release solver has neither a neutral fluid nor a
-    // finite-rate ionization stage, and chromo_main rejects both outright.
-    EXPECT_TRUE(std::getenv("ISO_TWO_FLUID") == nullptr);
-    EXPECT_TRUE(std::getenv("ISO_IONIZATION") == nullptr);
+    // The release preset must not mention ANY historical two-fluid research knob:
+    // the single-fluid release solver has no neutral fluid, no finite-rate
+    // ionization, no radiative sink, no TRAC and no artificial conduction, and
+    // model_column_ic rejects every one of them outright.
+    for (const char* knob : {"ISO_TWO_FLUID", "ISO_IONIZATION", "ISO_COOLING",
+                             "ISO_TRAC", "ISO_CORONA", "ISO_CHEAT", "ISO_QFLUX",
+                             "ISO_TBOOST", "ISO_NUMERICAL_DIFFUSIVITY_MULT"})
+        EXPECT_TRUE(std::getenv(knob) == nullptr);
 
+    // Overridable model/grid knobs still win, and the Gamma1 table is supplied
+    // UNCONDITIONALLY so model_column always names the release solver.
     clear_model_column_release_defaults_env();
     setenv("ISO_NS", "777", 1);
     setenv("ISO_HEAT_FLUX", "0", 1);
-    setenv("ISO_GAMMA", "1.05", 1);
-    Scenario diagnostic = make_scenario("model_column", "");
-    EXPECT_TRUE(diagnostic.peek_ns() == 777u);
+    Scenario tuned = make_scenario("model_column", "");
+    EXPECT_TRUE(tuned.peek_ns() == 777u);
     EXPECT_TRUE(std::string(std::getenv("ISO_HEAT_FLUX")) == "0");
-    EXPECT_TRUE(std::string(std::getenv("ISO_GAMMA")) == "1.05");
+    EXPECT_TRUE(std::string(std::getenv("GAMMA_TABLE")) ==
+                "data/eos/gamma1_hydrogen_v1.dat");
+
+    // The fixed-gamma two-fluid index can no longer reroute model_column into the
+    // historical solver: it is a hard scenario error.
+    clear_model_column_release_defaults_env();
+    setenv("ISO_GAMMA", "1.05", 1);
+    EXPECT_TRUE(throws_any([&] { (void)make_scenario("model_column", ""); }));
+    clear_model_column_release_defaults_env();
+
+    // ...and the retired "model_isentropic" alias is gone entirely.
+    EXPECT_TRUE(throws_any([&] { (void)make_scenario("model_isentropic", ""); }));
+
+    // model_gentle stays available as the HISTORICAL two-fluid preset, and it
+    // never loads a Gamma1 table, so it always selects the seven-row solver.
+    clear_model_column_release_defaults_env();
+    Scenario gentle = make_scenario("model_gentle", "");
+    (void)gentle;
     EXPECT_TRUE(std::getenv("GAMMA_TABLE") == nullptr);
+    EXPECT_TRUE(std::string(std::getenv("ISO_TWO_FLUID")) == "1");
+    EXPECT_TRUE(std::string(std::getenv("ISO_IONIZATION")) == "1");
+    clear_model_column_release_defaults_env();
+
+    // Every rejected knob is rejected by the IC itself, not only by the preset.
+    for (const char* knob : {"ISO_COOLING", "ISO_TRAC", "ISO_CORONA", "ISO_CHEAT",
+                             "ISO_QFLUX", "ISO_TBOOST", "ISO_TWO_FLUID",
+                             "ISO_IONIZATION", "ISO_NUMERICAL_DIFFUSIVITY_MULT"}) {
+        setenv("ISO_H_BASE", "1600", 1); setenv("ISO_DH", "553", 1);
+        setenv(knob, "1", 1);
+        Grid rejected;
+        rejected.init(16, 0.25f);
+        rejected.eos_gamma_table =
+            EosGammaTable::load(production_gamma_table_path());
+        EXPECT_TRUE(throws_any([&] { (void)model_column_ic(rejected); }));
+        unsetenv(knob);
+    }
     clear_model_column_release_defaults_env();
 }
 
@@ -1539,60 +1564,20 @@ static double coronal_ramp_profile(double f) {
     return std::exp(std::log(1.0e4)*(1.0-f) + std::log(1.0e6)*f);
 }
 
-// The release energy stages: volumetric heating adds exactly dt*Q, radiative
-// cooling removes energy, and the nonlinear conduction solve conserves the
-// flux-tube-weighted energy while driving its own residual to zero. Mass and
-// momentum must be bit-preserved by every one of them.
-static void test_mixture_energy_sources_and_conduction() {
+// The release timestep is hydro + PHYSICAL conduction and nothing else. The
+// nonlinear backward-Euler conduction solve must conserve the flux-tube-weighted
+// energy, drive its own residual to zero, and bit-preserve mass and momentum;
+// and the historical two-fluid stage flags must have no effect whatsoever on a
+// release Grid, because those stages no longer exist in this timestep.
+static void test_mixture_physical_conduction() {
     const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
     Grid grid;
-    Vec state = setup_gamma_equilibrium(grid, table, 8, false);
+    Vec state = setup_gamma_equilibrium(grid, table, 8, true);
     const auto sz = arma::size(grid.ns, num_of_mixture_eq);
     Vec dt(grid.ns); dt.fill(1.0e-4f);
 
-    grid.enable_coronal_heating = true;
-    // Sized so dt*Q is ~1e-3 of the cell energy: the single float energy row
-    // resolves the increment to ~1e-7 relative, so a much smaller probe would
-    // measure float rounding rather than the source term.
-    grid.coronal_heat_E0 = 1.0f;
-    grid.coronal_heat_sH = 1.0e30f;
-    const Vec H = coronal_heating_rate(grid);
-    const double energy0 = domain_total_energy(grid, state);
-    const MixtureField decoded = mixture_decode(grid, state);
-    const Vec heated = mixture_advance(grid, state, dt, decoded);
-    EXPECT_REL(domain_total_energy(grid, heated)-energy0,
-               dt(0)*arma::sum(H), 3e-2);   // float packed-row increment
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        EXPECT_NEAR(heated(arma::sub2ind(sz, i, mix::RHO)),
-                    state(arma::sub2ind(sz, i, mix::RHO)), 2e-12);
-        EXPECT_NEAR(heated(arma::sub2ind(sz, i, mix::MOM)),
-                    state(arma::sub2ind(sz, i, mix::MOM)), 2e-12);
-    }
-
-    grid.enable_coronal_heating = false;
-    grid.enable_beam_heating = true;
-    grid.beam_flux = 1.0e4f;
-    grid.beam_t_on = 0.0f; grid.beam_duration = 10.0f; grid.beam_ramp = 1.0f;
-    // The deposition window is an ABSOLUTE height band; widen it to cover this
-    // 8-cell test column, which sits just above the default C7 base.
-    grid.beam_h_lo_km = 0.0f; grid.beam_h_hi_km = 1.0e4f;
-    grid.sim_time = 5.0f;
-    const Vec beamed = mixture_advance(grid, state, dt, decoded);
-    EXPECT_TRUE(domain_total_energy(grid, beamed) > energy0);
-    EXPECT_TRUE(!beamed.has_nan());
-
-    grid.enable_beam_heating = false;
-    grid.enable_radiative_cooling = true;
-    const MixtureField heated_field = mixture_decode(grid, heated);
-    const Vec cooled = mixture_advance(grid, heated, dt, heated_field);
-    EXPECT_TRUE(domain_total_energy(grid, cooled)
-                < domain_total_energy(grid, heated));
-    EXPECT_TRUE(!cooled.has_nan());
-
     // Closed-end conduction on a refined, flux-tube-varying mesh smooths a
     // temperature ramp while conserving the weighted total energy.
-    state = setup_gamma_equilibrium(grid, table, 8, true);
-    grid.enable_radiative_cooling = false;
     grid.enable_conduction = true;
     for (arma::uword i = 0; i < grid.ns; ++i) {
         grid.ds_i(i) = 4.0e3f*(1.0f+0.12f*i);
@@ -1606,10 +1591,7 @@ static void test_mixture_energy_sources_and_conduction() {
     grid.inner_conduction_neumann = true;
     grid.impose_outer_heat_flux = true;
     grid.outer_heat_flux = 0.0f;
-    // Exercise the face-local numerical term, not only physical conduction.
-    grid.numerical_diffusivity_per_length = 2.0e3f;
     grid.broadcast();
-    dt.fill(1.0e-4f);
     const double conduction_e0 = weighted_domain_energy(grid, state);
     const MixtureField cond_field = mixture_decode(grid, state);
     const Vec conduction_input =
@@ -1626,14 +1608,37 @@ static void test_mixture_energy_sources_and_conduction() {
                     conduction_input(arma::sub2ind(sz, i, mix::MOM)), 0.0);
     }
 
-    // Strong nonlinear/TRAC case spanning chromosphere to corona. This drives
-    // kappa_e through five decades of T^(5/2), produces a visible implicit
-    // update, and independently checks the final residual and energy.
-    state = setup_gamma_equilibrium(grid, table, 12, false);
-    grid.enable_conduction = true;
+    // The retired optional stages are structurally absent from the release
+    // timestep: switching every one of their Grid flags on (they still exist for
+    // the historical two-fluid solver) must reproduce the step bit for bit.
+    grid.enable_radiative_cooling = true;
+    grid.enable_beam_heating = true;
+    grid.beam_flux = 1.0e4f;
+    grid.beam_t_on = 0.0f; grid.beam_duration = 10.0f; grid.beam_ramp = 1.0f;
+    grid.beam_h_lo_km = 0.0f; grid.beam_h_hi_km = 1.0e4f;
+    grid.sim_time = 5.0f;
+    grid.enable_coronal_heating = true;
+    grid.coronal_heat_E0 = 1.0f;
+    grid.coronal_heat_sH = 1.0e30f;
     grid.enable_trac = true;
     grid.trac_T_chrom = 2.0e4f;
+    grid.trac_cutoff_T = 1.0e6f;
     grid.trac_Tc_max_frac = 0.2f;
+    grid.numerical_diffusivity_per_length = 2.0e3f;
+    const Vec unaffected = mixture_advance(grid, state, dt, cond_field);
+    EXPECT_TRUE(arma::approx_equal(unaffected, conducted, "absdiff", 0.0));
+    grid.enable_radiative_cooling = false;
+    grid.enable_beam_heating = false;
+    grid.enable_coronal_heating = false;
+    grid.enable_trac = false;
+    grid.numerical_diffusivity_per_length = 0.0f;
+    grid.sim_time = 0.0f;
+
+    // Strong nonlinear case spanning chromosphere to corona. This drives kappa_e
+    // through five decades of T^(5/2), produces a visible implicit update, and
+    // independently checks the final residual and energy.
+    state = setup_gamma_equilibrium(grid, table, 12, false);
+    grid.enable_conduction = true;
     for (arma::uword i = 0; i < grid.ns; ++i) grid.ds_i(i) = 2.0e4f;
     grid.broadcast();
     fill_temperature_profile(grid, state, 1.0e18*eos_constants::m_h,
@@ -1660,48 +1665,48 @@ static void test_mixture_energy_sources_and_conduction() {
         EXPECT_TRUE(th.T >= table.min_temperature()
                     && th.T <= table.max_temperature());
     }
+}
 
-    // Strong sinks/sources at several density decades must remain within the
-    // strict caloric domain after the double target is packed into a float row.
-    const double densities[] = {1.0e14, 1.0e18, 1.0e22, 1.0e25};
-    for (double n_h : densities) {
-        Vec boundary_state = setup_gamma_uniform_point(grid, table, n_h, 1.0e4);
-        dt.set_size(grid.ns);
-        grid.enable_radiative_cooling = true;
-        grid.enable_coronal_heating = false;
-        dt.fill(1.0e30f);
-        const MixtureField bf = mixture_decode(grid, boundary_state);
-        const Vec floor_state = mixture_advance(grid, boundary_state, dt, bf);
-        const auto bsz = arma::size(grid.ns, num_of_mixture_eq);
-        auto first = [&](const Vec& u, arma::uword k) {
-            return static_cast<double>(u(arma::sub2ind(bsz, 0, k)));
-        };
-        const MixtureThermo floor_th = decode_equilibrium_mixture(
-            table, first(floor_state, mix::RHO), first(floor_state, mix::MOM),
-            first(floor_state, mix::ENERGY), 0.0);
-        EXPECT_TRUE(floor_th.T >= table.min_temperature());
-        EXPECT_REL(floor_th.T, table.min_temperature(), 2e-5);
+// The RETAINED historical two-fluid column: `model_gentle` must still build a
+// seven-row carrier state on the same IC/BC implementation and advance stably
+// through the two-fluid integrator, with the fixed-gamma index, the neutral
+// fluid, finite-rate ionization, the radiative sink, TRAC and the mesh-scaled
+// artificial conduction all reachable there and only there.
+static void test_model_gentle_two_fluid_path() {
+    clear_model_column_release_defaults_env();
+    setenv("ISO_NS", "40", 1);
+    Scenario sc = make_scenario("model_gentle", "");
+    EXPECT_TRUE(std::getenv("GAMMA_TABLE") == nullptr);   // never the release solver
 
-        boundary_state = setup_gamma_uniform_point(
-            grid, table, n_h, 0.999*table.max_temperature());
-        grid.enable_radiative_cooling = false;
-        grid.enable_coronal_heating = true;
-        grid.coronal_heat_E0 = 1.0e30f;
-        grid.coronal_heat_sH = 1.0e30f;
-        dt.fill(1.0f);
-        const MixtureField hf = mixture_decode(grid, boundary_state);
-        EXPECT_TRUE(throws_any([&] {
-            (void)mixture_advance(grid, boundary_state, dt, hf);
-        }));
+    Grid grid;
+    grid.init(sc.peek_ns(), 0.25f);
+    grid.enable_ionization = true;
+    grid.enable_radiative_cooling = true;
+    Vec state = sc.ic(grid);
+    EXPECT_TRUE(grid.eos_gamma_table.empty());
+    EXPECT_TRUE(state.n_elem == grid.n_state);            // seven rows, not three
+    EXPECT_TRUE(!grid.single_fluid);
+    EXPECT_TRUE(grid.enable_ionization);
+    EXPECT_TRUE(grid.enable_trac);
+
+    // The release entry points must refuse this Grid outright.
+    EXPECT_TRUE(throws_any([&] { (void)mixture_decode(grid, state); }));
+
+    for (int step = 0; step < 5; ++step) {
+        sc.update_bc(grid, state);
+        const Vec dt = cal_dt_i(grid, state);
+        EXPECT_TRUE(dt(0) > 0.0f && std::isfinite(dt(0)));
+        state = advance_Euler_state(grid, state, dt);
+        grid.sim_time += dt(0);
     }
-    Vec nonfinite_state = setup_gamma_uniform_point(grid, table, 1.0e20, 1.0e4);
-    dt.set_size(grid.ns); dt.fill(1.0f);
-    grid.enable_coronal_heating = true;
-    grid.coronal_heat_E0 = std::numeric_limits<float>::quiet_NaN();
-    const MixtureField nf = mixture_decode(grid, nonfinite_state);
-    EXPECT_TRUE(throws_any([&] {
-        (void)mixture_advance(grid, nonfinite_state, dt, nf);
-    }));
+    EXPECT_TRUE(!state.has_nan());
+    EXPECT_TRUE(state.is_finite());
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        EXPECT_TRUE(state(arma::sub2ind(sz, i, cons::RHO_I)) > 0.0f);
+        EXPECT_TRUE(state(arma::sub2ind(sz, i, cons::RHO_N)) > 0.0f);
+    }
+    clear_model_column_release_defaults_env();
 }
 
 // The decoded field is a validated cache of one immutable state: it must equal
@@ -1709,8 +1714,8 @@ static void test_mixture_energy_sources_and_conduction() {
 // reused for a different state or after a ghost update.
 static void test_mixture_field_cache_contract() {
     unsetenv("GAMMA_TABLE"); unsetenv("ISO_GAMMA");
-    setenv("ISO_HEAT_FLUX","0",1); setenv("ISO_COOLING","0",1);
-    setenv("ISO_CORONA","0",1); setenv("ISO_TRAC","0",1);
+    unsetenv("ISO_COOLING"); unsetenv("ISO_CORONA"); unsetenv("ISO_TRAC");
+    setenv("ISO_HEAT_FLUX","0",1);
     Grid grid; grid.init(24,0.25f);
     grid.eos_gamma_table=EosGammaTable::load(production_gamma_table_path());
     Vec state=model_column_ic(grid);
@@ -1797,10 +1802,11 @@ static void test_mixture_field_cache_contract() {
 }
 
 static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
-    unsetenv("GAMMA_TABLE"); unsetenv("ISO_GAMMA");
-    setenv("ISO_TWO_FLUID", "0", 1); setenv("ISO_IONIZATION", "0", 1);
-    setenv("ISO_HEAT_FLUX", "0", 1); setenv("ISO_COOLING", "0", 1);
-    setenv("ISO_CORONA", "0", 1); setenv("ISO_TRAC", "0", 1);
+    unsetenv("GAMMA_TABLE");        unsetenv("ISO_GAMMA");
+    unsetenv("ISO_TWO_FLUID");      unsetenv("ISO_IONIZATION");
+    unsetenv("ISO_COOLING");        unsetenv("ISO_CORONA");
+    unsetenv("ISO_TRAC");
+    setenv("ISO_HEAT_FLUX", "0", 1);
     // Historical fixed-gamma helper remains exactly piecewise linear.
     float linear_t, linear_ne, linear_nhi;
     c7_full_profile(587.5f, linear_t, linear_ne, linear_nhi);
@@ -1896,9 +1902,11 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
 // test-sized cell count. ISO_T_TOP pins the reference wall at 22 kK so the
 // baseline hydro ghost temperature is a known constant.
 static Vec setup_decoupling_column(Grid& grid, bool decouple, arma::uword ns) {
-    unsetenv("ISO_GAMMA");
-    setenv("ISO_COOLING", "0", 1);   setenv("ISO_CORONA", "0", 1);
-    setenv("ISO_TRAC", "0", 1);      setenv("ISO_HEAT_FLUX", "1", 1);
+    // The release scenario REJECTS every historical two-fluid knob, so they must
+    // be absent, not set to "0".
+    unsetenv("ISO_GAMMA");  unsetenv("ISO_COOLING");  unsetenv("ISO_CORONA");
+    unsetenv("ISO_TRAC");   unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
+    setenv("ISO_HEAT_FLUX", "1", 1);
     setenv("ISO_H_BASE", "1600", 1); setenv("ISO_DH", "553", 1);
     setenv("ISO_T_TOP", "22000", 1);
     setenv("ISO_HYDRO_T_DECOUPLE", decouple ? "1" : "0", 1);
@@ -2158,8 +2166,9 @@ static void test_face_flux_capture_matches_production_continuity() {
 static void test_model_column_release_numerics_defaults() {
     auto build = [](bool gamma_mode) {
         unsetenv("ISO_GAMMA");
-        setenv("ISO_COOLING","0",1);   setenv("ISO_CORONA","0",1);
-        setenv("ISO_TRAC","0",1);      setenv("ISO_HEAT_FLUX","0",1);
+        unsetenv("ISO_COOLING");   unsetenv("ISO_CORONA");
+        unsetenv("ISO_TRAC");
+        setenv("ISO_HEAT_FLUX","0",1);
         auto grid = std::make_unique<Grid>();
         grid->init(24,0.25f);
         if (gamma_mode)
@@ -2283,6 +2292,8 @@ static void test_outer_conduction_capture_matches_solver_face() {
     model_column_update_bc(grid, state);
     EXPECT_TRUE(grid.enable_conduction);
     EXPECT_TRUE(!grid.impose_outer_heat_flux);
+    // Structurally physical-only: the release scenario never even populates the
+    // historical artificial-conduction coefficient.
     EXPECT_REL(grid.numerical_diffusivity_per_length, 0.0f, 0.0);
     const MixtureField decoded = mixture_decode(grid, state, 1);
     const Vec dt = mixture_timestep(grid, state, decoded);
@@ -2313,33 +2324,22 @@ static void test_outer_conduction_capture_matches_solver_face() {
     const double x_face = saha_ionization_fraction_n_h(n_h_face, oc.T_wall);
     const double k_face = physical_conductivity(
         x_face*n_h_face, (1.0-x_face)*n_h_face, oc.T_wall);
-    EXPECT_REL(oc.kappa_phys_face, k_face, 1e-6);
-    EXPECT_REL(oc.kappa_num_face, 0.0, 0.0);
-    EXPECT_REL(oc.chi_num_face, 0.0, 0.0);
-    EXPECT_REL(oc.q_phys,
-        oc.kappa_phys_face*(oc.T_wall-oc.T_top)/oc.ds_face, 1e-12);
-    EXPECT_REL(oc.q_num, 0.0, 0.0);
-    EXPECT_REL(oc.q_total, oc.q_phys, 1e-12);
+    EXPECT_REL(oc.kappa_face, k_face, 1e-6);
+    EXPECT_REL(oc.q_face, oc.kappa_face*(oc.T_wall-oc.T_top)/oc.ds_face, 1e-12);
     // The wall is hotter than the top cell here, so the flux heats the top cell,
     // while the live top cell remains an evolved unknown rather than a pinned value.
-    EXPECT_TRUE(oc.q_total > 0.0);
+    EXPECT_TRUE(oc.q_face > 0.0);
     EXPECT_TRUE(std::abs(oc.T_top-oc.T_wall) > 1.0e-3);
 
-    // The historical mesh-scaled term remains available only as an explicit
-    // diagnostic; enabling it must not alter the physical-face geometry.
+    // The release scenario refuses the historical mesh-scaled artificial
+    // conduction term outright rather than accepting it as a diagnostic.
     setenv("ISO_NUMERICAL_DIFFUSIVITY_MULT", "1", 1);
-    Grid gd;
-    Vec sd = setup_decoupling_column(gd, true, ns);
-    model_column_update_bc(gd, sd);
-    EXPECT_TRUE(gd.numerical_diffusivity_per_length > 0.0f);
-    gd.capture_outer_conduction = true;
-    {
-        const MixtureField gf = mixture_decode(gd, sd, 1);
-        mixture_advance(gd, sd, mixture_timestep(gd, sd, gf), gf);
-    }
-    gd.capture_outer_conduction = false;
-    EXPECT_REL(gd.outer_conduction_capture.ds_face, 0.5*gd.ds_i(ns-1), 1e-12);
-    EXPECT_TRUE(gd.outer_conduction_capture.q_num > 0.0);
+    EXPECT_TRUE(throws_any([&] {
+        Grid gd;
+        gd.init(ns, 0.25f);
+        gd.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
+        (void)model_column_ic(gd);
+    }));
     unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
 
     clear_decoupling_env();
@@ -2363,7 +2363,6 @@ static void test_outer_conduction_physical_face_is_mesh_independent() {
         // The conduction boundary is the same physical domain face at both
         // resolutions; only the centre-to-face half-cell distance changes.
         EXPECT_REL(grid.phi_g_iph(ns-1)/grid.g, 553000.0, 2e-6);
-        EXPECT_REL(oc.q_num, 0.0, 0.0);
         clear_decoupling_env();
     }
 }
@@ -3705,37 +3704,6 @@ static void test_trac_broadening_conserves_kappa_lambda() {
     for (arma::uword i = 0; i < 6; ++i) EXPECT_REL(eps_off(i), 1.0f, 1e-5);
 }
 
-// The sidecar's physical coefficient must be independent of all solver-only
-// broadening/stabilization knobs. With both knobs off it equals the
-// solver-effective cell-centred coefficient.
-static void test_physical_conductivity_excludes_solver_terms() {
-    Grid grid;
-    grid.init(8, 0.25f);
-    const double n_e = 2.0e16;
-    const double n_hi = 8.0e18;
-    const double temperature = 5.0e4;
-    const double heat_capacity = 3.0e4;
-    const double physical = physical_conductivity(n_e, n_hi, temperature);
-
-    grid.enable_trac = false;
-    grid.numerical_diffusivity_per_length = 0.0f;
-    EXPECT_REL(solver_effective_conductivity(
-        grid, n_e, n_hi, temperature, heat_capacity, 1.0e4), physical, 1e-14);
-
-    grid.numerical_diffusivity_per_length = 1.0e4f;
-    EXPECT_REL(physical_conductivity(n_e, n_hi, temperature), physical, 1e-14);
-    EXPECT_TRUE(solver_effective_conductivity(
-        grid, n_e, n_hi, temperature, heat_capacity, 1.0e4) > physical);
-
-    grid.numerical_diffusivity_per_length = 0.0f;
-    grid.enable_trac = true;
-    grid.trac_T_chrom = 2.0e4f;
-    grid.trac_cutoff_T = 1.0e5f;
-    EXPECT_REL(physical_conductivity(n_e, n_hi, temperature), physical, 1e-14);
-    EXPECT_TRUE(solver_effective_conductivity(
-        grid, n_e, n_hi, temperature, heat_capacity, 1.0e4) > physical);
-}
-
 // TRAC adaptive cutoff: returns the floor for a resolved profile, rises above it
 // for an under-resolved (steep) TR, bounded by 0.2 T_peak, and the per-step
 // limiter caps the rate of change.
@@ -4704,8 +4672,9 @@ int main() {
     RUN(test_mixture_roe_flux_and_rusanov_fallback);
     RUN(test_release_production_table_domain_corners);
     RUN(test_mixture_integrator_path_and_guards);
-    RUN(test_mixture_energy_sources_and_conduction);
+    RUN(test_mixture_physical_conduction);
     RUN(test_mixture_field_cache_contract);
+    RUN(test_model_gentle_two_fluid_path);
     RUN(test_stage8_gamma_model_column_saha_hse_and_ghosts);
     RUN(test_upper_bc_hydro_conduction_temperature_decoupling);
     RUN(test_face_flux_capture_matches_production_continuity);
@@ -4756,7 +4725,6 @@ RUN(test_roe_local_face_flux_and_projection);
     RUN(test_model_c7_bc_discrete_hse_inner_mach_capped_outer);
     RUN(test_model_c7_tr_jump_bc);
     RUN(test_trac_broadening_conserves_kappa_lambda);
-    RUN(test_physical_conductivity_excludes_solver_terms);
     RUN(test_trac_cutoff_detection_and_limiter);
     RUN(test_beam_heating_rate_profile);
     RUN(test_beam_heating_partitions_by_heat_capacity);

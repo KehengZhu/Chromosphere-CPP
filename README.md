@@ -28,13 +28,14 @@ reconstruction (writeup §2.6–2.8). The released Gamma/Saha `model_column` pat
 limits `(ln ρ, V, ln p)` with the MC3/Koren limiter (β = 2) and uses the mixture
 Roe characteristic flux; the legacy fixed-γ / two-fluid scenarios keep minmod
 reconstruction and the Rusanov / local Lax–Friedrichs flux. Semi-implicit Euler driver
-([src/integrators.cpp:38](src/integrators.cpp#L38)); the implicit branch is
-currently disabled at [src/integrators.cpp:57](src/integrators.cpp#L57). RK4 is
-also available ([advance_RK4](src/integrators.cpp#L67)) for the explicit-only path.
+([src/two_fluid/integrators.cpp](src/two_fluid/integrators.cpp)); the implicit
+branch is currently disabled there. RK4 is also available (`advance_RK4`) for the
+explicit-only path. Those are TWO-FLUID entry points; the release timestep is
+`mixture_advance` in [src/single_fluid/integrator.cpp](src/single_fluid/integrator.cpp).
 
 ### Release conserved state (single-fluid equilibrium mixture)
 
-The released `model_column` solver (`mixture.hpp`, `src/mixture*.cpp`) stores **three**
+The released `model_column` solver (`src/single_fluid/`) stores **three**
 conserved rows per cell:
 
 | Index | Symbol | Meaning |
@@ -47,12 +48,23 @@ The ionization fraction `x`, the carrier densities `xρ` / `(1-x)ρ`, `n_e`, `n_
 are **derived** equilibrium diagnostics of `(ρ, e_int)` — the solver never stores or advances
 them, and there is no equilibrium-projection stage.
 
+The release timestep is exactly
+
+```
+U^n  ->  MUSCL/Roe hydro  ->  U*  ->  implicit PHYSICAL conduction  ->  U^{n+1}
+```
+
+and contains no other stage. TRAC, nonthermal beam heating, volumetric coronal
+heating, radiative cooling and artificial/numerical conduction are **not** release
+physics; they exist only in the historical two-fluid solver.
+
 ### Legacy two-fluid conserved state (non-release)
 
 The historical two-fluid / three-temperature / finite-rate-ionization solver
-(`chromosphere.hpp`, `src/state.cpp`, `src/flux.cpp`, `src/rhs.cpp`, `src/integrators.cpp`)
-keeps its own seven-row state (writeup eq 61). Loading a `Gamma1` table selects the release
-solver; each solver rejects the other's `Grid`.
+(`src/two_fluid/`) keeps its own seven-row state (writeup eq 61). Loading a `Gamma1`
+table selects the release solver; each solver rejects the other's `Grid`. The two
+directories share only `chromosphere.hpp` (Grid) and `eos.hpp`; neither includes
+the other.
 
 | Index | Symbol | Meaning |
 | --- | --- | --- |
@@ -66,22 +78,30 @@ solver; each solver rejects the other's `Grid`.
 ## File layout
 
 ```
-chromosphere.hpp         Shared Grid struct + LEGACY two-fluid API (cons::/prim:: indices)
-mixture.hpp              RELEASE single-fluid solver API (mix:: indices, U = (rho, rho u, E))
+chromosphere.hpp         SHARED infrastructure only: Grid, mix::/cons::/prim:: index sets,
+                         scratch + diagnostic capture structs. Declares NEITHER solver's API.
 eos.hpp                  Saha/Gamma1 EOS closure, mixture decode, equilibrium face states
 data/eos/                Versioned Gamma1 production table, checksum, and provenance
-physics.hpp              Inline collision frequency (nu_in), conductivities (kappa_e, kappa_n),
-                         Stage E ionization/recombination rates (Voronov 1997, Hummer 1994)
+physics.hpp              Inline formula library: collision frequency (nu_in), conductivities,
+                         radiative losses, heating rates, TRAC, Stage E ionization /
+                         recombination rates (Voronov 1997, Hummer 1994). Used by the
+                         two-fluid solver and by EOS diagnostics; the release solver
+                         does not include it.
 chromo_main.cpp          Main entry point — CLI dispatcher
 src/
-  eos.cpp                Gamma1 loader + caloric inversion / mixture decode / face states
-  mixture.cpp            RELEASE: decode, MUSCL reconstruction, mixture Roe flux, source, dt
-  mixture_integrator.cpp RELEASE: implicit physical conduction, energy stages, timestep path
-  grid.cpp               Grid::init, Grid::broadcast
-  state.cpp              cons2prim, prim2cons, get_scalar, scalar_to, ip1/im1/ip2/im2, flux_lim
-  flux.cpp               cal_flux_state, cal_spectral_radius_state, cal_source_state
-  rhs.cpp                rhs_explicit_state (MUSCL+Rusanov), rhs_implicit_state
-  integrators.cpp        advance_Euler_state, advance_RK4, cal_dt_i, cal_max_v_i, Stage E driver
+  eos.cpp                SHARED: Gamma1 loader + caloric inversion / mixture decode / faces
+  grid.cpp               SHARED: Grid::init, Grid::broadcast
+  profiling.cpp          SHARED: runtime profile regions and counters
+  single_fluid/          RELEASE solver — U = (rho, rho u, E). Depends only on the shared layer.
+    mixture.hpp          Release solver API (mix:: indices) + governing equations/contract
+    mixture.cpp          decode, MUSCL reconstruction, mixture Roe flux, source, dt
+    integrator.cpp       implicit PHYSICAL conduction + the two-stage release timestep
+  two_fluid/             HISTORICAL research solver — seven-row carrier state. Non-release.
+    two_fluid.hpp        Two-fluid solver API (cons::/prim:: helpers, stages, integrators)
+    state.cpp            cons2prim, prim2cons, get_scalar, scalar_to, ip1/im1/ip2/im2, flux_lim
+    flux.cpp             cal_flux_state, cal_spectral_radius_state, cal_source_state
+    rhs.cpp              rhs_explicit_state (MUSCL+Rusanov), rhs_implicit_state
+    integrators.cpp      advance_Euler_state, advance_RK4, cal_dt_i, Stage E/R/beam/coronal
 scenarios/
   scenario.{hpp,cpp}     Scenario dispatcher (make_scenario) + shared apply_open_bcs helper
   model_c7.{hpp,cpp}     Model C7 atmosphere IC + photospheric inner BC
@@ -193,7 +213,7 @@ To regenerate the build after editing `CMakeLists.txt`: re-run `cmake ..` from
 If `cmake` is not installed, the build is two short commands:
 
 ```sh
-SOLVER_SRCS="src/grid.cpp src/state.cpp src/flux.cpp src/rhs.cpp src/integrators.cpp scenarios/model_c7.cpp"
+SOLVER_SRCS="src/grid.cpp src/two_fluid/state.cpp src/two_fluid/flux.cpp src/two_fluid/rhs.cpp src/two_fluid/integrators.cpp scenarios/model_c7.cpp"
 
 clang++ -std=c++14 -O2 -I. -Iinclude -DARMA_DONT_USE_LAPACK -DARMA_DONT_USE_BLAS \
     $SOLVER_SRCS chromo_main.cpp -o chromo_main
@@ -246,7 +266,7 @@ Each argument is positional and optional; defaults are shown in parentheses.
 | `output_path` | 1 | any path | `outputs/model_c7/output.txt` | snapshot file (line 1 = `ns num_of_eq`; line 2 = cumulative heights in km; then `# t = T step = S` markers each followed by `ns` rows of conserved variables). Gamma mode also writes `<output_path>.gamma_diag` with decoded physical fields and EOS provenance. |
 | `mode`        | 2 | `full` \| `explicit` | `full` | `full` = semi-implicit driver (Stage A explicit, B drag, C T-equil, D conduction). `explicit` zeroes `R_I` and runs pure explicit Euler |
 | `ionization`  | 3 | `ionization` \| `no-ionization` | `ionization` | toggles Stage E (Voronov 1997 ionization + Hummer 1994 recombination) |
-| `scenario`    | 4 | `model_column` \| `model_c7` \| `model_flare` \| `analytic_canopy` \| `pfss_field_line` | `model_column` | which IC + BC pair to dispatch (see [Scenarios](#scenarios)). `model_isentropic` and `model_gentle` are backward-compat aliases of `model_column` (the latter applies the resolved-corona full-physics gentle preset) |
+| `scenario`    | 4 | `model_column` \| `model_gentle` \| `model_c7` \| `model_flare` \| `analytic_canopy` \| `pfss_field_line` | `model_column` | which IC + BC pair to dispatch (see [Scenarios](#scenarios)). `model_column` is the single-fluid RELEASE scenario and always selects the release solver; every other scenario, `model_gentle` included, runs the historical two-fluid solver |
 | `data_path`   | 5 | path to `.dat` \| `""` | `""` | required for tabulated scenarios (`pfss_field_line`); ignored otherwise |
 | `time_mult`   | 6 | float | `1.0` | multiplier on the default total simulation time `10·L/Cs`. Step cap scales with this so longer runs aren't truncated |
 
@@ -345,25 +365,33 @@ treatment.
 
 Source: [scenarios/model_column.cpp](scenarios/model_column.cpp).
 
-The unified field-aligned chromosphere→corona column — the merge of the former
-`model_c7` (as a testbed), `model_gentle`, and `model_isentropic`. A single straight
-field line (B = 1, gravity on) initialized from the real Model C7 atmosphere (via
+The field-aligned chromosphere→corona column. A single straight field line
+(B = 1, gravity on) initialized from the real Model C7 atmosphere (via
 `c7_full_profile` in the C7 library) with the density re-integrated hydrostatically
-for a clean V ≈ 0 start and a realistic frozen ionization profile.
+for a clean V ≈ 0 start.
 
-When `GAMMA_TABLE` is active, the Model C7 temperature is instead evaluated by
-a shape-preserving monotone cubic Hermite (PCHIP) interpolant before the
-Saha-HSE density integration. It preserves all C7 knot values and makes
-`dT/dh` continuous, avoiding artificial steps in the initial conductive-flux
-profile. The fixed-gamma path deliberately retains the historical linear
-interpolation.
+`model_column` is the **RELEASE** scenario: it always supplies the production
+`Gamma1` table, so it always selects the single-fluid equilibrium-mixture solver.
+It has one production meaning and nothing a user can set changes that — every
+historical two-fluid knob (`ISO_GAMMA`, `ISO_TWO_FLUID`, `ISO_IONIZATION`,
+`ISO_COOLING`, `ISO_TRAC`, `ISO_CORONA`, `ISO_CHEAT`, `ISO_QFLUX`, `ISO_TBOOST`,
+`ISO_NUMERICAL_DIFFUSIVITY_MULT`) is a hard error here. The same IC/BC
+implementation also backs `model_gentle`, the historical two-fluid research
+preset, which never loads a table and therefore always selects the seven-row
+solver.
+
+On the release path the Model C7 temperature is evaluated by a shape-preserving
+monotone cubic Hermite (PCHIP) interpolant before the Saha-HSE density
+integration. It preserves all C7 knot values and makes `dT/dh` continuous,
+avoiding artificial steps in the initial conductive-flux profile. The historical
+fixed-gamma path deliberately retains the older linear interpolation.
 
 - **Release numerics (default, no environment variables needed):**
   well-balanced explicit reconstruction, log-space MUSCL, the MC3/Koren limiter
   (β = 2), equilibrium-reference δ-form well-balancing, and an inner discrete-HSE
   reservoir well-balanced through both ghosts (pressure and density). These hold a
-  hydrostatic column at V ≈ 0 to round-off, so any flow is physical. On the
-  Gamma/Saha path (`GAMMA_TABLE` set) the scenario additionally selects the
+  hydrostatic column at V ≈ 0 to round-off, so any flow is physical. The release
+  path additionally selects the
   **mixture Roe characteristic flux** and the **`(ln ρ, V, ln p)` primitive
   reconstruction**, which closes the face temperature by inverting the same
   authoritative Saha closure. Two reference configurations remain reachable for
@@ -373,21 +401,27 @@ interpolation.
   `ISO_RECONSTRUCTION=lnrho-v-lnt` (limits `(ln ρ, V, ln T)` and closes pressure
   through the nonlinear EOS, which manufactures face-pressure mismatch across the
   partial-ionization transition). See `docs/pressure_reconstruction_recap.md`.
-- **Modes / drivers (env-selected physics):** resolved corona (`ISO_CORONA`);
-  conduction via a top ghost-T jump (`ISO_TJUMP_A/_B`, `ISO_T_TOP`), an imposed
-  Neumann coronal flux with a ramp (`ISO_QFLUX*`), ambient volumetric coronal
-  heating H(s) (`ISO_CHEAT*`), or a one-time IC coronal superheat (`ISO_TBOOST*`);
-  radiative sink (`ISO_COOLING`), two-fluid (`ISO_TWO_FLUID`), and the ionization
-  network (`ISO_IONIZATION`). See the header for the full knob list.
-- **Upper-BC experiment (default off):** `ISO_HYDRO_T_DECOUPLE=1` lets the outer
-  *hydro* ghost temperature zero-gradient-extrapolate the live top cell while the
-  Stage-D conduction solver keeps the unchanged fixed hot Dirichlet wall
-  (`Grid::outer_conduction_temperature`). Removes the last-cell velocity reversal
-  but not the 2130–2150 km mass-flux ripple — see
+- **Release physics:** hydro plus implicit **physical** conduction, driven by the
+  22,000 K external conductive reservoir at the physical outer face
+  (`ISO_T_TOP`, `ISO_TJUMP_A/_B`). That is the entire release timestep.
+- **Historical two-fluid drivers (`model_gentle` only, rejected by
+  `model_column`):** resolved corona (`ISO_CORONA`), an imposed Neumann coronal
+  flux with a ramp (`ISO_QFLUX*`), ambient volumetric coronal heating H(s)
+  (`ISO_CHEAT*`), a one-time IC coronal superheat (`ISO_TBOOST*`), the radiative
+  sink (`ISO_COOLING`), TRAC (`ISO_TRAC*`), the artificial conduction term
+  (`ISO_NUMERICAL_DIFFUSIVITY_MULT`), two-fluid (`ISO_TWO_FLUID`) and the
+  ionization network (`ISO_IONIZATION`). See the header for the full knob list.
+- **Upper-BC decoupling (release default, `ISO_HYDRO_T_DECOUPLE=1`):** the outer
+  *hydro* ghost temperature zero-gradient-extrapolates the live top cell while the
+  conduction solver keeps the fixed hot wall at the **physical outer face**
+  (`Grid::outer_conduction_temperature`, flux distance ½Δs_top — not a ghost
+  centre). Removes the last-cell velocity reversal but not the 2130–2150 km
+  mass-flux ripple — see
   `docs/upper_bc_hydro_temperature_decoupling_recap.md`.
 - **Face mass-flux diagnostic (default off):** `CHROMO_FACE_FLUX_DIAG=1` writes a
-  `<out>.faceflux` sidecar holding a read-only copy-out of the *production* Rusanov
-  total-mass face flux and its central/diffusive split from `rhs_explicit_mixture`
+  `<out>.faceflux` sidecar holding a read-only copy-out of the *production*
+  total-mass face flux (the `mix::RHO` continuity row) and its central/diffusive
+  split from `mixture_rhs_explicit`
   (`CHROMO_FACE_FLUX_TOP`, `CHROMO_FACE_FLUX_STRIDE`; analysed by
   `util/face_flux_diag.py`). It changed nothing bit-for-bit. Because `eq_wb`
   subtracts the frozen reference residual from the continuity rows, the conserved
@@ -396,9 +430,11 @@ interpolation.
   not a continuity violation. `ISO_LIMITER=mc3|minmod|first` is a diagnostic-only
   reconstruction override (unset = the production MC3 β=2). See
   `docs/top_ripple_face_flux_diagnosis.md`.
-- **Aliases:** `model_isentropic` → `model_column` (identical); `model_gentle` →
-  `model_column` with the documented stable resolved-corona full-physics preset
-  (`ISO_CORONA ISO_H_BASE=1003 ISO_HEAT_FLUX ISO_COOLING ISO_IONIZATION ISO_TWO_FLUID`).
+- **`model_gentle`:** the HISTORICAL two-fluid research preset on the same IC/BC
+  implementation — the documented stable resolved-corona full-physics
+  configuration (`ISO_CORONA ISO_H_BASE=1003 ISO_HEAT_FLUX ISO_COOLING
+  ISO_IONIZATION ISO_TWO_FLUID`). It never loads a `Gamma1` table. The retired
+  `model_isentropic` alias has been removed; use `model_column`.
 
 Migration: the numeric-method env toggles that used to select the "bestwb" path —
 `ISO_LOG_RECON`, `ISO_MC3`/`ISO_MC3_BETA`, `ISO_EQ_WB`, `ISO_INNER_WB`,
@@ -447,7 +483,7 @@ B(z) = B_∞ + (B_0 − B_∞) · exp(−(z − z_base) / H_B)
 Defaults: `B_0 = 100 G` (footpoint), `B_∞ = 15 G` (canopy-merged), `H_B = 300 km`.
 
 `∂(1/B)/∂s` is now non-zero, so the flux-tube expansion source term in
-[src/flux.cpp](src/flux.cpp) becomes active — this is the **only** physics
+[src/two_fluid/flux.cpp](src/two_fluid/flux.cpp) becomes active — this is the **only** physics
 difference from `model_c7`. By flux conservation the tube cross-section grows
 as `A(z) ∝ 1/B(z)`, expanding by ~6.7× across the chromospheric domain.
 
@@ -543,10 +579,10 @@ layers:
 - Offline Stage-9 CRASH validation on a 2x-refined grid at all 28,000
   production-cell midpoints (`bash util/eos/build_and_run.sh`)
 
-The release solver is selected by `GAMMA_TABLE=/path/to/table` for the `model_column`
-scenario (and its `model_isentropic` alias) with the full semi-implicit Euler integrator; the
-scenario supplies the production table as an override-preserving default, so a normal release
-run needs no environment variable at all. It requires an explicit `no-ionization` command-line
+The release solver is selected by a loaded `Gamma1` table for the `model_column`
+scenario; the scenario supplies the production table unconditionally, so a normal
+release run needs no environment variable at all and `model_column` cannot be
+routed into the historical solver. It requires an explicit `no-ionization` command-line
 selection, and it **rejects** every legacy two-fluid setting outright — `SINGLE_FLUID`,
 `ENABLE_TE`, `ISO_TWO_FLUID`, `ISO_IONIZATION` — because none of them has meaning for a
 single-fluid common-temperature equilibrium mixture. Other scenarios, the explicit-only
@@ -557,9 +593,11 @@ A release snapshot carries the three conserved rows (`ns 3` header); a legacy tw
 snapshot carries seven.
 
 Each gamma snapshot has an EOS-aware `.gamma_diag` sidecar containing
-`rho_total`, `v_cm`, `T`, `x_eq`, `n_e`, `n_HI`, `p_total`, `Gamma1`, and the
-solver-effective conductivity (including TRAC and numerical diffusivity), plus
-the table path, its runtime SHA-256, and the gravitational-potential convention.
+`rho_total`, `v_cm`, `T`, `x_eq`, `n_e`, `n_HI`, `p_total`, `Gamma1`,
+`kappa_physical` and `kappa_solver`, plus the table path, its runtime SHA-256, and
+the gravitational-potential convention. Because release conduction is physical
+only, `kappa_solver` is identically `kappa_physical`; the column is kept for
+format stability with the existing analysis scripts.
 `util/animate_gentle_column.py` automatically prefers this sidecar and computes
 conductive flux from the decoded physical electron and neutral densities.
 
@@ -601,7 +639,7 @@ Currently 70 test cases / 6735 individual checks; all passing.
   `dt·|R_I'| < 1`. The body of `rhs_implicit_state` is correct (drag,
   collisional + frictional heating, and conservative field-aligned heat
   conduction, writeup §4.3–4.4), but the call site in
-  [src/integrators.cpp:57](src/integrators.cpp#L57) keeps the residual zeroed —
+  [src/two_fluid/integrators.cpp](src/two_fluid/integrators.cpp) keeps the residual zeroed —
   the step is pure explicit Euler until a real implicit solve (Newton on the
   `R_I` Jacobian) replaces the Picard iteration.
 - `dinvB_ds_i` is allocated and used (writeup pressure-area term in

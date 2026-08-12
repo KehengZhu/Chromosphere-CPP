@@ -19,16 +19,21 @@ option(CHROMO_ENABLE_OPENMP "Enable OpenMP parallel execution" OFF)
 # min/max, and sub2ind, which are all header-only.
 add_compile_definitions(ARMA_DONT_USE_LAPACK ARMA_DONT_USE_BLAS)
 
+# Two solvers, two source directories, one shared infrastructure layer.
+#   src/*.cpp             shared: profiling, EOS, Grid geometry/broadcast
+#   src/single_fluid/     RELEASE: U = (rho, rho u, E) equilibrium mixture
+#   src/two_fluid/        HISTORICAL research: seven-row carrier state
+# Neither solver directory depends on the other.
 add_library(chromosphere STATIC
     src/profiling.cpp
     src/eos.cpp
     src/grid.cpp
-    src/state.cpp
-    src/flux.cpp
-    src/rhs.cpp
-    src/integrators.cpp
-    src/mixture.cpp
-    src/mixture_integrator.cpp
+    src/single_fluid/mixture.cpp
+    src/single_fluid/integrator.cpp
+    src/two_fluid/state.cpp
+    src/two_fluid/flux.cpp
+    src/two_fluid/rhs.cpp
+    src/two_fluid/integrators.cpp
     scenarios/scenario.cpp
     scenarios/mesh.cpp
     scenarios/model_c7.cpp
@@ -40,6 +45,7 @@ add_library(chromosphere STATIC
 )
 target_include_directories(chromosphere PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 

@@ -1,4 +1,4 @@
-#include "chromosphere.hpp"
+#include "two_fluid/two_fluid.hpp"
 
 #include <cmath>
 #include <limits>

@@ -1,4 +1,10 @@
 /*!
+ * @file physics.hpp
+ * @brief Inline physics formula library: collision frequencies, conductivities,
+ *        radiative losses, heating rates, TRAC, and hydrogen ionization /
+ *        recombination rate coefficients.
+ * @ingroup physics_formulas
+ *
  * Inline physics helpers — collision frequencies, heat conductivities, and
  * hydrogen ionization / recombination rate coefficients.
  *
@@ -14,6 +20,10 @@
 #include <cmath>
 
 namespace chromosphere {
+
+/** @addtogroup physics_formulas
+ *  @{
+ */
 
 /// TRAC broadening factor ε(T) (Johnston et al. 2020 §2.2): ε = (T_c/T)^{5/2}
 /// inside the TRAC region T_b ≤ T < T_c, and ε = 1 elsewhere (chromosphere
@@ -86,12 +96,24 @@ inline double physical_kappa_e(double n_e, double n_n, double temperature) {
          / (n_e + 2.836e-11*n_n*temperature*temperature);
 }
 
+/// Neutral-hydrogen heat conductivity [W m^-1 K^-1] at a single common
+/// temperature: the scalar counterpart of kappa_n() above with T_i = T_n = T,
+/// which is why the ion-neutral term carries sqrt(2 T). `n_i` is the ion
+/// (= electron) density [m^-3] and `n_n` the neutral density [m^-3]. This
+/// channel dominates the total conductivity in the dense, weakly-ionized lower
+/// chromosphere where n_n greatly exceeds n_e.
 inline double physical_kappa_n(double n_i, double n_n, double temperature) {
     return 0.0342006*n_n*temperature
          / (1.20613*n_i*std::sqrt(2.0*temperature)
           + 1.70573*n_n*std::sqrt(temperature));
 }
 
+/// Total physical field-aligned heat conductivity [W m^-1 K^-1] at one common
+/// temperature: kappa = kappa_e + kappa_n, the Spitzer electron channel plus the
+/// neutral-hydrogen channel. `n_e` is the electron density [m^-3] and `n_n` the
+/// neutral density [m^-3]; both conduction channels are evaluated at the same T.
+/// This is the closure the single-fluid release conduction operator uses, so it
+/// deliberately contains no TRAC broadening and no artificial diffusivity.
 inline double physical_conductivity(double n_e, double n_n, double temperature) {
     return physical_kappa_e(n_e, n_n, temperature)
          + physical_kappa_n(n_e, n_n, temperature);
@@ -246,52 +268,59 @@ inline Vec photoionization_rate_P(const Grid& grid) {
     return Vec(grid.ns, arma::fill::value(grid.photoionization_rate));
 }
 
-// ============================================================================
-// Optically-thick chromospheric radiative cooling
-//   Carlsson & Leenaarts 2012 A&A 539 A39, Eq. 1:
-//     Q_X = -L_X(T) E_X(tau or m_c) (N_X*/N_X)(T) A_X (N_H/rho) n_e rho
-//   for X in {H I, Ca II, Mg II}. Tables digitized from CL2012 Figs 3-11
-//   (see writeup §6 Tables 1-3). Returns Q_rad in W/m^3, positive for
-//   net cooling — caller subtracts to add to e_i.
-// ============================================================================
-
+/*!
+ * Optically-thick chromospheric radiative cooling
+ *   Carlsson & Leenaarts 2012 A&A 539 A39, Eq. 1:
+ *     Q_X = -L_X(T) E_X(tau or m_c) (N_X\* / N_X)(T) A_X (N_H/rho) n_e rho
+ *   for X in {H I, Ca II, Mg II}. Tables digitized from CL2012 Figs 3-11
+ *   (see writeup §6 Tables 1-3). Returns Q_rad in W/m^3, positive for
+ *   net cooling — caller subtracts to add to e_i.
+ *
+ * Tables and helpers live in this namespace; the assembled loss is
+ * radiative_loss_thick().
+ */
 namespace cl2012 {
 
 // Table 1: log10 L_X(T) [erg s^-1 per e- per X-particle], T in kK.
 // Below the first T entry, L_X is held at the first value (a large negative
 // log -> effectively zero), then linear-interpolated. CL2012 Figs 3-5.
-constexpr int N_L = 13;
+constexpr int N_L = 13;   ///< Sample count of the L_X(T) tables (length of L_T_kK and each L_logL_*).
 static constexpr float L_T_kK[N_L]   = { 4.f,  5.f, 6.f,  7.f,  8.f, 10.f, 12.f, 15.f, 20.f, 25.f, 30.f, 40.f, 50.f};
 static constexpr float L_logL_H[N_L] = {-30.f, -25.0f,-24.5f,-24.0f,-23.6f,-22.8f,-22.2f,-21.85f,-21.75f,-21.85f,-22.0f,-22.4f,-22.8f};
 static constexpr float L_logL_Ca[N_L]= {-22.5f,-21.3f,-20.5f,-19.9f,-19.5f,-18.9f,-18.6f,-18.35f,-18.15f,-18.05f,-18.0f,-18.0f,-18.0f};
 static constexpr float L_logL_Mg[N_L]= {-23.0f,-21.7f,-20.5f,-19.7f,-19.2f,-18.7f,-18.4f,-18.2f, -18.05f,-18.0f, -18.0f,-18.0f,-18.0f};
 
 // Table 2a: E_H(log10 tau_Lya), Fig 6.
-constexpr int N_EH = 11;
+constexpr int N_EH = 11;  ///< Sample count of the H I escape-probability table E_H(log10 tau_Lya).
 static constexpr float EH_logTau[N_EH] = {-2.f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f, 4.5f, 5.0f, 6.0f};
 static constexpr float EH_E[N_EH]      = { 1.0f,1.00f,0.99f,0.95f,0.85f,0.70f,0.55f,0.40f,0.25f,0.15f,0.03f};
 
 // Table 2b: E_Ca(log10 m_c [g/cm^2]), Fig 7.
-constexpr int N_ECa = 11;
+constexpr int N_ECa = 11; ///< Sample count of the Ca II escape-probability table E_Ca(log10 m_c).
 static constexpr float ECa_logMc[N_ECa] = {-8.f, -7.0f, -6.5f, -6.0f, -5.5f, -5.0f, -4.5f, -4.0f, -3.5f, -3.0f, -2.0f};
 static constexpr float ECa_E[N_ECa]     = { 1.0f, 0.99f, 0.97f, 0.90f, 0.75f, 0.58f, 0.43f, 0.30f, 0.20f, 0.12f, 0.02f};
 
 // Table 2c: E_Mg(log10 m_c [g/cm^2]), Fig 8.
-constexpr int N_EMg = 10;
+constexpr int N_EMg = 10; ///< Sample count of the Mg II escape-probability table E_Mg(log10 m_c).
 static constexpr float EMg_logMc[N_EMg] = {-8.f, -6.0f, -5.5f, -5.0f, -4.5f, -4.0f, -3.5f, -3.0f, -2.5f, -2.0f};
 static constexpr float EMg_E[N_EMg]     = { 1.0f, 1.00f, 0.97f, 0.85f, 0.65f, 0.45f, 0.30f, 0.18f, 0.10f, 0.04f};
 
 // Table 3: N(X*)/N(X) (T in kK), Figs 9-11 red curves.
-constexpr int N_F = 11;
+constexpr int N_F = 11;   ///< Sample count of the N(X*)/N(X) population-fraction tables.
 static constexpr float F_T_kK[N_F] = { 5.f, 8.f, 10.f, 12.f, 14.f, 15.f, 16.f, 18.f, 20.f, 25.f, 30.f};
 static constexpr float F_HI[N_F]   = { 1.0f, 0.99f, 0.85f, 0.42f, 0.17f, 0.10f, 0.07f, 0.04f, 0.025f,0.010f,0.005f};
 static constexpr float F_Ca[N_F]   = { 1.0f, 0.97f, 0.90f, 0.75f, 0.55f, 0.42f, 0.30f, 0.15f, 0.08f, 0.025f,0.010f};
 static constexpr float F_Mg[N_F]   = { 0.95f,0.95f, 0.90f, 0.75f, 0.55f, 0.42f, 0.28f, 0.10f, 0.05f, 0.010f,0.005f};
 
 // Asplund et al. 2009 abundances and N_H/rho [g^-1].
+/// Hydrogen abundance A_H relative to hydrogen by number [-] — unity by
+/// definition; kept explicit so the three species enter Q_X the same way.
 constexpr float A_H        = 1.0f;
-constexpr float A_Ca       = 2.19e-6f;   // 10^(6.34-12)
-constexpr float A_Mg       = 3.98e-5f;   // 10^(7.60-12)
+constexpr float A_Ca       = 2.19e-6f;   ///< Ca/H abundance by number [-] = 10^(6.34-12)
+constexpr float A_Mg       = 3.98e-5f;   ///< Mg/H abundance by number [-] = 10^(7.60-12)
+/// Hydrogen nuclei per gram of gas, N_H/rho [g^-1] in cgs, for the Asplund et
+/// al. (2009) mixture. Multiplying it by rho_cgs turns a mass density into the
+/// hydrogen-nuclei density N_H that CL2012 Eq. 1 needs.
 constexpr float NH_over_rho_cgs = 4.407e23f; // per gram
 
 /// 1-D linear interpolation: piecewise linear, constant extrapolation.
@@ -313,21 +342,21 @@ inline Vec lookup_vec(const Vec& q, const float* xs, const float* ys, int n) {
 
 } // namespace cl2012
 
-// ============================================================================
-// Frozen-radiation-field hydrogen photoionization rate R_ik(z)
-//   Chae (2021) J. Astron. Space Sci. 38, 83, Table 1 — the FAL-C
-//   (Fontenla, Avrett & Loeser 1993) "frozen radiation field" photoionization
-//   rate tabulated vs height z [km] on the tau_500=1 scale, as log10 R_ik
-//   [s^-1]. Replaces the earlier C7-calibrated P_phot inversion (which the
-//   inversion P = α_r n_e²/n_n − S_i n_e made a Stage-E fixed point of C7 but
-//   produced an unphysical, ~exact-balance profile). R_ik dips to ~7e-8 s^-1
-//   at the temperature minimum (weak radiation field) and climbs to ~7e-3
-//   s^-1 at the chromosphere top. Carlsson & Stein 2002 show the photoionizing
-//   (Balmer-continuum, n=2) field varies only ~1–2% even through shocks, so a
-//   height-only fixed rate is valid (Sollum 1999; Leenaarts 2007, 2020).
-// ============================================================================
+/*!
+ * Frozen-radiation-field hydrogen photoionization rate R_ik(z)
+ *   Chae (2021) J. Astron. Space Sci. 38, 83, Table 1 — the FAL-C
+ *   (Fontenla, Avrett & Loeser 1993) "frozen radiation field" photoionization
+ *   rate tabulated vs height z [km] on the tau_500=1 scale, as log10 R_ik
+ *   [s^-1]. Replaces the earlier C7-calibrated P_phot inversion (which the
+ *   inversion P = α_r n_e²/n_n − S_i n_e made a Stage-E fixed point of C7 but
+ *   produced an unphysical, ~exact-balance profile). R_ik dips to ~7e-8 s^-1
+ *   at the temperature minimum (weak radiation field) and climbs to ~7e-3
+ *   s^-1 at the chromosphere top. Carlsson & Stein 2002 show the photoionizing
+ *   (Balmer-continuum, n=2) field varies only ~1–2% even through shocks, so a
+ *   height-only fixed rate is valid (Sollum 1999; Leenaarts 2007, 2020).
+ */
 namespace chae2021 {
-constexpr int N_R = 43;
+constexpr int N_R = 43;   ///< Height-sample count of the Chae (2021) R_ik(z) table (length of Z_km and logR).
 // z [km] on the tau_500=1 scale (h=0 = photospheric reference level).
 static constexpr float Z_km[N_R] = {
     -100.f, -80.f, -60.f, -40.f, -20.f,    0.f,   50.f,  100.f,  150.f,  200.f,
@@ -420,31 +449,31 @@ inline Vec radiative_loss_thick(const Grid& grid,
     return 0.1f * (Q_H + Q_Ca + Q_Mg);
 }
 
-// ============================================================================
-// Optically-thin transition-region / coronal radiative losses
-//   Q_thin = n_e n_H Λ(T)   [W/m^3],  positive = net cooling.
-//   Λ(T) is the standard coronal-abundance optically-thin radiative loss
-//   function (CHIANTI-class; peak ≈ 4×10^-35 W m^3 ≈ 10^-21.35 erg cm^3 s^-1
-//   near log T ≈ 5.1). It covers the 10^4–10^7 K regime that the optically-THICK
-//   chromospheric CL2012 recipe (H I/Ca II/Mg II, effective only for T ≲ 3×10^4 K)
-//   does not. This is the radiative sink the lower TR needs to re-radiate the
-//   imposed downward coronal conductive flux q(T) (writeup §Boundary conditions,
-//   RTV 1978); without it the imposed flux had no TR-temperature sink and ran
-//   the top up to coronal temperatures. The enthalpy/advective flux — the other
-//   dominant TR energy term (Bradshaw & Cargill 2010; Klimchuk et al. 2008) —
-//   is already carried by the hydrodynamic advection, so adding this radiative
-//   term completes the leading-order TR energy balance.
-//
-//   A smooth low-T switch-on (~2×10^4 K) stitches the two recipes: CL2012
-//   governs the chromosphere, the thin loss governs the TR/corona, with a tanh
-//   blend across the overlap so neither double-counts the other. Λ(T) tabulated
-//   from standard sources (Cook et al. 1989; Klimchuk et al. 2008; CHIANTI,
-//   Dere et al. 1997+); refine against CHIANTI v11 (Dufresne 2024) if needed.
-//   NOTE: equilibrium Λ(T) underestimates lower-TR losses by up to ~×3 under
-//   non-equilibrium ionization (Landi et al. 2012) — a known conservative bias.
-// ============================================================================
+/*!
+ * Optically-thin transition-region / coronal radiative losses
+ *   Q_thin = n_e n_H Λ(T)   [W/m^3],  positive = net cooling.
+ *   Λ(T) is the standard coronal-abundance optically-thin radiative loss
+ *   function (CHIANTI-class; peak ≈ 4×10^-35 W m^3 ≈ 10^-21.35 erg cm^3 s^-1
+ *   near log T ≈ 5.1). It covers the 10^4–10^7 K regime that the optically-THICK
+ *   chromospheric CL2012 recipe (H I/Ca II/Mg II, effective only for T ≲ 3×10^4 K)
+ *   does not. This is the radiative sink the lower TR needs to re-radiate the
+ *   imposed downward coronal conductive flux q(T) (writeup §Boundary conditions,
+ *   RTV 1978); without it the imposed flux had no TR-temperature sink and ran
+ *   the top up to coronal temperatures. The enthalpy/advective flux — the other
+ *   dominant TR energy term (Bradshaw & Cargill 2010; Klimchuk et al. 2008) —
+ *   is already carried by the hydrodynamic advection, so adding this radiative
+ *   term completes the leading-order TR energy balance.
+ *
+ *   A smooth low-T switch-on (~2×10^4 K) stitches the two recipes: CL2012
+ *   governs the chromosphere, the thin loss governs the TR/corona, with a tanh
+ *   blend across the overlap so neither double-counts the other. Λ(T) tabulated
+ *   from standard sources (Cook et al. 1989; Klimchuk et al. 2008; CHIANTI,
+ *   Dere et al. 1997+); refine against CHIANTI v11 (Dufresne 2024) if needed.
+ *   NOTE: equilibrium Λ(T) underestimates lower-TR losses by up to ~×3 under
+ *   non-equilibrium ionization (Landi et al. 2012) — a known conservative bias.
+ */
 namespace optthin {
-constexpr int N_L = 17;
+constexpr int N_L = 17;   ///< Temperature-sample count of the optically-thin Lambda(T) table.
 // log10 T [K]
 static constexpr float logT_K[N_L] = {
     4.0f, 4.1f, 4.2f, 4.3f, 4.5f, 4.7f, 4.9f, 5.1f, 5.3f,
@@ -476,24 +505,24 @@ inline Vec radiative_loss_thin(const Grid& /*grid*/, const Vec& n_i,
     return w % ((n_i % Lambda_SI) % n_H);                       // W m^-3
 }
 
-// ============================================================================
-// Flare nonthermal-electron-beam heating (chromospheric evaporation driver)
-//   Q_beam(s,t) = beam_flux · g(t) · φ(s)   [W/m³],  positive = heating.
-//   The beam is injected from the corona at the outer boundary and stops in the
-//   upper chromosphere. Its true thick-target stopping column (~10²⁰ cm⁻² for
-//   tens of keV) is unresolved on the coarse C7 grid — a single top cell already
-//   holds ~10²⁶ m⁻² — so we deposit the flux over a finite layer of thickness
-//   beam_deposition_height [km] below the top, weighted by the local total
-//   density n_tot (the densest reachable layer absorbs the most, as a stopping
-//   beam does). φ(s) is normalized so ∫φ ds = 1, hence the column-integrated
-//   heating equals beam_flux [W/m²]. g(t) is a flat-top window over
-//   [t_on, t_on+τ] with cosine ramps of half-width beam_ramp.
-//
-//   This is the standard Fisher/RADYN explosive-evaporation driver expressed as
-//   an interior source term (see docs/explosive_evaporation_plan.md). Explosive
-//   evaporation requires beam_flux above the Fisher (1985) threshold
-//   F_crit ≈ 7×10⁶ W m⁻² together with an active radiative sink.
-// ============================================================================
+/*!
+ * Flare nonthermal-electron-beam heating (chromospheric evaporation driver)
+ *   Q_beam(s,t) = beam_flux · g(t) · φ(s)   [W/m³],  positive = heating.
+ *   The beam is injected from the corona at the outer boundary and stops in the
+ *   upper chromosphere. Its true thick-target stopping column (~10²⁰ cm⁻² for
+ *   tens of keV) is unresolved on the coarse C7 grid — a single top cell already
+ *   holds ~10²⁶ m⁻² — so we deposit the flux over a finite layer of thickness
+ *   beam_deposition_height [km] below the top, weighted by the local total
+ *   density n_tot (the densest reachable layer absorbs the most, as a stopping
+ *   beam does). φ(s) is normalized so ∫φ ds = 1, hence the column-integrated
+ *   heating equals beam_flux [W/m²]. g(t) is a flat-top window over
+ *   [t_on, t_on+τ] with cosine ramps of half-width beam_ramp.
+ *
+ *   This is the standard Fisher/RADYN explosive-evaporation driver expressed as
+ *   an interior source term (see docs/explosive_evaporation_plan.md). Explosive
+ *   evaporation requires beam_flux above the Fisher (1985) threshold
+ *   F_crit ≈ 7×10⁶ W m⁻² together with an active radiative sink.
+ */
 inline Vec beam_heating_rate(const Grid& grid, const Vec& n_i, const Vec& n_n) {
     Vec Q = arma::zeros<Vec>(grid.ns);
     if (!grid.enable_beam_heating || grid.beam_flux <= 0.0f) return Q;
@@ -571,25 +600,25 @@ inline Vec beam_heating_rate(const Grid& grid, const Vec& n_i, const Vec& n_n) {
     return Q;
 }
 
-// ============================================================================
-// Ambient coronal (footpoint) heating — gentle conduction-driven evaporation
-//   H(s) = E_H0 · exp(−d(s)/s_H) · enhance(t)   [W/m³],  positive = heating.
-//   The steady, footpoint-anchored exponential heating of Aschwanden & Schrijver
-//   (2002, ApJS 142, 269, §3): E_H0 is the volumetric heating rate at the loop
-//   base and s_H the field-aligned scale length over which it decays into the
-//   corona. This is the H(s) term in the RTV (1978) static loop balance
-//   d/ds(κ_e T^{5/2} dT/ds) + H − n²Λ = 0 — the ingredient the code previously
-//   lacked, without which a resolved corona simply drains. d(s) is the distance
-//   to the nearest chromospheric footpoint (two-sided for a full loop so the
-//   heating is weakest at the apex; one-sided from the inner footpoint for an
-//   open line / half loop). The s_H → ∞ limit gives uniform heating (Martens
-//   2010: T(s) is only weakly sensitive to the shape).
-//
-//   enhance(t) is the Phase-3 driver: 1 during relaxation, ramped up to
-//   coronal_heat_enhance to drive the gentle upflow. A modest, slow increment
-//   keeps it in the Antiochos & Sturrock (1978) gentle regime (v ≪ c_s); a
-//   large/fast jump would tip into the Fisher (1985) explosive regime.
-// ============================================================================
+/*!
+ * Ambient coronal (footpoint) heating — gentle conduction-driven evaporation
+ *   H(s) = E_H0 · exp(−d(s)/s_H) · enhance(t)   [W/m³],  positive = heating.
+ *   The steady, footpoint-anchored exponential heating of Aschwanden & Schrijver
+ *   (2002, ApJS 142, 269, §3): E_H0 is the volumetric heating rate at the loop
+ *   base and s_H the field-aligned scale length over which it decays into the
+ *   corona. This is the H(s) term in the RTV (1978) static loop balance
+ *   d/ds(κ_e T^{5/2} dT/ds) + H − n²Λ = 0 — the ingredient the code previously
+ *   lacked, without which a resolved corona simply drains. d(s) is the distance
+ *   to the nearest chromospheric footpoint (two-sided for a full loop so the
+ *   heating is weakest at the apex; one-sided from the inner footpoint for an
+ *   open line / half loop). The s_H → ∞ limit gives uniform heating (Martens
+ *   2010: T(s) is only weakly sensitive to the shape).
+ *
+ *   enhance(t) is the Phase-3 driver: 1 during relaxation, ramped up to
+ *   coronal_heat_enhance to drive the gentle upflow. A modest, slow increment
+ *   keeps it in the Antiochos & Sturrock (1978) gentle regime (v ≪ c_s); a
+ *   large/fast jump would tip into the Fisher (1985) explosive regime.
+ */
 inline Vec coronal_heating_rate(const Grid& grid) {
     Vec H = arma::zeros<Vec>(grid.ns);
     if (!grid.enable_coronal_heating || grid.coronal_heat_E0 <= 0.0f) return H;
@@ -626,5 +655,7 @@ inline Vec coronal_heating_rate(const Grid& grid) {
     }
     return H;
 }
+
+/** @} */
 
 } // namespace chromosphere

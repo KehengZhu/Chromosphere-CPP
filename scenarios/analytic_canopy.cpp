@@ -1,3 +1,8 @@
+/*!
+ * @file scenarios/analytic_canopy.cpp
+ * @brief Exponential magnetic-canopy B(z) overlay on the C7 thermodynamic profile.
+ * @ingroup scenarios
+ */
 #include "analytic_canopy.hpp"
 #include "model_c7.hpp"
 

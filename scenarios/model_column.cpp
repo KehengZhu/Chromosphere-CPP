@@ -1,3 +1,17 @@
+/*!
+ * @file scenarios/model_column.cpp
+ * @brief The field-aligned chromosphere-to-corona column: the `model_column`
+ *        RELEASE scenario and the `model_gentle` historical two-fluid preset.
+ * @ingroup scenarios
+ *
+ * One IC/BC implementation, two scenarios that never cross solvers. In release
+ * mode this file loads the production `Gamma1` table unconditionally, builds the
+ * Saha-HSE initial column from the C7 temperature profile, sets the validated
+ * release numerics (log-space MUSCL with the MC3/Koren limiter, the mixture Roe
+ * flux, the pressure-based reconstruction) and the 22,000 K external conductive
+ * reservoir at the physical outer face — and rejects every historical two-fluid
+ * knob. See scenarios/model_column.hpp for the full environment-variable list.
+ */
 #include "model_column.hpp"
 #include "single_fluid/mixture.hpp"
 #include "model_c7.hpp"   // c7_full_profile + c7_route_b_photoionization (C7 library)

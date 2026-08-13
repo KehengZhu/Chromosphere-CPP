@@ -1,4 +1,9 @@
 /*!
+ * @file single_fluid/mixture.hpp
+ * @brief RELEASE solver API: the single-fluid field-aligned equilibrium-mixture
+ *        model with conserved state U = (rho, rho u, E).
+ * @ingroup release_solver
+ *
  * single_fluid/mixture.hpp — the RELEASE solver: a single-fluid field-aligned
  * equilibrium-mixture model.
  *
@@ -49,6 +54,10 @@
 
 namespace chromosphere {
 
+/** @addtogroup release_solver
+ *  @{
+ */
+
 // ============================================================================
 // State decode
 // ============================================================================
@@ -60,6 +69,11 @@ namespace chromosphere {
 MixtureField mixture_decode(const Grid& grid, const Vec& state,
                             std::uint64_t state_generation = 0,
                             const MixtureField* previous = nullptr);
+/// Same decode, into a caller-owned field so a hot loop can reuse its storage
+/// instead of allocating one per step. `output` is overwritten: the per-cell
+/// thermodynamics, the (ns+4)-entry extended primitive and temperature arrays
+/// covering the two ghosts at each end, the cache-validity fingerprint (grid,
+/// state address, boundary signature) and `state_generation`.
 void mixture_decode_into(const Grid& grid, const Vec& state,
                          MixtureField& output,
                          std::uint64_t state_generation = 0,
@@ -129,5 +143,7 @@ double mixture_conduction_residual_max(const Grid& grid, const Vec& before,
 /// equilibrium projection. `decoded` must describe `state`.
 Vec mixture_advance(Grid& grid, const Vec& state, const Vec& dt_i,
                     const MixtureField& decoded);
+
+/** @} */
 
 } // namespace chromosphere

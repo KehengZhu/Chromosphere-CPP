@@ -1,3 +1,9 @@
+/*!
+ * @file two_fluid/state.cpp
+ * @brief Packed-state accessors, index shifts, and cons2prim / prim2cons for the
+ *        historical two-fluid solver.
+ * @ingroup two_fluid_solver
+ */
 #include "two_fluid/two_fluid.hpp"
 #include <limits>
 #include <stdexcept>

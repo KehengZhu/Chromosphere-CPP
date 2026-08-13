@@ -1,3 +1,8 @@
+/*!
+ * @file scenarios/scenario.cpp
+ * @brief Scenario name dispatch and the shared open-hyperbolic boundary update.
+ * @ingroup scenarios
+ */
 #include "scenario.hpp"
 #include "analytic_canopy.hpp"
 #include "model_c7.hpp"

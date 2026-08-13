@@ -1,3 +1,11 @@
+/*!
+ * @file profiling.cpp
+ * @brief Implementation of the opt-in runtime profile counters and their report.
+ * @ingroup runtime
+ *
+ * Counters are accumulated in cache-line-padded per-thread slots so an OpenMP
+ * run does not false-share, and are summed only when the report is printed.
+ */
 #include "profiling.hpp"
 #include "parallel.hpp"
 

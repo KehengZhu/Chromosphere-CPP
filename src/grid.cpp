@@ -1,3 +1,14 @@
+/*!
+ * @file grid.cpp
+ * @brief Grid allocation, resize, and the packed/static-mesh cache rebuild.
+ * @ingroup grid
+ *
+ * SHARED between both solvers. Grid::broadcast() fingerprints the five geometry
+ * arrays it derives from (`ds_i`, `B_i`, `B_imh`, `B_iph`, `dinvB_ds_i`) and
+ * rebuilds the caches only when one of them actually changed, so a per-step
+ * boundary refresh that calls it costs an O(ns) comparison instead of ~50
+ * `n_state`-sized temporaries.
+ */
 #include "chromosphere.hpp"
 
 #include <stdexcept>

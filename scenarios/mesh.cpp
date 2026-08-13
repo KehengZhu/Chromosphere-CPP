@@ -1,3 +1,9 @@
+/*!
+ * @file scenarios/mesh.cpp
+ * @brief Static local-refinement face-grid construction and its environment
+ *        parameter parsing.
+ * @ingroup scenarios
+ */
 #include "mesh.hpp"
 
 #include <algorithm>

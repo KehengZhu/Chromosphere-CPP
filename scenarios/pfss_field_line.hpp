@@ -1,4 +1,8 @@
 /*!
+ * @file scenarios/pfss_field_line.hpp
+ * @brief PFSS field-line scenario driven by a tabulated field-line data file.
+ * @ingroup scenarios
+ *
  * PFSS field-line scenario.
  *
  * Initializes the grid from a tabulated data file produced by
@@ -21,6 +25,10 @@
 
 namespace chromosphere {
 
+/** @addtogroup scenarios
+ *  @{
+ */
+
 /// Read ns from the file's [META] section. Called before Grid::init.
 arma::uword pfss_peek_ns(const std::string& data_path);
 
@@ -36,5 +44,7 @@ Vec pfss_ic(Grid& grid, const std::string& data_path);
 /// Refresh ghost cells via `apply_open_bcs`: inner reflecting wall, outer
 /// zero-gradient outflow.
 void pfss_update_bc(Grid& grid, const Vec& xn);
+
+/** @} */
 
 } // namespace chromosphere

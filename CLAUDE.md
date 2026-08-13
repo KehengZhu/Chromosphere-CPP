@@ -8,6 +8,12 @@ Changes to release physics, governing equations, thermodynamics, numerics, bound
 
 Keep `paper.tex` concise and current-release-only. Use `main.tex` for the deeper engineering record and clearly label inactive, experimental, historical, retired, and planned material. Update only the document or documents whose role is affected, avoid configuration mixing, and do not commit or push either repository unless explicitly requested.
 
+The compiled PDFs are mirrored into the main repository automatically: `main.pdf` → `docs/chromosphere_writeup.pdf` and `paper.pdf` → `docs/chromosphere_paper.pdf`. `docs/writeup-overleaf/latex-build/` is gitignored in both repositories, so those two copies are the only tracked PDFs of the writeup, and they are the ones to link from `README.md` and the Doxygen pages. The sync is a `$success_cmd` hook in `docs/writeup-overleaf/.latexmkrc` that calls `scripts/sync_writeup_pdf.sh`, so every successful `latexmk` run — VS Code LaTeX Workshop recipe or command line — refreshes them; the hook no-ops where the main repository is absent, e.g. when Overleaf compiles the same sources. Do not delete the hook when editing `.latexmkrc`, and run `scripts/sync_writeup_pdf.sh` by hand if a PDF was produced some other way.
+
+## Code documentation
+
+The API reference is Doxygen: config in `docs/doxygen/Doxyfile`, narrative pages in `docs/doxygen/pages/`, built with `scripts/build_docs.sh` into the gitignored `docs/doxygen/html/`. `README.md` is deliberately a quick start only — configure, build, choose parameters, run, visualize — and technical detail belongs in the Doxygen pages, not in the README. When you change public behavior, update the relevant page (`configuration.md`, `numerics.md`, `physics_model.md`, `scenario_reference.md`, `io_formats.md`, `validation.md`, `architecture.md`) in the same change, and keep the build warning-free: `EXTRACT_ALL` is off and `WARN_IF_UNDOCUMENTED` is on, so a new undocumented public entity is a warning in `docs/doxygen/doxygen-warnings.log`.
+
 ## Output directories
 
 - **Code outputs** (simulation results, data dumps, logs from `chromo_main` / scenarios): save under `outputs/`.

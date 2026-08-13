@@ -1,3 +1,8 @@
+/*!
+ * @file scenarios/data_file_parser.cpp
+ * @brief Implementation of the [META]/[CELLS]/[GHOSTS] scenario data-file parser.
+ * @ingroup scenarios
+ */
 #include "data_file_parser.hpp"
 
 #include <fstream>

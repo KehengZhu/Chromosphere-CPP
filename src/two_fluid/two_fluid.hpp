@@ -1,4 +1,9 @@
 /*!
+ * @file two_fluid/two_fluid.hpp
+ * @brief HISTORICAL two-fluid / multi-temperature / finite-rate-ionization research
+ *        solver API (seven-row carrier state). NOT the release path.
+ * @ingroup two_fluid_solver
+ *
  * two_fluid.hpp — the HISTORICAL two-fluid / multi-temperature /
  * finite-rate-ionization research solver. NOT the release path.
  *
@@ -20,13 +25,24 @@
 
 namespace chromosphere {
 
-// Used by ip1/im1/...: SLICE means "treat input as one scalar field of length
-// ns", CUBE means "treat input as the packed seven-row state".
+/** @addtogroup two_fluid_solver
+ *  @{
+ */
+
+/// `nk` selector for ip1/im1/ip2/im2: treat the input as ONE scalar field of
+/// length ns (one row of the packed state). Scalar shifts are always
+/// zero-gradient at the domain ends — the seven-row ghost buffers do not apply
+/// to an anonymous scalar.
 const arma::uword SLICE = 1;
+/// `nk` selector for ip1/im1/ip2/im2: treat the input as the packed seven-row
+/// state (all `num_of_eq` rows), so the shifts pull the two-fluid ghost buffers
+/// in at the domain ends.
 const arma::uword CUBE  = num_of_eq;
 
-// Outer/inner ghost-cell handling for ip2/im2: copy interior (Neumann) when
-// true, otherwise pull from the two-fluid ghost buffers in Grid.
+/// Outer/inner ghost-cell handling for the packed-state index shifts: `true`
+/// makes every shift zero-gradient (Neumann) at both domain ends, `false` (the
+/// build setting) pulls the two-fluid ghost buffers `Grid::inner_boundary0_i` /
+/// `_boundary1_i` and `Grid::outer_boundary0_i` / `_boundary1_i` instead.
 const bool USE_NEUMANN_BC = false;
 
 
@@ -53,16 +69,43 @@ Vec scalar_to(const Grid& grid, const Vec& xn_i, arma::uword index);
 
 /// Index shifts. `nk = CUBE` treats the input as packed state; `nk = SLICE`
 /// treats it as one scalar field of length ns.
+///
+/// Shift one cell OUTWARD: `ip1(xn)(i) = xn(i+1)` for i < ns-1. The top slot
+/// i = ns-1 is filled from the FIRST outer ghost `Grid::outer_boundary0_i`,
+/// except for a SLICE input or when USE_NEUMANN_BC is set, where it is a
+/// zero-gradient copy of `xn(ns-1)`.
 Vec ip1(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
+/// Shift one cell INWARD: `im1(xn)(i) = xn(i-1)` for i > 0. The bottom slot
+/// i = 0 is filled from the FIRST inner ghost `Grid::inner_boundary0_i`,
+/// except for a SLICE input or when USE_NEUMANN_BC is set, where it is a
+/// zero-gradient copy of `xn(0)`.
 Vec im1(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
+/// Shift two cells OUTWARD: ip1 applied twice, then (packed state only) the top
+/// slot i = ns-1 overwritten with the SECOND outer ghost
+/// `Grid::outer_boundary1_i`, which is the value the MUSCL stencil needs two
+/// cells beyond the boundary.
 Vec ip2(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
+/// Shift two cells INWARD: im1 applied twice, then (packed state only) the
+/// bottom slot i = 0 overwritten with the SECOND inner ghost
+/// `Grid::inner_boundary1_i`.
 Vec im2(const Grid& grid, const Vec& xn, arma::uword nk = CUBE);
 
 // ============================================================================
 // Equation of state
 // ============================================================================
 
+/// Conserved → primitive (writeup eq 38). Maps the seven `cons::` rows
+/// (ρ_i, ρ_n, ρ_i V, ρ_n U, E_I, E_N, E_E) onto the seven `prim::` rows
+/// (ρ_i, ρ_n, V, U, p_I, p_N, p_E) by removing the kinetic and gravitational
+/// parts of the energies with the cell-centred potential
+/// φ_g = ½(phi_g_imh + phi_g_iph) [J/kg]. `p_I` is the TOTAL charged pressure
+/// (protons + electrons, quasi-neutrality n_e = n_i); `p_E` is the electron
+/// partial pressure alone and carries neither kinetic nor gravitational energy.
+/// Densities [kg/m^3], velocities [m/s], pressures [Pa].
 Vec cons2prim(const Grid& grid, const Vec& cons_state);
+/// Primitive → conserved, the exact inverse of cons2prim with the same
+/// φ_g gauge and the same "E_I holds the total charged energy, E_E holds the
+/// electron internal energy alone" convention.
 Vec prim2cons(const Grid& grid, const Vec& prim_state);
 
 // ============================================================================
@@ -79,7 +122,12 @@ Vec flux_lim(const Vec& r);
 ///   '−' faces (Rxn = u_i − ½φΔ₊):  φ₋(r) = max(0, min(β r, β, (r+2)/3))
 /// β = grid.limiter_beta (2 ⇒ classic Koren). Non-finite r ⇒ 0 (first order at
 /// flats/extrema, matching flux_lim). Selected by grid.mc3_limiter in rhs.
+///
+/// The '+' branch φ₊(r) = max(0, min(β r, β, (2r+1)/3)), used for the
+/// right-face (Lxn) reconstruction term.
 Vec flux_lim_mc3_plus (const Vec& r, float beta);
+/// The '−' branch φ₋(r) = max(0, min(β r, β, (r+2)/3)), used for the left-face
+/// (Rxn) reconstruction term. See flux_lim_mc3_plus for the shared derivation.
 Vec flux_lim_mc3_minus(const Vec& r, float beta);
 
 /// Cell-centered flux F(U).
@@ -164,6 +212,11 @@ Vec advance_RK4(Grid& grid, const Vec& xn_state, const Vec& dt_i);
 // Debug
 // ============================================================================
 
+/// Dump a packed seven-row state to stdout, one line per cell and one
+/// whitespace-separated column per equation, in `cons::`/`prim::` row order.
+/// Debug aid used by the rhs NaN/blow-up guard; no formatting guarantees.
 void print_xn(const Grid& grid, const Vec& xn);
+
+/** @} */
 
 } // namespace chromosphere

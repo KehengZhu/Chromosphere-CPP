@@ -1,3 +1,9 @@
+/*!
+ * @file scenarios/model_flare.cpp
+ * @brief Explosive-evaporation flare scenario: the C7 column plus a transient
+ *        nonthermal electron beam and an open supersonic outer boundary.
+ * @ingroup scenarios
+ */
 #include "model_flare.hpp"
 #include "model_c7.hpp"
 

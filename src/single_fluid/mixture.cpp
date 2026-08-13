@@ -1,6 +1,27 @@
-// Release solver: decode, MUSCL reconstruction, mixture Roe flux, source.
-// See single_fluid/mixture.hpp for the governing equations and the software
-// contract. Nothing here reaches into the two-fluid research solver.
+/*!
+ * @file single_fluid/mixture.cpp
+ * @brief Release solver: state decode, MUSCL reconstruction, the mixture Roe
+ *        numerical flux, the geometric source, and the CFL timestep.
+ * @ingroup release_solver
+ *
+ * See single_fluid/mixture.hpp for the governing equations and the software
+ * contract. Nothing here reaches into the two-fluid research solver.
+ *
+ * One explicit RHS evaluation, in order:
+ *
+ *  1. reconstruct `(log rho, u, log p)` with the asymmetric MC3/Koren limiter
+ *     (beta = 2) on the non-uniform-mesh-aware slope metrics;
+ *  2. take a MUSCL-Hancock predictor half step that applies the SAME momentum
+ *     source (flux-tube pressure term plus gravity) as the corrector;
+ *  3. build both sides of every face through the authoritative equilibrium face
+ *     builder, so a face state is on the Saha manifold by construction;
+ *  4. evaluate the 3x3 mixture Roe characteristic flux, falling back per face to
+ *     local Rusanov whenever the Roe average is not admissible;
+ *  5. difference the fluxes with the flux-tube area factor and add the source.
+ *
+ * The interior operator is reference-free: it needs no frozen global hydrostatic
+ * reference state. `Grid::eq_wb` exists for the two-fluid research solver only.
+ */
 
 #include "single_fluid/mixture.hpp"
 #include "profiling.hpp"

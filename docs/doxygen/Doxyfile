@@ -1,0 +1,157 @@
+#---------------------------------------------------------------------------
+# Chromosphere2026 — Doxygen configuration
+#
+# Run from the repository root:
+#     scripts/build_docs.sh
+# or directly:
+#     doxygen docs/doxygen/Doxyfile
+#
+# Output lands in docs/doxygen/html (gitignored). Open docs/doxygen/html/index.html.
+#---------------------------------------------------------------------------
+
+PROJECT_NAME           = "Chromosphere2026"
+PROJECT_BRIEF          = "1.5D field-aligned solar chromosphere solver"
+PROJECT_NUMBER         =
+OUTPUT_DIRECTORY       = docs/doxygen
+CREATE_SUBDIRS         = NO
+OUTPUT_LANGUAGE        = English
+
+#---------------------------------------------------------------------------
+# Input
+#---------------------------------------------------------------------------
+
+# Paths are relative to the repository root, which is where doxygen must be run.
+INPUT                  = docs/doxygen/pages \
+                         chromosphere.hpp \
+                         eos.hpp \
+                         physics.hpp \
+                         parallel.hpp \
+                         profiling.hpp \
+                         run_control.hpp \
+                         chromo_main.cpp \
+                         src \
+                         scenarios
+
+FILE_PATTERNS          = *.hpp *.cpp *.md *.dox
+RECURSIVE              = YES
+
+# Vendored Armadillo, generated field-line data, and build trees are not ours.
+EXCLUDE                = include \
+                         scenarios/data \
+                         build \
+                         build_omp
+EXCLUDE_PATTERNS       = */.venv/* */build*/* */_archive/*
+EXCLUDE_SYMBOLS        = arma::*
+
+# The landing page.
+USE_MDFILE_AS_MAINPAGE = docs/doxygen/pages/mainpage.md
+
+STRIP_FROM_PATH        = .
+STRIP_FROM_INC_PATH    = .
+
+#---------------------------------------------------------------------------
+# What to extract
+#---------------------------------------------------------------------------
+
+# Everything the project exposes is documented explicitly, so EXTRACT_ALL stays
+# off: an undocumented entity is then a warning rather than an empty page.
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = NO
+EXTRACT_LOCAL_CLASSES  = NO
+EXTRACT_ANON_NSPACES   = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+INTERNAL_DOCS          = NO
+
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+MULTILINE_CPP_IS_BRIEF = NO
+INHERIT_DOCS           = YES
+DISTRIBUTE_GROUP_DOC   = YES
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+TOC_INCLUDE_HEADINGS   = 3
+
+OPTIMIZE_OUTPUT_FOR_C  = NO
+BUILTIN_STL_SUPPORT    = YES
+TYPEDEF_HIDES_STRUCT   = NO
+
+SORT_MEMBER_DOCS       = NO
+SORT_BRIEF_DOCS        = NO
+SORT_MEMBERS_CTORS_1ST = YES
+SORT_GROUP_NAMES       = NO
+SORT_BY_SCOPE_NAME     = NO
+
+SHOW_INCLUDE_FILES     = YES
+SHOW_USED_FILES        = YES
+SHOW_FILES             = YES
+SHOW_NAMESPACES        = YES
+FORCE_LOCAL_INCLUDES   = NO
+
+#---------------------------------------------------------------------------
+# Source browsing — the physics rationale often lives inside the function.
+#---------------------------------------------------------------------------
+
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_CODE_COMMENTS    = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+REFERENCES_LINK_SOURCE = YES
+VERBATIM_HEADERS       = YES
+
+#---------------------------------------------------------------------------
+# Diagnostics
+#---------------------------------------------------------------------------
+
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_NO_PARAMDOC       = NO
+WARN_AS_ERROR          = NO
+WARN_LOGFILE           = docs/doxygen/doxygen-warnings.log
+
+#---------------------------------------------------------------------------
+# HTML output
+#---------------------------------------------------------------------------
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+HTML_COLORSTYLE        = TOGGLE
+HTML_DYNAMIC_SECTIONS  = YES
+HTML_INDEX_NUM_ENTRIES = 100
+GENERATE_TREEVIEW      = YES
+FULL_SIDEBAR           = NO
+DISABLE_INDEX          = NO
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
+
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = NO
+
+#---------------------------------------------------------------------------
+# Preprocessor
+#---------------------------------------------------------------------------
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+EXPAND_ONLY_PREDEF     = NO
+SEARCH_INCLUDES        = NO
+# Document the OpenMP-enabled build: it is the production configuration.
+PREDEFINED             = CHROMO_USE_OPENMP=1
+
+#---------------------------------------------------------------------------
+# Diagrams
+#---------------------------------------------------------------------------
+
+HAVE_DOT               = NO
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = NO
+GROUP_GRAPHS           = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = NO

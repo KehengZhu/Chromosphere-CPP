@@ -1,3 +1,23 @@
+/*!
+ * @file two_fluid/integrators.cpp
+ * @brief Two-fluid time integrators and the operator-split source stages.
+ * @ingroup two_fluid_solver
+ *
+ * advance_Euler_state() is the semi-implicit driver. Its stages, in order:
+ *
+ *  - **Stage A** — explicit MUSCL + Rusanov step (rhs_explicit_state()).
+ *  - **Stage B** — point-implicit ion-neutral drag and frictional heating.
+ *  - **Stage C** — point-implicit temperature equilibration (three-way
+ *    nu_ei / nu_en / nu_in relaxation when Grid::enable_Te).
+ *  - **Stage D** — tridiagonal field-aligned heat conduction per species.
+ *  - **Stage E** — point-implicit hydrogen ionization / recombination.
+ *  - **Stage R** — backward-Euler radiative cooling.
+ *  - beam, coronal-heating and positivity-floor stages, each gated by its
+ *    own Grid flag.
+ *
+ * NONE of this is release physics: the release timestep is the two stages in
+ * single_fluid/integrator.cpp.
+ */
 #include "two_fluid/two_fluid.hpp"
 #include "physics.hpp"
 #include "profiling.hpp"
@@ -747,27 +767,29 @@ void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt) 
     }
 }
 
-// ----------------------------------------------------------------------------
-// Vacuum-floor / single-fluid-collapse stage for the flare scenario. Explosive
-// evaporation fully ionizes the heated gas, so the neutral density n_n collapses
-// toward zero in the evaporated column. There the neutral velocity decode
-// U = ρ_n U / ρ_n becomes 0/0 noise and the spectral radius |U| + c_s,n blows up
-// → NaN (the ρ_n→0 ill-conditioning of two-fluid codes). We therefore floor both
-// densities, floor the pressures positive, cap the per-fluid speeds at a generous
-// physical ceiling, and — where the gas is ionized — COLLAPSE the neutral onto
-// the charged fluid (U = V, T_n = T_e), the exact single-fluid limit (Gómez
-// Míguez et al. 2024; the same slaving the C7 outer BC uses).
-//
-// The collapse triggers on the ionization fraction f = n_i/(n_i+n_n) exceeding
-// F_SLAVE, NOT on an absolute n_n floor. This is the key to a smooth neutral
-// profile: f varies smoothly through the hot column, so the whole ionized region
-// is slaved consistently. An absolute-floor trigger instead let neighbouring
-// cells flip in and out of the slaved state every step — the explicit hydro
-// re-noises the near-zero-mass neutral momentum each step, pushing ρ_n a hair
-// above/below the floor — producing the cell-to-cell checkerboard (sawtooth) seen
-// in u and p_n. Gated on enable_beam_heating so steady scenarios and the existing
-// test suite are untouched. Mutates prim in place.
-// ----------------------------------------------------------------------------
+/// Vacuum-floor / single-fluid-collapse stage for the flare scenario. Explosive
+/// evaporation fully ionizes the heated gas, so the neutral density n_n collapses
+/// toward zero in the evaporated column. There the neutral velocity decode
+/// U = ρ_n U / ρ_n becomes 0/0 noise and the spectral radius |U| + c_s,n blows up
+/// → NaN (the ρ_n→0 ill-conditioning of two-fluid codes). We therefore floor both
+/// densities, floor the pressures positive, cap the per-fluid speeds at a generous
+/// physical ceiling, and — where the gas is ionized — COLLAPSE the neutral onto
+/// the charged fluid (U = V, T_n = T_e), the exact single-fluid limit (Gómez
+/// Míguez et al. 2024; the same slaving the C7 outer BC uses).
+///
+/// The collapse triggers on the ionization fraction f = n_i/(n_i+n_n) exceeding
+/// F_SLAVE, NOT on an absolute n_n floor. This is the key to a smooth neutral
+/// profile: f varies smoothly through the hot column, so the whole ionized region
+/// is slaved consistently. An absolute-floor trigger instead let neighbouring
+/// cells flip in and out of the slaved state every step — the explicit hydro
+/// re-noises the near-zero-mass neutral momentum each step, pushing ρ_n a hair
+/// above/below the floor — producing the cell-to-cell checkerboard (sawtooth) seen
+/// in u and p_n. Gated on enable_beam_heating so steady scenarios and the existing
+/// test suite are untouched. Mutates prim in place.
+///
+/// Internal to the historical two-fluid integrator: it is called from the
+/// operator-split step (guarded by Grid::floors_active()) and has no declaration
+/// in two_fluid.hpp.
 void apply_flare_floor_stage(const Grid& grid, Vec& prim_state) {
     const float m_i = grid.m_i, m_n = grid.m_n, k_b = grid.k_b;
     const float RHO_I_FLOOR = m_i * 1.0e10f;   // n_i ≥ 10^10 m^-3

@@ -1,4 +1,8 @@
 /*!
+ * @file scenarios/model_flare.hpp
+ * @brief Explosive chromospheric evaporation scenario (nonthermal electron beam).
+ * @ingroup scenarios
+ *
  * Explosive chromospheric evaporation scenario (Fisher, Canfield & McClymont
  * 1985, ApJ 289, 425).
  *
@@ -19,6 +23,10 @@
 
 namespace chromosphere {
 
+/** @addtogroup scenarios
+ *  @{
+ */
+
 /// Build the flare IC: identical to model_c7_ic, then enable beam heating, force
 /// ionization + radiative cooling on (the radiative sink defines the explosive
 /// threshold), and open the outer boundary (free supersonic outflow). The beam
@@ -30,5 +38,7 @@ Vec model_flare_ic(Grid& grid);
 /// Boundary refresh — delegates to model_c7_update_bc (which honors
 /// grid.outer_free_outflow set by model_flare_ic).
 void model_flare_update_bc(Grid& grid, const Vec& xn);
+
+/** @} */
 
 } // namespace chromosphere

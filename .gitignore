@@ -29,3 +29,7 @@ output_*.txt
 output_*.log
 *.out
 *.mp4
+
+# Generated Doxygen output (rebuild with scripts/build_docs.sh).
+docs/doxygen/html/
+docs/doxygen/doxygen-warnings.log

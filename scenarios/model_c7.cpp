@@ -1,3 +1,14 @@
+/*!
+ * @file scenarios/model_c7.cpp
+ * @brief Model C7 atmosphere library: the tabulated Avrett and Loeser (2008)
+ *        profile, its interpolants, the Route-B photoionization closure, and the
+ *        quiet-Sun C7 scenario IC/BC.
+ * @ingroup scenarios
+ *
+ * This file is also the shared C7 data source for model_column, model_flare and
+ * analytic_canopy, which reuse c7_full_profile(), c7_full_temperature_pchip()
+ * and c7_route_b_photoionization().
+ */
 #include "model_c7.hpp"
 #include "physics.hpp"
 #include "scenario.hpp"

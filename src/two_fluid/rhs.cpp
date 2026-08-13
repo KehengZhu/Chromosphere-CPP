@@ -1,3 +1,9 @@
+/*!
+ * @file two_fluid/rhs.cpp
+ * @brief Explicit (TVD-MUSCL + Rusanov) and implicit (drag, frictional heating,
+ *        field-aligned conduction) right-hand sides of the two-fluid solver.
+ * @ingroup two_fluid_solver
+ */
 #include "two_fluid/two_fluid.hpp"
 #include "physics.hpp"
 #include "profiling.hpp"

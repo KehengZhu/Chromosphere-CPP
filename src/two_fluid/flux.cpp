@@ -1,3 +1,9 @@
+/*!
+ * @file two_fluid/flux.cpp
+ * @brief Cell-centred flux, spectral radius, and the pressure-area + gravity
+ *        source of the historical two-fluid solver.
+ * @ingroup two_fluid_solver
+ */
 #include "two_fluid/two_fluid.hpp"
 
 #include <cmath>

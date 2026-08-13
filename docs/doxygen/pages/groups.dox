@@ -1,0 +1,120 @@
+/*!
+ * @defgroup shared Shared infrastructure
+ * @brief Code both solvers depend on: the mesh, the thermodynamic closure, the
+ *        physics formula library, and the runtime support layer.
+ *
+ * The dependency direction is strictly one way:
+ *
+ * @verbatim
+ *      chromosphere.hpp  +  eos.hpp        (shared)
+ *              ^                  ^
+ *        single_fluid          two_fluid
+ * @endverbatim
+ *
+ * Neither solver directory includes the other, and the two do not share a
+ * conserved-state width, a packing convention, or a timestep path.
+ */
+
+/*!
+ * @defgroup grid Grid and state layout
+ * @ingroup shared
+ * @brief chromosphere::Grid — the object that owns all solver state — plus the
+ *        two conserved-row index sets and the reusable scratch buffers.
+ *
+ * There is no global mutable state. Solver functions take `const Grid&`, or
+ * `Grid&` when they write a scratch buffer, so several Grids can coexist and
+ * every test can construct its own.
+ */
+
+/*!
+ * @defgroup eos Equation of state
+ * @ingroup shared
+ * @brief Pure-hydrogen Saha equilibrium closure, the CRASH `Gamma1` acoustic
+ *        index table, and the caloric inversions and face builders built on them.
+ *
+ * This is the thermodynamic closure of the release solver. The authoritative
+ * state of a cell or face is `(rho, rho u, E)`; the ionization fraction `x`, the
+ * electron density `n_e`, the neutral density `n_HI` and the electron partial
+ * pressure `p_e` are all DERIVED from it and are diagnostics, never independently
+ * advanced variables.
+ *
+ * See @ref physics_model for the closure equations.
+ */
+
+/*!
+ * @defgroup physics_formulas Physics formula library
+ * @ingroup shared
+ * @brief Inline closed-form rates and coefficients: collision frequencies, heat
+ *        conductivities, radiative losses, heating rates, TRAC, and the hydrogen
+ *        ionization / recombination network.
+ *
+ * Used by the two-fluid solver and by the EOS diagnostics. The release solver
+ * pulls only the scalar physical conductivity helpers from here; it has no
+ * radiative, beam, coronal-heating or TRAC stage at all.
+ */
+
+/*!
+ * @defgroup runtime Runtime support
+ * @ingroup shared
+ * @brief OpenMP abstraction and opt-in performance profiling.
+ *
+ * Neither affects a numerical result. The parallel layer degrades to serial
+ * loops when OpenMP is not compiled in, and makes a throwing cell deterministic
+ * by rethrowing the exception from the lowest physical cell index. Profiling is
+ * off unless `CHROMO_PROFILE=1`.
+ */
+
+/*!
+ * @defgroup release_solver Release solver (single fluid)
+ * @brief The production path: a single-fluid field-aligned equilibrium-mixture
+ *        model whose conserved state is exactly `U = (rho, rho u, E)`.
+ *
+ * One fluid, one velocity, one temperature, on a prescribed flux tube. The whole
+ * timestep is
+ *
+ * @verbatim
+ *     U^n -> MUSCL/Hancock/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}
+ * @endverbatim
+ *
+ * and contains no other stage: no equilibrium projection, no carrier-row storage,
+ * no TRAC, no beam heating, no volumetric coronal heating, no radiative cooling,
+ * and no artificial or numerical conduction.
+ *
+ * Selected by loading a `Gamma1` table, which the `model_column` scenario does
+ * unconditionally. See @ref numerics for the discretization and
+ * @ref physics_model for the equations.
+ */
+
+/*!
+ * @defgroup two_fluid_solver Historical two-fluid solver (non-release)
+ * @brief The research path: a seven-row ion / neutral / electron carrier state
+ *        with finite-rate ionization, three temperatures, and operator-split
+ *        source stages.
+ *
+ * This is NOT the release path. It keeps its own conserved-state width, its own
+ * packing convention and its own timestep, and every entry point rejects a Grid
+ * that carries a `Gamma1` table. Scenarios `model_gentle`, `model_c7`,
+ * `model_flare`, `analytic_canopy` and `pfss_field_line` run on it.
+ */
+
+/*!
+ * @defgroup scenarios Scenarios
+ * @brief Initial conditions, boundary conditions, mesh generation and field-line
+ *        geometry — one scenario fixes all four.
+ *
+ * A scenario supplies three callables (chromosphere::Scenario): how many cells
+ * to allocate, how to fill the Grid and produce the initial conserved state, and
+ * how to refresh the boundary buffers each step. It also decides which solver
+ * runs, by loading a `Gamma1` table or not.
+ *
+ * See @ref scenario_reference for what each one models.
+ */
+
+/*!
+ * @defgroup driver Driver and run control
+ * @brief The `chromo_main` command-line program, its step-cap and snapshot
+ *        scheduling helpers, and the files it writes.
+ *
+ * The driver owns no physics. See @ref configuration for the full command-line
+ * and environment reference and @ref io_formats for the output file layouts.
+ */

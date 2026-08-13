@@ -1,3 +1,15 @@
+/*!
+ * @file eos.cpp
+ * @brief Implementation of the pure-hydrogen Saha closure, the CRASH `Gamma1`
+ *        table loader, the caloric inversions, and the equilibrium face builders.
+ * @ingroup eos
+ *
+ * SHARED between both solvers. Everything here is evaluated in double precision
+ * and, where a state is only known through logarithms, in the log domain, so the
+ * closure stays exact in both the fully-neutral and fully-ionized limits. The
+ * temperature inversions are safeguarded Newton iterations that can never leave
+ * their analytic bracket and fall back to bisection on a rejected step.
+ */
 #include "eos.hpp"
 #include "profiling.hpp"
 #include "parallel.hpp"

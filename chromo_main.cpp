@@ -1,3 +1,29 @@
+/*!
+ * @file chromo_main.cpp
+ * @brief Command-line driver: parse arguments and environment, build the
+ *        scenario, run the timestep loop, and write snapshots and sidecars.
+ * @ingroup driver
+ *
+ * The driver owns no physics. It selects a solver, steps it, and writes files:
+ *
+ *  1. make_scenario() builds the requested IC/BC pair.
+ *  2. Grid::init() allocates the mesh; the scenario IC fills the geometry,
+ *     gravity, ghost buffers and the initial conserved state (and may resize
+ *     the Grid when it generates a locally refined mesh).
+ *  3. A loaded `Gamma1` table selects the RELEASE single-fluid solver
+ *     (mixture_advance()); without one the driver runs the historical
+ *     two-fluid solver (advance_Euler_state() / advance_Euler_explicit_state()).
+ *     The release path rejects `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID`,
+ *     `ISO_IONIZATION` and finite-rate ionization outright.
+ *  4. Each step refreshes the boundary, computes the CFL timestep, advances,
+ *     and writes a snapshot when the OutputSchedule says it is due.
+ *  5. On exit it prints `termination=end_time|step_cap|other` together with the
+ *     requested end time, final time, final step and effective cap.
+ *
+ * The full command-line and environment reference is on the
+ * @ref configuration "Configuration reference" page; the file formats written
+ * here are described on the @ref io_formats "Output formats" page.
+ */
 #include "chromosphere.hpp"
 #include "single_fluid/mixture.hpp"
 #include "two_fluid/two_fluid.hpp"
@@ -85,6 +111,22 @@ std::string sha256_file(const std::string& path) {
 
 } // namespace
 
+/// Command-line entry point.
+///
+/// Reads the positional arguments and the `CHROMO_*` / `ISO_*` environment,
+/// builds the requested Scenario, allocates and initialises the Grid, then runs
+/// the timestep loop — boundary refresh, CFL timestep, solver advance, snapshot
+/// when due — until the end time or the step cap is reached, writing the
+/// snapshot, log and sidecar files on the way and the `termination=` summary at
+/// the end. See the @ref configuration "Configuration reference" for the full
+/// argument and environment list.
+///
+/// @param argc Argument count.
+/// @param argv `[output_path] [mode] [ionization] [scenario] [data_path]
+///             [time_mult] [cooling]`, each optional and positional; the
+///             defaults are documented at the top of the function body.
+/// @return 0 on a completed run; non-zero after a fatal configuration or
+///         solver error, whose message is printed to stderr.
 int main(int argc, char** argv) {
     using namespace chromosphere;
 

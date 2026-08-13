@@ -1,14 +1,25 @@
-// Release solver: implicit physical conduction and the release timestep.
-//
-//     U^n  --MUSCL/Roe hydro-->  U*  --implicit physical conduction-->  U^{n+1}
-//
-// Those are the only two stages. There is no equilibrium projection between
-// them (U = (rho, rho u, E) is already the authoritative state, and Saha
-// equilibrium enters only through the EOS closure that decodes it), and there
-// are no volumetric energy stages: TRAC, nonthermal beam heating, volumetric
-// coronal heating, radiative cooling and artificial/numerical conduction are
-// NOT part of the release and live only in the historical two-fluid research
-// solver (src/two_fluid/).
+/*!
+ * @file single_fluid/integrator.cpp
+ * @brief Release solver: implicit physical conduction and the release timestep.
+ * @ingroup release_solver
+ *
+ *     U^n  --MUSCL/Roe hydro-->  U*  --implicit physical conduction-->  U^{n+1}
+ *
+ * Those are the only two stages, composed by first-order Lie splitting. There is
+ * no equilibrium projection between them (U = (rho, rho u, E) is already the
+ * authoritative state, and Saha equilibrium enters only through the EOS closure
+ * that decodes it), and there are no volumetric energy stages: TRAC, nonthermal
+ * beam heating, volumetric coronal heating, radiative cooling and
+ * artificial/numerical conduction are NOT part of the release and live only in
+ * the historical two-fluid research solver (src/two_fluid/).
+ *
+ * The conduction stage is a nonlinear backward-Euler solve on the mixture energy
+ * row alone: Newton on the cell temperatures with a tridiagonal Jacobian, the
+ * effective heat capacity and the conductivity taken from one fused Saha
+ * evaluation per cell per pass. Mass and momentum are untouched, and the accepted
+ * energy is the flux-updated internal energy plus the unchanged kinetic and
+ * gravitational parts, so the stage is conservative by construction.
+ */
 
 #include "single_fluid/mixture.hpp"
 #include "profiling.hpp"

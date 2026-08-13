@@ -8,6 +8,7 @@ docs/presentation-build/
 docs/latex-build/
 # LaTeX build artifacts (LaTeX Workshop / latexmk -outdir) in any latex-build/ subfolder
 **/latex-build/
+.ai-bridge/
 __pycache__/
 .venv/
 .vscode/

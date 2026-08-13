@@ -1,0 +1,25 @@
+var searchData=
+[
+  ['b_0',['b',['../group__grid.html#ga60f800c1a645647a725876f4a978599e',1,'chromosphere::MixtureConductionScratch']]],
+  ['b_5fi_1',['B_i',['../structchromosphere_1_1_grid.html#a22e4706c775e6f3ab1fcd9ef6286430c',1,'chromosphere::Grid']]],
+  ['b_5fimh_2',['B_imh',['../structchromosphere_1_1_grid.html#a3b671401bd71a489f57714d6836d7e59',1,'chromosphere::Grid']]],
+  ['b_5fimh_5ft_3',['B_imh_T',['../structchromosphere_1_1_scenario_data_file.html#aa055ddff43509c9733b163bea5c17f4c',1,'chromosphere::ScenarioDataFile']]],
+  ['b_5fiph_4',['B_iph',['../structchromosphere_1_1_grid.html#a67e418f15a9a5075e26862ce379fba2e',1,'chromosphere::Grid']]],
+  ['b_5fiph_5ft_5',['B_iph_T',['../structchromosphere_1_1_scenario_data_file.html#a507cd7ab794d99254dc4d140b537708e',1,'chromosphere::ScenarioDataFile']]],
+  ['b_5fouter_5ft_6',['B_outer_T',['../structchromosphere_1_1_scenario_data_file.html#afd15c3631aa716066089727311b7557b',1,'chromosphere::ScenarioDataFile']]],
+  ['b_5fstate_7',['B_state',['../structchromosphere_1_1_grid.html#a3965af15a803b232547548b0ca2d5d88',1,'chromosphere::Grid']]],
+  ['b_5fstate_5fimh_8',['B_state_imh',['../structchromosphere_1_1_grid.html#a00e1f90cb49c1d7fddc7a6439d41503b',1,'chromosphere::Grid']]],
+  ['b_5fstate_5fiph_9',['B_state_iph',['../structchromosphere_1_1_grid.html#a19458b3cc2fbbc7bb77ad92a84b24c0f',1,'chromosphere::Grid']]],
+  ['beam_5fdelta_10',['beam_delta',['../structchromosphere_1_1_grid.html#af37ff94c37559ff669c7796cf588e619',1,'chromosphere::Grid']]],
+  ['beam_5fduration_11',['beam_duration',['../structchromosphere_1_1_grid.html#a8eb90c738d08f2433d67ebf53de8bcec',1,'chromosphere::Grid']]],
+  ['beam_5fe_5fcut_5fkev_12',['beam_E_cut_keV',['../structchromosphere_1_1_grid.html#a7cdda0d19ad7a30d3ff204f7715bcbe0',1,'chromosphere::Grid']]],
+  ['beam_5fflux_13',['beam_flux',['../structchromosphere_1_1_grid.html#ac38e49d297b7d960a6086c508ccba4a1',1,'chromosphere::Grid']]],
+  ['beam_5fh_5fhi_5fkm_14',['beam_h_hi_km',['../structchromosphere_1_1_grid.html#aa93ab4512198fdffe06a560c272ccd23',1,'chromosphere::Grid']]],
+  ['beam_5fh_5flo_5fkm_15',['beam_h_lo_km',['../structchromosphere_1_1_grid.html#a5ee9ef21495b5e50ce8eea08fa4c2a3d',1,'chromosphere::Grid']]],
+  ['beam_5framp_16',['beam_ramp',['../structchromosphere_1_1_grid.html#a64ac7c6bf80a05ef91f60d8518846f64',1,'chromosphere::Grid']]],
+  ['beam_5ft_5fon_17',['beam_t_on',['../structchromosphere_1_1_grid.html#ab63346e6092f1d35e075d3f94eaf38fb',1,'chromosphere::Grid']]],
+  ['beam_5fthick_5ftarget_18',['beam_thick_target',['../structchromosphere_1_1_grid.html#ae5a18a65b1c7eb90ffa02e687d844775',1,'chromosphere::Grid']]],
+  ['bisection_5ffallbacks_19',['bisection_fallbacks',['../structchromosphere_1_1_pressure_inversion_profile.html#a57d9997b14b50ff5d8def56e62b27a69',1,'chromosphere::PressureInversionProfile::bisection_fallbacks'],['../structchromosphere_1_1_eos_inversion_profile.html#aacc84e2d34d5c393c45fe0dadafbcb0d',1,'chromosphere::EosInversionProfile::bisection_fallbacks']]],
+  ['boundary_5fsignature_20',['boundary_signature',['../structchromosphere_1_1_mixture_field.html#a5802a39726d8207aaefd22a50197cad7',1,'chromosphere::MixtureField']]],
+  ['bracket_5fevaluations_21',['bracket_evaluations',['../structchromosphere_1_1_eos_inversion_profile.html#a9ac50dcfa4a9dfb23efd9c1dbf77f3fe',1,'chromosphere::EosInversionProfile']]]
+];

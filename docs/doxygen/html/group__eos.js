@@ -1,0 +1,97 @@
+var group__eos =
+[
+    [ "eos.cpp", "eos_8cpp.html", null ],
+    [ "chromosphere::eos_constants", "namespacechromosphere_1_1eos__constants.html", null ],
+    [ "chromosphere::EosOperationCounts", "structchromosphere_1_1_eos_operation_counts.html", [
+      [ "gamma1_queries", "structchromosphere_1_1_eos_operation_counts.html#a0b94f453bfdded4c6ebe85fddb230247", null ],
+      [ "temperature_logs", "structchromosphere_1_1_eos_operation_counts.html#a44284d3ccbee08c9455ec985d2a29178", null ],
+      [ "n_h_logs", "structchromosphere_1_1_eos_operation_counts.html#ae73fef1278b4eda4a2a9fdb083f567b2", null ]
+    ] ],
+    [ "chromosphere::GammaState", "structchromosphere_1_1_gamma_state.html", [
+      [ "x_eq", "structchromosphere_1_1_gamma_state.html#a3ebcf87e50f0de74763da522506ac65e", null ],
+      [ "gamma_energy", "structchromosphere_1_1_gamma_state.html#a7c0e06a78444c46ea660508b6f21afde", null ],
+      [ "gamma_sound", "structchromosphere_1_1_gamma_state.html#ad8eee91012f00882d8f7d6450a846cec", null ]
+    ] ],
+    [ "chromosphere::MixtureThermo", "structchromosphere_1_1_mixture_thermo.html", [
+      [ "rho", "structchromosphere_1_1_mixture_thermo.html#a80a50c44c07f21f5897495facaf6cd6c", null ],
+      [ "T", "structchromosphere_1_1_mixture_thermo.html#a3af115cca262034543379692a4cb7c56", null ],
+      [ "x", "structchromosphere_1_1_mixture_thermo.html#ab5b1d07c04c9d2929819935fe37d0bde", null ],
+      [ "n_H", "structchromosphere_1_1_mixture_thermo.html#a2196c4ed22896221413f48d4934e54fb", null ],
+      [ "n_e", "structchromosphere_1_1_mixture_thermo.html#ae5fc15784a3bbcb9bae5d58174379de5", null ],
+      [ "n_HI", "structchromosphere_1_1_mixture_thermo.html#a8240b30ba52779fb77899e6e0975fa37", null ],
+      [ "p", "structchromosphere_1_1_mixture_thermo.html#a719d718d759e14e76c3f06b3f07105ba", null ],
+      [ "p_e", "structchromosphere_1_1_mixture_thermo.html#ad0bde56edeeae15e6e5de506be4faee5", null ],
+      [ "gamma1", "structchromosphere_1_1_mixture_thermo.html#af4cd98cab02b5b85331b16bc5544228d", null ],
+      [ "internal_energy", "structchromosphere_1_1_mixture_thermo.html#ae9d9ad0164c3dd050aa637a7889899c0", null ]
+    ] ],
+    [ "chromosphere::CaloricMixtureThermo", "structchromosphere_1_1_caloric_mixture_thermo.html", [
+      [ "rho", "structchromosphere_1_1_caloric_mixture_thermo.html#a5e05cf00a5d39be521aa4a4fa745f4af", null ],
+      [ "T", "structchromosphere_1_1_caloric_mixture_thermo.html#ac302a7f965bed5640a7006623d247791", null ],
+      [ "x", "structchromosphere_1_1_caloric_mixture_thermo.html#a338ea0a3073f3ce5e7bf81dbb7a4413a", null ],
+      [ "n_H", "structchromosphere_1_1_caloric_mixture_thermo.html#aef50d486a625026e1f4898eb190436e7", null ],
+      [ "n_e", "structchromosphere_1_1_caloric_mixture_thermo.html#a4d880c2452e8740543d9ca0d4e27173b", null ],
+      [ "n_HI", "structchromosphere_1_1_caloric_mixture_thermo.html#a0fd481b85f4fafd926d0d40f9661720e", null ],
+      [ "p", "structchromosphere_1_1_caloric_mixture_thermo.html#a024a369736388b51bd8fb27b41c5ea69", null ],
+      [ "p_e", "structchromosphere_1_1_caloric_mixture_thermo.html#a4d874a92f2dc10c7fc146fea0dfd3a2d", null ],
+      [ "internal_energy", "structchromosphere_1_1_caloric_mixture_thermo.html#a61170e349d04fa4433a15a6d4a682d55", null ]
+    ] ],
+    [ "chromosphere::MixtureFaceState", "structchromosphere_1_1_mixture_face_state.html", [
+      [ "rho", "structchromosphere_1_1_mixture_face_state.html#a92b81fe61189bf79eecde7d31d69fa25", null ],
+      [ "velocity", "structchromosphere_1_1_mixture_face_state.html#ad3f31dd18f65aa3e3818f635b0505b77", null ],
+      [ "temperature", "structchromosphere_1_1_mixture_face_state.html#a72b0d9de013e0c33643cc3293acd6151", null ],
+      [ "pressure", "structchromosphere_1_1_mixture_face_state.html#a8268a0bba57fea66f6f98a55846b873a", null ],
+      [ "internal_energy", "structchromosphere_1_1_mixture_face_state.html#a15f7cb1f6d058196a419016c48b9633b", null ],
+      [ "energy", "structchromosphere_1_1_mixture_face_state.html#a367bbded13fd742fefe7cb0477828081", null ],
+      [ "sound_speed", "structchromosphere_1_1_mixture_face_state.html#a77a09d6d6dc71e2b10fcc07b2e01298b", null ],
+      [ "gamma1", "structchromosphere_1_1_mixture_face_state.html#a3c834d514c2fb5e1f54416d14f9a945d", null ],
+      [ "dp_deint_rho", "structchromosphere_1_1_mixture_face_state.html#a4bbff72dd64d1fa8df6dc1628dd4f736", null ]
+    ] ],
+    [ "chromosphere::EosGammaTable", "classchromosphere_1_1_eos_gamma_table.html", [
+      [ "empty", "classchromosphere_1_1_eos_gamma_table.html#a5ebe31e3784e02007b449e8538b7be04", null ],
+      [ "temperature_size", "classchromosphere_1_1_eos_gamma_table.html#a5cd1355a19dfa22e0088911a686ffef0", null ],
+      [ "density_size", "classchromosphere_1_1_eos_gamma_table.html#abf9cdebebd99d6d547d30d2e6614bcb2", null ],
+      [ "temperature_at", "classchromosphere_1_1_eos_gamma_table.html#aa2f9e62c2a299561acb4b8800eaafe3b", null ],
+      [ "n_h_at", "classchromosphere_1_1_eos_gamma_table.html#a540c0b34e011bc0985aefda560acf1ca", null ],
+      [ "min_temperature", "classchromosphere_1_1_eos_gamma_table.html#a72ad83410e63cb028d909333cd197601", null ],
+      [ "max_temperature", "classchromosphere_1_1_eos_gamma_table.html#a86094ab1d21ee64573f22d2d9a753b62", null ],
+      [ "min_n_h", "classchromosphere_1_1_eos_gamma_table.html#adaf965b217e5f47ac2d1e4ac0f191e5f", null ],
+      [ "max_n_h", "classchromosphere_1_1_eos_gamma_table.html#a42e467559d95ccfcd87b79548c40a26e", null ],
+      [ "contains", "classchromosphere_1_1_eos_gamma_table.html#a472867dddd925b5ad326ac20bb69233a", null ],
+      [ "require_n_h_in_bounds", "classchromosphere_1_1_eos_gamma_table.html#a92ab98bf847b424435e788502652dc04", null ],
+      [ "require_n_h_in_bounds_from_log", "classchromosphere_1_1_eos_gamma_table.html#ac630e97281caf27d11634efeb8b17f53", null ],
+      [ "gamma1", "classchromosphere_1_1_eos_gamma_table.html#addadcc7598d67829f19b894c09e4be0c", null ],
+      [ "gamma1_from_logs", "classchromosphere_1_1_eos_gamma_table.html#aa49c5d7cd01a43bfd3a300da07737ce0", null ],
+      [ "log_temperature_", "classchromosphere_1_1_eos_gamma_table.html#ac817636d5e10189408a6302d02a70634", null ],
+      [ "log_n_h_", "classchromosphere_1_1_eos_gamma_table.html#aa5f359f1388096b245764f5550f36974", null ],
+      [ "gamma1_", "classchromosphere_1_1_eos_gamma_table.html#a88024703d75c96d54ba1579a1051142c", null ]
+    ] ],
+    [ "chromosphere::CaloricState", "structchromosphere_1_1_caloric_state.html", [
+      [ "n_h", "structchromosphere_1_1_caloric_state.html#ac4ddb754ac7ec973ddd5542b72a46c28", null ],
+      [ "x", "structchromosphere_1_1_caloric_state.html#a0323dfd49adf5b9b0722b99db28c6c6c", null ],
+      [ "n_e", "structchromosphere_1_1_caloric_state.html#a41d9c6e1b6ba62f16fe78dba028ee8a7", null ],
+      [ "n_hi", "structchromosphere_1_1_caloric_state.html#aefaa96863dfde37a47b0f5b569d07708", null ],
+      [ "pressure", "structchromosphere_1_1_caloric_state.html#a66fc98d9b2e84f199371cfd121cc8bc7", null ],
+      [ "internal_energy", "structchromosphere_1_1_caloric_state.html#a6c89e2bde0b199a42338927e46c736bc", null ],
+      [ "heat_capacity", "structchromosphere_1_1_caloric_state.html#ae2d2272b9e45e175fe1634b0f6b6179f", null ]
+    ] ],
+    [ "chromosphere::set_eos_operation_counting", "group__eos.html#ga7c34089d04bc4b54a7f4c94bccc5c11b", null ],
+    [ "chromosphere::reset_eos_operation_counts", "group__eos.html#ga2417216b81ff041e14aea96393e9ceae", null ],
+    [ "chromosphere::eos_operation_counts", "group__eos.html#ga3af659d012ae0c351cd22371458570d3", null ],
+    [ "chromosphere::saha_ionization_fraction", "group__eos.html#ga65b0d7a3c63ca56049543278c8b5c50d", null ],
+    [ "chromosphere::saha_ionization_fraction_n_h", "group__eos.html#ga0861e36cf653e0bbe5b4bbb18bb4de00", null ],
+    [ "chromosphere::equilibrium_density_from_pressure", "group__eos.html#gabb94f3073c35945fbd6b07c56fb3aa8e", null ],
+    [ "chromosphere::equilibrium_internal_energy", "group__eos.html#ga272ccf00c6b593a7a49a741fa30e9bef", null ],
+    [ "chromosphere::equilibrium_heat_capacity", "group__eos.html#gabbd500520a3d9be279cfb3ba14071b5b", null ],
+    [ "chromosphere::equilibrium_caloric_state", "group__eos.html#ga85464f1f731f9d853a97dbba2a8022d2", null ],
+    [ "chromosphere::equilibrium_caloric_state_from_logs", "group__eos.html#ga2b59474990e49395c1d2c0e1d3036f9c", null ],
+    [ "chromosphere::gamma_state", "group__eos.html#ga64501d367740200fa49790a22ee3260f", null ],
+    [ "chromosphere::equilibrium_temperature_from_density_pressure", "group__eos.html#ga7f4cbdec28b1368cc94cef97d3976ac4", null ],
+    [ "chromosphere::temperature_from_rho_eint", "group__eos.html#gadae59b48212c9d70786cdf53816dfac9", null ],
+    [ "chromosphere::mixture_total_energy", "group__eos.html#gac5a9d53161f2b105646d8f98865ac3c6", null ],
+    [ "chromosphere::decode_equilibrium_mixture", "group__eos.html#gae846f162e415e247f6e02a316a2c11df", null ],
+    [ "chromosphere::decode_equilibrium_caloric_mixture", "group__eos.html#gac72caef516826b8b2ef3403f6dc4ae03", null ],
+    [ "chromosphere::equilibrium_mixture_face_state", "group__eos.html#ga23f33352820f1147d6f3f085a29acc9e", null ],
+    [ "chromosphere::equilibrium_mixture_face_state_from_logs", "group__eos.html#ga0a703546137f2f1d7b824150fafc9181", null ],
+    [ "chromosphere::equilibrium_mixture_face_state_from_log_pressure", "group__eos.html#ga5cd8682752286e20c3a09181307eeafb", null ],
+    [ "chromosphere::equilibrium_mixture_flux", "group__eos.html#gae3d2ec9b7d9e06bd33cbb03f34d1fee1", null ]
+];

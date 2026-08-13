@@ -12,7 +12,11 @@ The compiled PDFs are mirrored into the main repository automatically: `main.pdf
 
 ## Code documentation
 
-The API reference is Doxygen: config in `docs/doxygen/Doxyfile`, narrative pages in `docs/doxygen/pages/`, built with `scripts/build_docs.sh` into the gitignored `docs/doxygen/html/`. `README.md` is deliberately a quick start only — configure, build, choose parameters, run, visualize — and technical detail belongs in the Doxygen pages, not in the README. When you change public behavior, update the relevant page (`configuration.md`, `numerics.md`, `physics_model.md`, `scenario_reference.md`, `io_formats.md`, `validation.md`, `architecture.md`) in the same change, and keep the build warning-free: `EXTRACT_ALL` is off and `WARN_IF_UNDOCUMENTED` is on, so a new undocumented public entity is a warning in `docs/doxygen/doxygen-warnings.log`.
+The API reference is Doxygen: config in `docs/doxygen/Doxyfile`, narrative pages in `docs/doxygen/pages/`, built with `scripts/build_docs.sh`. `README.md` is deliberately a quick start only — configure, build, choose parameters, run, visualize — and technical detail belongs in the Doxygen pages, not in the README. When you change public behavior, update the relevant page (`configuration.md`, `numerics.md`, `physics_model.md`, `scenario_reference.md`, `io_formats.md`, `validation.md`, `architecture.md`) in the same change.
+
+**The generated `docs/doxygen/html/` is TRACKED, not gitignored**, so the reference is browsable from GitHub without installing anything. It must therefore never go stale. **Before any commit that touches a `.hpp`, `.cpp`, the `Doxyfile`, or a page under `docs/doxygen/pages/`, run `scripts/build_docs.sh` and stage `docs/doxygen/html/` along with the source change.** The tracked `.githooks/pre-commit` hook does this automatically, but it only applies in clones that have run `scripts/install_hooks.sh` once — never assume it is active, and never bypass it with `--no-verify` on a commit that changes documented sources.
+
+Keep the build warning-free. `EXTRACT_ALL` is off and `WARN_IF_UNDOCUMENTED` is on, so a new public entity with no documentation is a warning in `docs/doxygen/doxygen-warnings.log` and the pre-commit hook rejects the commit. Every public entity gets a real statement of what it is, with physical units in square brackets where it has them — not a restatement of its name. Doxygen output is deterministic here, so a rebuild with no documentation change produces no diff; a large `docs/doxygen/html/` diff means something real changed.
 
 ## Output directories
 

@@ -36,6 +36,13 @@ fi
 echo "build_docs: doxygen $(doxygen --version)"
 doxygen docs/doxygen/Doxyfile
 
+# docs/doxygen/html/ is tracked so the reference is browsable from the
+# repository and servable by GitHub Pages. Pages runs Jekyll by default, which
+# would drop the files and directories Doxygen names with a leading underscore;
+# .nojekyll turns that off. Doxygen overwrites rather than wipes the output
+# directory, but recreate it unconditionally so a clean build cannot lose it.
+touch docs/doxygen/html/.nojekyll
+
 log="docs/doxygen/doxygen-warnings.log"
 warnings=0
 if [ -s "$log" ]; then

@@ -1,0 +1,26 @@
+var searchData=
+[
+  ['p_0',['p',['../structchromosphere_1_1_mixture_thermo.html#a719d718d759e14e76c3f06b3f07105ba',1,'chromosphere::MixtureThermo::p'],['../structchromosphere_1_1_caloric_mixture_thermo.html#a024a369736388b51bd8fb27b41c5ea69',1,'chromosphere::CaloricMixtureThermo::p']]],
+  ['p_5fcell_1',['p_cell',['../structchromosphere_1_1_mixture_face_flux_capture.html#a3f9ac5900479e60dcef16d53e3a7d36a',1,'chromosphere::MixtureFaceFluxCapture']]],
+  ['p_5fe_2',['P_E',['../namespacechromosphere_1_1prim.html#af750c1b8a303dc0f2ab29c53530190cf',1,'chromosphere::prim']]],
+  ['p_5fe_3',['p_e',['../structchromosphere_1_1_mixture_thermo.html#ad0bde56edeeae15e6e5de506be4faee5',1,'chromosphere::MixtureThermo::p_e'],['../structchromosphere_1_1_caloric_mixture_thermo.html#a4d874a92f2dc10c7fc146fea0dfd3a2d',1,'chromosphere::CaloricMixtureThermo::p_e']]],
+  ['p_5fi_4',['P_I',['../namespacechromosphere_1_1prim.html#a5125da6a028636a6082e911284ac6ea7',1,'chromosphere::prim']]],
+  ['p_5fl_5',['p_L',['../structchromosphere_1_1_mixture_face_flux_capture.html#a5328edce0b2ff6176dcbac2604839dde',1,'chromosphere::MixtureFaceFluxCapture']]],
+  ['p_5fn_6',['P_N',['../namespacechromosphere_1_1prim.html#a2d1b27ebbe7c986107680f7bba01d94d',1,'chromosphere::prim']]],
+  ['p_5fr_7',['p_R',['../structchromosphere_1_1_mixture_face_flux_capture.html#a9ede8676585daf45bd2811b98d367271',1,'chromosphere::MixtureFaceFluxCapture']]],
+  ['peek_5fns_8',['peek_ns',['../structchromosphere_1_1_scenario.html#aafb6ace30d2d5b45730b1aca4d46f798',1,'chromosphere::Scenario']]],
+  ['phi_5fg_5fimh_9',['phi_g_imh',['../structchromosphere_1_1_grid.html#ac0e48ec7e191174c8ddd766e36a4bd94',1,'chromosphere::Grid::phi_g_imh'],['../structchromosphere_1_1_scenario_data_file.html#a4655f94d87578039462f1dbb813f26ca',1,'chromosphere::ScenarioDataFile::phi_g_imh']]],
+  ['phi_5fg_5fiph_10',['phi_g_iph',['../structchromosphere_1_1_grid.html#ad953c243c05631294c3538f4b394008e',1,'chromosphere::Grid::phi_g_iph'],['../structchromosphere_1_1_scenario_data_file.html#aaa163d05570686886c148c6ceff2c845',1,'chromosphere::ScenarioDataFile::phi_g_iph']]],
+  ['phi_5fg_5foffset_5fjpkg_11',['phi_g_offset_Jpkg',['../structchromosphere_1_1_scenario_data_file.html#a152fde689edefb7b11bddbcdcfc3fd29',1,'chromosphere::ScenarioDataFile']]],
+  ['phi_5fminus_5frho_12',['phi_minus_rho',['../structchromosphere_1_1_mixture_face_flux_capture.html#a803ee87a8974a7f8aab109a7873bda2a',1,'chromosphere::MixtureFaceFluxCapture']]],
+  ['phi_5fplus_5frho_13',['phi_plus_rho',['../structchromosphere_1_1_mixture_face_flux_capture.html#acb79c5586ad87bf6789eab429fa8d779',1,'chromosphere::MixtureFaceFluxCapture']]],
+  ['phi_5fplus_5ft_14',['phi_plus_T',['../structchromosphere_1_1_mixture_face_flux_capture.html#a2f57b1c36a130d95c95754d9312aa6b4',1,'chromosphere::MixtureFaceFluxCapture']]],
+  ['phi_5fplus_5fv_15',['phi_plus_v',['../structchromosphere_1_1_mixture_face_flux_capture.html#a636dad336afdc0efa5c28b1c9786891c',1,'chromosphere::MixtureFaceFluxCapture']]],
+  ['photoionization_5frate_16',['photoionization_rate',['../structchromosphere_1_1_grid.html#a62301bda3238f71c716b5f1b21171063',1,'chromosphere::Grid']]],
+  ['photoionization_5frate_5fi_17',['photoionization_rate_i',['../structchromosphere_1_1_grid.html#af01fd0d870bd05fd85cef37bd5b24abb',1,'chromosphere::Grid']]],
+  ['predicted_18',['predicted',['../structchromosphere_1_1_mixture_rhs_scratch.html#a98fa73c62cb530b0971953bafa737e3e',1,'chromosphere::MixtureRhsScratch']]],
+  ['predicted_5fstate_19',['predicted_state',['../structchromosphere_1_1_mixture_rhs_scratch.html#aa0bf83d9cc21e962420ab789525779d1',1,'chromosphere::MixtureRhsScratch']]],
+  ['pressure_20',['pressure',['../structchromosphere_1_1_mixture_face_arrays.html#a923f4a64979f22c4107550a62b69794a',1,'chromosphere::MixtureFaceArrays::pressure'],['../structchromosphere_1_1_mixture_face_state.html#a8268a0bba57fea66f6f98a55846b873a',1,'chromosphere::MixtureFaceState::pressure'],['../structchromosphere_1_1_caloric_state.html#a66fc98d9b2e84f199371cfd121cc8bc7',1,'chromosphere::CaloricState::pressure']]],
+  ['pressure_5freconstruct_21',['pressure_reconstruct',['../structchromosphere_1_1_grid.html#a0b309c15b9a9ea18f29e6860a6a792a1',1,'chromosphere::Grid']]],
+  ['profile_22',['profile',['../structchromosphere_1_1_refine_params.html#a519e55a5380c77966cc1deae97c13331',1,'chromosphere::RefineParams']]]
+];

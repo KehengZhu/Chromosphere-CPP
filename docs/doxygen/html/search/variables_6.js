@@ -1,0 +1,19 @@
+var searchData=
+[
+  ['g_0',['g',['../structchromosphere_1_1_grid.html#af3eae4e617db5498ce1823dc8189df97',1,'chromosphere::Grid']]],
+  ['g_5fleft_1',['g_left',['../group__grid.html#gaedd7415eac1f16149a35292e308da94b',1,'chromosphere::MixtureConductionScratch']]],
+  ['g_5fright_2',['g_right',['../group__grid.html#gabae1a07aea45185bdd6e55da98213fe6',1,'chromosphere::MixtureConductionScratch']]],
+  ['g_5fsi_3',['g_si',['../structchromosphere_1_1_scenario_data_file.html#aaa3c7896b6fad8fcb84e72f09572c3b1',1,'chromosphere::ScenarioDataFile']]],
+  ['gamma1_4',['gamma1',['../structchromosphere_1_1_mixture_thermo.html#af4cd98cab02b5b85331b16bc5544228d',1,'chromosphere::MixtureThermo::gamma1'],['../structchromosphere_1_1_mixture_face_state.html#a3c834d514c2fb5e1f54416d14f9a945d',1,'chromosphere::MixtureFaceState::gamma1']]],
+  ['gamma1_5f_5',['gamma1_',['../classchromosphere_1_1_eos_gamma_table.html#a88024703d75c96d54ba1579a1051142c',1,'chromosphere::EosGammaTable']]],
+  ['gamma1_5fqueries_6',['gamma1_queries',['../structchromosphere_1_1_eos_operation_counts.html#a0b94f453bfdded4c6ebe85fddb230247',1,'chromosphere::EosOperationCounts']]],
+  ['gamma_5fenergy_7',['gamma_energy',['../structchromosphere_1_1_gamma_state.html#a7c0e06a78444c46ea660508b6f21afde',1,'chromosphere::GammaState']]],
+  ['gamma_5fmono_8',['gamma_mono',['../structchromosphere_1_1_grid.html#adf538cda2d32cbf959ff0b19e92f0186',1,'chromosphere::Grid']]],
+  ['gamma_5fsound_9',['gamma_sound',['../structchromosphere_1_1_gamma_state.html#ad8eee91012f00882d8f7d6450a846cec',1,'chromosphere::GammaState']]],
+  ['ghost_5fb_5ft_10',['ghost_B_T',['../structchromosphere_1_1_scenario_data_file.html#a7daf7f2434de712779b2b72f96cde47b',1,'chromosphere::ScenarioDataFile']]],
+  ['ghost_5fne_5fim3_11',['ghost_ne_im3',['../structchromosphere_1_1_scenario_data_file.html#a7efc2bbedf3eb0e878185ddba89b658f',1,'chromosphere::ScenarioDataFile']]],
+  ['ghost_5fnn_5fim3_12',['ghost_nn_im3',['../structchromosphere_1_1_scenario_data_file.html#a148087b879f3398da61aa03368aa9e40',1,'chromosphere::ScenarioDataFile']]],
+  ['ghost_5fphi_5fg_5fjpkg_13',['ghost_phi_g_Jpkg',['../structchromosphere_1_1_scenario_data_file.html#a78cddd9f1cf31175580fcd2957be7ac0',1,'chromosphere::ScenarioDataFile']]],
+  ['ghost_5ft_5fe_5ffactor_14',['ghost_T_e_factor',['../structchromosphere_1_1_scenario_data_file.html#abee3697064af846878694742b1b4d0d4',1,'chromosphere::ScenarioDataFile']]],
+  ['ghost_5ft_5fk_15',['ghost_T_K',['../structchromosphere_1_1_scenario_data_file.html#a31aa024d3d19723f334f6eeb03040d99',1,'chromosphere::ScenarioDataFile']]]
+];

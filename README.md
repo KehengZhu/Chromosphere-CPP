@@ -8,7 +8,7 @@ The production configuration (`model_column`) is a **single-fluid field-aligned 
 
 | | |
 | --- | --- |
-| Code reference | `scripts/build_docs.sh --open` → `docs/doxygen/html/index.html` |
+| Code reference | [docs/doxygen/html/index.html](docs/doxygen/html/index.html) — prebuilt and committed, no install needed |
 | Write-up (current release) | [docs/chromosphere_paper.pdf](docs/chromosphere_paper.pdf) |
 | Write-up (engineering record) | [docs/chromosphere_writeup.pdf](docs/chromosphere_writeup.pdf) |
 | Reference papers | `docs/supporting-papers/` |
@@ -145,12 +145,22 @@ outputs/  visualization/                  run output and figures, per scenario
 
 ## Documentation
 
+The code reference is committed prebuilt at `docs/doxygen/html/index.html`, so reading it needs nothing installed — open that file from a clone, or browse it on GitHub Pages if the repository has Pages enabled.
+
+To rebuild it after changing the code:
+
 ```sh
-brew install doxygen      # or: sudo apt-get install doxygen
+brew install doxygen             # or: sudo apt-get install doxygen
 scripts/build_docs.sh --open
 ```
 
-The generated HTML is gitignored. The write-up PDFs in `docs/` are refreshed automatically whenever `main.tex` or `paper.tex` is recompiled, by a `latexmk` hook that calls `scripts/sync_writeup_pdf.sh`.
+Because the generated HTML is tracked, it has to be rebuilt and staged alongside any change to a documented source. Install the hook once per clone and that happens automatically:
+
+```sh
+scripts/install_hooks.sh
+```
+
+The write-up PDFs in `docs/` are refreshed the same way, by a `latexmk` hook that calls `scripts/sync_writeup_pdf.sh` whenever `main.tex` or `paper.tex` is recompiled.
 
 ## References
 

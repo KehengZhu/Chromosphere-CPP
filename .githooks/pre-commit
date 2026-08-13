@@ -1,0 +1,60 @@
+#!/bin/sh
+# Keep the committed Doxygen reference in sync with the sources it documents.
+#
+# docs/doxygen/html/ is tracked so the reference is browsable straight from the
+# repository and servable by GitHub Pages. That only works if it is rebuilt
+# whenever the code or the narrative pages change, which is what this hook does.
+#
+# Install with:  scripts/install_hooks.sh
+# Skip once with: git commit --no-verify
+# Disable entirely: git config chromo.docs-hook false
+#
+# The hook rebuilds ONLY when a documentation input is staged, so an ordinary
+# commit that touches nothing Doxygen reads costs one `git diff --cached` call.
+
+set -eu
+
+[ "$(git config --bool chromo.docs-hook || echo true)" = "false" ] && exit 0
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+# The Doxyfile's INPUT list, plus the Doxyfile itself.
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- \
+    'docs/doxygen/Doxyfile' \
+    'docs/doxygen/pages/*' \
+    '*.hpp' '*.cpp' \
+    'src/*' 'scenarios/*' 'chromo_main.cpp')
+
+[ -z "$staged" ] && exit 0
+
+if ! command -v doxygen >/dev/null 2>&1; then
+    echo "pre-commit: doxygen is not installed, so docs/doxygen/html/ cannot be" >&2
+    echo "            refreshed for this commit. Install it (brew install doxygen)" >&2
+    echo "            or run: git config chromo.docs-hook false" >&2
+    exit 1
+fi
+
+echo "pre-commit: documentation inputs changed, rebuilding the Doxygen reference"
+if ! scripts/build_docs.sh >/dev/null 2>&1; then
+    echo "pre-commit: scripts/build_docs.sh failed. Run it directly to see why." >&2
+    exit 1
+fi
+
+# Warning-free is the standard: EXTRACT_ALL is off and WARN_IF_UNDOCUMENTED is
+# on, so a warning here means a new public entity has no documentation.
+log="docs/doxygen/doxygen-warnings.log"
+if [ -s "$log" ]; then
+    echo "pre-commit: Doxygen reported warnings; the reference must stay clean." >&2
+    echo "            Fix these, then commit again:" >&2
+    sed -n '1,20p' "$log" >&2
+    exit 1
+fi
+
+git add docs/doxygen/html
+
+if git diff --cached --quiet -- docs/doxygen/html; then
+    echo "pre-commit: reference already current"
+else
+    echo "pre-commit: refreshed docs/doxygen/html and added it to this commit"
+fi

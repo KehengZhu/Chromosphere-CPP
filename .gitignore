@@ -30,6 +30,9 @@ output_*.log
 *.out
 *.mp4
 
-# Generated Doxygen output (rebuild with scripts/build_docs.sh).
-docs/doxygen/html/
+# Generated Doxygen output. docs/doxygen/html/ is DELIBERATELY TRACKED so the
+# reference is browsable straight from the repository (and servable by GitHub
+# Pages) without anyone having to install doxygen. Rebuild it with
+# scripts/build_docs.sh before committing — the pre-commit hook in .githooks/
+# does that automatically once you run scripts/install_hooks.sh.
 docs/doxygen/doxygen-warnings.log

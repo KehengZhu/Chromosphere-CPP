@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from column_spacetime import load, col
 
 FACEFLUX_COLS = ("cell_km face_km rho_cell v_cell T_cell rho_L rho_R v_L v_R T_L T_R "
-                 "cs_L cs_R a_face f_central f_diff f_total eq_residual_mass r_rho "
+                 "cs_L cs_R a_face f_central f_diff f_total r_rho "
                  "phi_plus_rho r_ip1_rho phi_minus_rho r_v phi_plus_v r_T phi_plus_T "
                  "p_cell p_L p_R").split()
 

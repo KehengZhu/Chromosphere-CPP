@@ -1,5 +1,8 @@
 # Why the relaxed corona settles to a steady downflow ($V<0$)
 
+> **Partly superseded (see `docs/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
+
+
 In the corona-as-boundary gentle-evaporation runs (`model_gentle`, see `gentle_evaporation_plan.md`, option A) the resolved corona relaxes to a *stationary* profile — $T_i$, $n_e$, and the emission measure stop changing — yet it carries a persistent downflow of a few km/s ($V<0$, since the field-aligned coordinate $s$ increases upward). This note explains why, using only the symbols of the six-equation system in `paper.tex`.
 
 ## The balance that governs the corona

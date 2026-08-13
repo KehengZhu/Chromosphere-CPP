@@ -1,5 +1,8 @@
 # Diagnosis: the broad low-chromosphere oscillation in the Roe + `(ln ρ, V, ln p)` N1000 run
 
+> **Partly superseded (see `docs/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
+
+
 **Scope.** Bounded read-only diagnosis of the large-scale velocity / cell-centred mass-flux oscillation seen in `outputs/model_column/lnp_roe_N1000_4000s.txt`. No production code, defaults, or release decision were changed. One new bounded control run and two diagnostic scripts were added.
 
 **Verdict up front.** The feature is a **conduction-excited, boundary-trapped standing oscillation of the sub-TR column**, present with the same amplitude under Rusanov as under Roe, and damped only numerically. It is bounded, smooth, resolved, and does **not** contaminate the evaporation flux. **Release impact: NON-BLOCKER.**

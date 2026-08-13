@@ -1,5 +1,8 @@
 # Top-region ripple: finite-volume face mass-flux diagnosis
 
+> **Partly superseded (see `docs/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
+
+
 Read-only follow-up to `docs/upper_bc_hydro_temperature_decoupling_recap.md`. That stage established that the fixed hydro ghost temperature caused the *last-cell* reversal but not the ~20–30 km ripple below the top. This stage asks the sharper question: **does the ripple exist in the finite-volume face mass flux that continuity is actually differenced from, or only in the cell-centred product `rho*V`?**
 
 Answer: **it exists only in `rho*V`. Case A.** The conserved face flux is smooth to ~1e-4 in normalised curvature while `rho*V` ripples at ~7e-2 — a factor of ~830. There is no continuity violation, no boundary instability, and the limiter and the operator splitting are both cleared by direct experiment.

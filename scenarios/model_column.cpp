@@ -21,12 +21,20 @@ namespace chromosphere {
 namespace {
 float kAjump       = 1.0f;      // top temperature jump: T_ghost1 = a·T_top
 float kBjump       = 1.0f;      // T_ghost2 = b·T_ghost1
-// Inner (photospheric) discrete-HSE reservoir, captured at the IC base. Both
-// ghosts continue the hydrostatic reservoir and carry ρ ∝ p at the base T₀, so
-// the inner-face reconstruction is consistent and V = 0 is an exact fixed point
-// (docs/gentle_evaporation_downflow.md; the well-balanced inner BC — always on).
+// ---------------------------------------------------------------------------
+// Inner boundary — the LOWER TRUNCATION of the modeled domain at h_base
+// (1600 km by default). This is NOT the photosphere: it is a mid-chromospheric
+// cut chosen because the Saha/LTE equilibrium closure this solver uses is only
+// intended to be trusted from about that height upward. The real atmosphere
+// continues below it and is simply outside the model. Consequently the two
+// ghost cells are a NUMERICAL closure for the MUSCL stencil, not a claim that
+// the LTE model extends downward, and the physical content of the boundary is
+// exactly one thing: the lower chromosphere below the cut behaves, on the
+// timescales resolved here, as a quasi-static stratified reservoir.
+// ---------------------------------------------------------------------------
 float kInnerRhoI   = 0.0f;      // base ion density (RHO slot ghost 0)
 float kInnerRhoN   = 0.0f;
+// Two-fluid (non-release) ghost ladder: first-order p_0 + k ρ_0 g Δs with ρ ∝ p.
 float kInnerPiGh   = 0.0f;      // ion ghost pressure   p_i,0 + ρ_i,0 g Δs
 float kInnerPnGh   = 0.0f;      // neutral ghost pressure p_n,0 + ρ_n,0 g Δs
 float kInnerPiGh2  = 0.0f;      // second inner ghost (2 Δs below): p_0 + 2ρgΔs
@@ -35,7 +43,18 @@ float kInnerRhoIGh  = 0.0f;     // isothermal-hydrostatic ghost densities (ρ �
 float kInnerRhoNGh  = 0.0f;     //   ρ_{i,n},G0 = ρ_{i,n},0 · p_{i,n},G0 / p_{i,n},0
 float kInnerRhoIGh2 = 0.0f;     //   ρ_{i,n},G1 = ρ_{i,n},0 · p_{i,n},G1 / p_{i,n},0
 float kInnerRhoNGh2 = 0.0f;
-float kInnerTRef     = 0.0f;     // fixed photospheric reservoir temperature
+float kInnerTRef     = 0.0f;     // reservoir temperature at the truncation
+// RELEASE lower reservoir, captured once at the IC base. Unlike the two-fluid
+// ladder above, each rung is the trapezoidal, EOS-closed hydrostatic step
+// p_{k+1} = p_k + Δs·½(ρ_k + ρ_{k+1})·g with ρ_{k+1} = ρ_EOS(p_{k+1}, T₀),
+// iterated to a fixed point — the SAME construction the outer face already used
+// (hse_rung), so the two boundaries are now discretely consistent. The first-
+// order form this replaces carried an O((Δs/H)²) pressure error, i.e. an O(Δs/H)
+// error in the hydrostatic force balance of the lowest interior cells.
+float kInnerPRes0   = 0.0f;     // reservoir pressure at ghost 0 (1 Δs below cell 0)
+float kInnerPRes1   = 0.0f;     // reservoir pressure at ghost 1 (2 Δs below)
+float kInnerRhoRes0 = 0.0f;     // EOS density at (kInnerPRes0, kInnerTRef)
+float kInnerRhoRes1 = 0.0f;
 float kTtopRef     = 0.0f;      // FIXED reference top temperature [K] for the jump
 bool  kTtopFixedAbs = false;    // ISO_T_TOP>0: kTtopRef is an ABSOLUTE imposed top T
 // FIXED reference outer ghost pressure [Pa] — the coronal reservoir back-pressure,
@@ -87,6 +106,25 @@ double gamma_density_from_pressure(const Grid& grid, double pressure, double tem
     // The 100 geometric bisections this replaced (200 Saha evaluations per call)
     // solved the same closure the algebraic inverse below solves in closed form.
     return equilibrium_density_from_pressure(pressure, temperature);
+}
+
+// One rung of an EOS-consistent hydrostatic ladder taken DOWNWARD by `ds`
+// metres from an anchor (p_anchor, rho_anchor) at fixed temperature T_gh:
+//     p = p_anchor + Δs·½(ρ_anchor + ρ)·g,     ρ = ρ_EOS(p, T_gh),
+// iterated to a fixed point. Trapezoidal in ρ, so the ladder reproduces the
+// exponential stratification to O(Δs²) instead of the O(Δs) of p + ρ_anchor gΔs.
+void gamma_hse_rung_down(const Grid& grid, double p_anchor, double rho_anchor,
+                         double T_gh, double ds, double& p_out, double& rho_out) {
+    double rho_gh = rho_anchor;
+    for (int it = 0; it < 8; ++it) {
+        const double p = p_anchor + ds*0.5*(rho_anchor + rho_gh)*grid.g;
+        const double rho_next = gamma_density_from_pressure(grid, p, T_gh);
+        const bool done = std::abs(rho_next - rho_gh) <= 1.0e-14*rho_next;
+        p_out = p;
+        rho_gh = rho_next;
+        if (done) break;
+    }
+    rho_out = rho_gh;
 }
 
 // Pack a LEGACY two-fluid ghost cell from explicit ion/neutral densities,
@@ -183,7 +221,10 @@ Vec model_column_ic(Grid& grid) {
     kCorona = (env_f("ISO_CORONA", 0.0f) != 0.0f);
 
     // --- parameters -------------------------------------------------------
-    const float h_base     = env_f("ISO_H_BASE", 0.0f);                     // km, gauge (photosphere)
+    // Lower truncation height of the modeled domain, in km measured from the
+    // photosphere (that is the HEIGHT GAUGE only -- the domain itself starts
+    // here, at 1600 km, well above it). See the inner-boundary block.
+    const float h_base     = env_f("ISO_H_BASE", 0.0f);
     const float corona_top = env_f("ISO_CORONA_TOP_KM", 10000.0f);          // km, coronal top
     float       DH_km      = env_f("ISO_DH", kCorona ? (corona_top - h_base) : 1303.0f); // km
     // Base (T, n_H) from the C7 profile at h_base.
@@ -395,12 +436,12 @@ Vec model_column_ic(Grid& grid) {
         }
     }
 
-    // --- inner (photospheric) discrete-HSE V=0 reservoir ------------------
-    // The ghost sits one Δs below cell 0, so a hydrostatic reservoir carries the
-    // extra weight ρg·Δs ⇒ p_ghost = p_0 + ρ_0 g Δs. BOTH ghosts continue the
-    // reservoir (p_0 + 2ρgΔs for ghost 2) and carry ρ ∝ p at the base T₀, so the
-    // inner-face MUSCL reconstruction is consistent and V = U = 0 is an exact
-    // discrete fixed point for momentum AND mass (always-on well-balanced inner BC).
+    // --- lower truncation reservoir (h_base = 1600 km, NOT the photosphere) ---
+    // The ghosts sit one and two Δs below cell 0 and stand in for the unmodeled
+    // lower chromosphere, which on these timescales is a quasi-static stratified
+    // reservoir. The RELEASE ladder (gamma_mode) is trapezoidal and EOS-closed at
+    // the truncation temperature T₀; the legacy two-fluid ladder below it keeps
+    // the historical first-order form p_0 + kρ_0gΔs with ρ ∝ p.
     {
         const float T0    = T_c(0);
         kInnerTRef = T0;
@@ -417,13 +458,16 @@ Vec model_column_ic(Grid& grid) {
             const double rho0 = kInnerRhoI+kInnerRhoN;
             const double p0 = (1.0+saha_ionization_fraction_n_h(
                 rho0/eos_constants::m_h, T0))*rho0/eos_constants::m_h*eos_constants::k_b*T0;
-            const double pg0 = p0+rho0*grid.g*ds_base;
-            const double pg1 = p0+2.0*rho0*grid.g*ds_base;
+            double pg0, rg0, pg1, rg1;
+            gamma_hse_rung_down(grid, p0,  rho0, T0, ds_base, pg0, rg0);
+            gamma_hse_rung_down(grid, pg0, rg0,  T0, ds_base, pg1, rg1);
+            kInnerPRes0 = pg0; kInnerRhoRes0 = rg0;
+            kInnerPRes1 = pg1; kInnerRhoRes1 = rg1;
             kInnerPiGh = pg0; kInnerPnGh = 0.0f;
             kInnerPiGh2 = pg1; kInnerPnGh2 = 0.0f;
-            kInnerRhoIGh = gamma_density_from_pressure(grid, pg0, T0);
+            kInnerRhoIGh = rg0;
             kInnerRhoNGh = 0.0f;
-            kInnerRhoIGh2 = gamma_density_from_pressure(grid, pg1, T0);
+            kInnerRhoIGh2 = rg1;
             kInnerRhoNGh2 = 0.0f;
         } else {
         kInnerPiGh  = p_i0 + kInnerRhoI * grid.g * ds_base;
@@ -652,12 +696,23 @@ Vec model_column_ic(Grid& grid) {
     model_column_update_bc(grid, xn);
     grid.broadcast();
 
-    // Equilibrium-reference well-balancing (always on): freeze this (V=0, HSE) IC as
-    // the reference equilibrium. The integrator caches the explicit-RHS residual here
-    // on the first step and subtracts it every step, so this hydrostatic state is an
-    // exact discrete fixed point (V=0 held to round-off for any stratification).
-    grid.eq_wb = true;
-    grid.eq_state = xn;
+    // The release is REFERENCE-FREE: it does not know a hydrostatic equilibrium
+    // in advance and does not subtract a frozen residual. The release formerly
+    // froze this (V=0, HSE) IC as grid.eq_state and subtracted R(U_eq) every
+    // step, which made that one state an exact discrete fixed point but bound
+    // the solver to a pre-known global equilibrium and kept applying a residual
+    // evaluated at t = 0 (and at the first step's Δt) long after the transition
+    // region had restructured. Completing the MUSCL-Hancock source treatment and
+    // making the lower ghost ladder second order dropped the raw discrete
+    // hydrostatic face mass-flux defect of the release mesh by ~560x, to within
+    // ~1.3x of the float32 round-off floor of the stored state, so the frozen
+    // reference no longer has anything material to remove.
+    //
+    // The non-gamma (two-fluid) leg of this scenario is a different solver that
+    // never received the predictor source term, so it keeps the frozen
+    // reference exactly as before. eq_wb is now a two-fluid-only mechanism.
+    grid.eq_wb = !gamma_mode;
+    if (grid.eq_wb) grid.eq_state = xn;
     return xn;
 }
 
@@ -880,19 +935,40 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
     }
 
     // ====================================================================
-    // Inner face — photosphere, discrete-HSE V=0 reservoir (Pandey 2024),
-    // well-balanced through BOTH ghosts (pressure p_0+ρgΔs / p_0+2ρgΔs and
-    // density ρ ∝ p at T₀). The lower-BC TEMPERATURE choice (Dirichlet vs
-    // Neumann/zero-flux) is a CONDUCTION boundary condition imposed inside the
-    // Stage-D solver (grid.inner_conduction_neumann); the hydro wall stays a
-    // stable Dirichlet V=0 anchor either way.
+    // Inner face — the LOWER TRUNCATION of the modeled domain at h_base
+    // (1600 km). Not the photosphere: it is the height below which this
+    // solver's Saha/LTE equilibrium closure is not intended to be trusted, so
+    // the atmosphere underneath is deliberately outside the model and the two
+    // ghosts are a numerical closure for the MUSCL stencil.
+    //
+    // The physical content is one statement: the lower chromosphere below the
+    // cut is a quasi-static stratified reservoir at temperature T₀. That fixes
+    // the ghost thermal state, the hydrostatic ghost pressures kInnerPRes0/1
+    // (trapezoidal, EOS-closed — see gamma_hse_rung_down) and V = 0.
+    //
+    // A gravity-aware CHARACTERISTIC alternative was prototyped and measured:
+    // impose only the incoming (upward, u+c) acoustic invariant δu + δp/Z = 0
+    // about the base reference state with impedance Z = ρc, and take the
+    // outgoing (u−c) one from the live base cell, giving ghost deviations
+    // V_g = −(p_0 − p_0,ref)/Z and p_g = p_g,ref − Z·V_0. It degenerates
+    // exactly to this wall at equilibrium. Over 20 s conduction-off, 100 s and
+    // 1000 s conduction-driven runs it changed the hydrostatic residual not at
+    // all, the evaporation window velocity by ≤0.4 %, and the detrended
+    // base-region oscillation content not at all: the disturbance that reaches
+    // 1600 km is a slow quasi-static pressure adjustment, not acoustic ringing,
+    // so this face is not an important reflector for this model. It was
+    // therefore NOT promoted — see main.tex for the measurement.
+    //
+    // The lower-BC TEMPERATURE choice (Dirichlet vs Neumann/zero-flux) is a
+    // separate CONDUCTION boundary condition imposed inside the Stage-D solver
+    // (grid.inner_conduction_neumann); the hydro closure is independent of it.
     // ====================================================================
     {
         const float phi_g_in = grid.phi_g_imh(0);
         if (release) {
-            mixture_pack_ghost(grid, grid.mix_inner_boundary0, kInnerRhoIGh, 0.0,
+            mixture_pack_ghost(grid, grid.mix_inner_boundary0, kInnerRhoRes0, 0.0,
                                kInnerTRef, phi_g_in);
-            mixture_pack_ghost(grid, grid.mix_inner_boundary1, kInnerRhoIGh2, 0.0,
+            mixture_pack_ghost(grid, grid.mix_inner_boundary1, kInnerRhoRes1, 0.0,
                                kInnerTRef, phi_g_in);
             grid.broadcast();
             return;

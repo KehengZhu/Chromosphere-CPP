@@ -378,9 +378,15 @@ void build_roe_flux(const Grid& grid, const MixtureFaceArrays& left,
     }
 }
 
-// Geometric momentum source: the flux-tube pressure term p d_s(ln A) written in
-// the code's B form (A B = const => d_s(ln A) = -d_s(ln B) = B d_s(1/B)) plus
-// the gravitational body force -rho d_s(phi_g).
+// Momentum source of the field-aligned PDE: the flux-tube pressure term
+// p d_s(ln A) written in the code's B form (A B = const => d_s(ln A) =
+// -d_s(ln B) = B d_s(1/B)) plus the gravitational body force -rho d_s(phi_g).
+// The energy row has no source because E carries the gravitational potential,
+// so the gravitational work is already inside the (E + p) u flux.
+//
+// This is the ONE source the hydrodynamic update uses, and both stages of the
+// MUSCL-Hancock step apply it: the Hancock predictor with weight dt_predictor
+// and the corrector inside the final RHS.
 void build_source(const Grid& grid, const Vec& state,
                   const MixtureField& decoded, Work& source) {
     source.zeros(grid.ns*num_of_mixture_eq);
@@ -406,7 +412,6 @@ void capture_face_flux(const Grid& grid, const Work& w, const Work& wl,
     MixtureFaceFluxCapture& c = grid.face_flux_capture;
     c.resize(grid.ns);
     const auto sz = state_size(grid);
-    const bool has_eq = grid.eq_wb && !grid.eq_residual.is_empty();
     for (arma::uword i = 0; i < grid.ns; ++i) {
         auto W = [&](const Work& v, arma::uword slot) {
             return v(arma::sub2ind(sz, i, slot));
@@ -445,8 +450,6 @@ void capture_face_flux(const Grid& grid, const Work& w, const Work& wl,
         c.f_diff[i]    = grid.roe_characteristic_flux
             ? c.f_total[i] - c.f_central[i]
             : -0.5*c.a_face[i]*(fr.conserved(k_rho) - fl.conserved(k_rho));
-        c.eq_residual_mass[i] = has_eq
-            ? static_cast<double>(grid.eq_residual(k_rho)) : 0.0;
         c.r_rho[i]         = W(r,       MIX_LOG_RHO);
         c.phi_plus_rho[i]  = W(lp_r,    MIX_LOG_RHO);
         c.r_ip1_rho[i]     = W(r_ip1,   MIX_LOG_RHO);
@@ -615,6 +618,12 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
         build_faces(grid, requests, 2);
     }
 
+    // The ONE momentum source of the PDE (flux-tube pressure term + gravity),
+    // evaluated at U^n. Both MUSCL-Hancock stages consume it: the predictor just
+    // below and the corrector when the final RHS is assembled.
+    Work& source = scratch.source;
+    build_source(grid, state, decoded, source);
+
     const auto sz = state_size(grid);
     Vec& predicted = scratch.predicted_state;
     predicted.set_size(grid.n_mixture_state);
@@ -622,9 +631,17 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
         const double scale = dt_predictor/static_cast<double>(grid.ds_i(i));
         for (arma::uword row = 0; row < num_of_mixture_eq; ++row) {
             const arma::uword k = arma::sub2ind(sz, i, row);
+            // Hancock half step. It differences cell i's OWN two extrapolated
+            // fluxes over ds_i -- i.e. it applies the pressure gradient -- so it
+            // must apply the source that balances that gradient in the same
+            // stage. Omitting it left the half state of a hydrostatic column
+            // with a spurious upward dt*|g| velocity, which the corrector then
+            // reconstructed into every face: that, not the numerical flux, was
+            // the dominant discrete hydrostatic defect of the release scheme.
             predicted(k) = static_cast<float>(
                 static_cast<double>(state(k))
-                - scale*(fl_iph.flux(k) - fr_imh.flux(k)));
+                - scale*(fl_iph.flux(k) - fr_imh.flux(k))
+                + dt_predictor*source(k));
         }
     }
     MixtureField& decoded_predicted = scratch.predicted;
@@ -680,8 +697,6 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
         }
     }
 
-    Work& source = scratch.source;
-    build_source(grid, state, decoded, source);
     Vec& rhs = scratch.rhs;
     rhs.set_size(grid.n_mixture_state);
     for (arma::uword i = 0; i < grid.ns; ++i) {
@@ -696,7 +711,6 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
                 + source(k));
         }
     }
-    if (grid.eq_wb && !grid.eq_residual.is_empty()) rhs -= grid.eq_residual;
     if (grid.capture_face_flux)
         capture_face_flux(grid, w, wl_iph, wr_iph, fl_iph, fr_iph, a_iph,
                           flux_iph, r, r_ip1, lp_r, lm_rip1);

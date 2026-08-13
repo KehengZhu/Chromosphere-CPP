@@ -196,8 +196,6 @@ struct MixtureRhsScratch {
 struct MixtureFaceFluxCapture {
     // cell-centred (length ns): the decoded state the reconstruction saw
     std::vector<double> rho_cell, v_cell, T_cell;
-    // frozen equilibrium-reference residual, total-mass row (0 when eq_wb is off)
-    std::vector<double> eq_residual_mass;
     // one-sided reconstructed face states at i+1/2 (L = from cell i, R = cell i+1)
     std::vector<double> rho_L, rho_R, v_L, v_R, T_L, T_R, cs_L, cs_R;
     // Authoritative total pressure of the same corrector face states, rebuilt
@@ -216,7 +214,7 @@ struct MixtureFaceFluxCapture {
 
     void resize(arma::uword ns) {
         std::vector<double>* all[] = {
-            &rho_cell,&v_cell,&T_cell,&eq_residual_mass,
+            &rho_cell,&v_cell,&T_cell,
             &rho_L,&rho_R,&v_L,&v_R,&T_L,&T_R,&cs_L,&cs_R,
             &p_cell,&p_L,&p_R,
             &a_face,&f_central,&f_diff,&f_total,

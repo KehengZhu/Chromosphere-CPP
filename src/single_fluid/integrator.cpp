@@ -525,22 +525,6 @@ double mixture_conduction_residual_max(const Grid& grid, const Vec& before,
     return maximum;
 }
 
-namespace {
-
-// Equilibrium-reference well-balancing: on the first step cache
-// R_eq = RHS(eq_state) so it can be subtracted every step, making eq_state an
-// exact discrete fixed point. Computed here (not inside the const RHS) because
-// it mutates grid; the empty() guard inside the RHS keeps this capture itself
-// uncorrected.
-void ensure_eq_residual(Grid& grid, double dt) {
-    if (grid.eq_wb && grid.eq_residual.is_empty() && !grid.eq_state.is_empty()) {
-        const MixtureField reference = mixture_decode(grid, grid.eq_state);
-        grid.eq_residual = mixture_rhs_explicit(grid, grid.eq_state, reference, dt);
-    }
-}
-
-} // namespace
-
 // ============================================================================
 // Release timestep
 // ============================================================================
@@ -551,7 +535,6 @@ Vec mixture_advance(Grid& grid, const Vec& state, const Vec& dt_i,
         throw std::logic_error("the mixture solver requires a Gamma1 table");
     decoded.require_matches(grid, state);
     const double dt = dt_i(0);   // uniform by mixture_timestep construction
-    ensure_eq_residual(grid, dt);
 
     Vec next = state;
     {

@@ -16,8 +16,8 @@ Definitions (index i is the UPPER face i+1/2 of cell i; ds = Delta h):
     f_central  = 0.5[(rho v)_L + (rho v)_R]
     f_diff     = -0.5 a (rho_R - rho_L)
     f_total    = f_central + f_diff                   the production face flux
-    f_ref      = f_total at t = 0                     frozen eq_wb reference
-    f_eff      = f_total - f_ref                      what continuity SEES
+    f_ref      = f_total at t = 0                     t = 0 baseline flux
+    f_eff      = f_total - f_ref                      CHANGE in the flux since t=0
     d_diff     = f_diff - f_diff(ref)
 
     A_x  = std(x) / |mean(f_eff)|      (for x = d_diff)  or  std(x)/|mean(x)|
@@ -143,9 +143,6 @@ def face_metrics(record, ref, ds_km, win):
         # sanity
         "split_max_relerr": float(np.max(
             np.abs(f_cen + f_dif - f_tot) / np.maximum(np.abs(f_tot), 1e-300))),
-        "eq_ref_max_relerr": float(np.max(np.abs(
-            (-np.diff(ref["f_total"]) / ds) - ref["eq_residual_mass"][1:]
-        )) / max(np.mean(np.abs(ref["eq_residual_mass"][1:])), 1e-300)),
     }
     out.update(ripple_geometry(km_cell[mc], Mw, ds_km))
     return out
@@ -400,7 +397,7 @@ def render(result, runs, ds, args):
     hdr = f"{'field':<22}" + "".join(fmt(f"ns={r['ns']}") for r in runs)
     L.append(hdr)
     L.append("-" * len(hdr))
-    for f in ("ns", "ds_km", "uniform_mesh", "mc3", "beta", "eq_wb", "first_cell"):
+    for f in ("ns", "ds_km", "uniform_mesh", "mc3", "beta", "first_cell"):
         L.append(f"{f:<22}" + "".join(fmt(r["meta"].get(f, r.get(f, "-"))) for r in runs))
     L.append(f"{'n_faceflux_records':<22}" + "".join(fmt(r["n_records"]) for r in runs))
     L.append(f"{'cells in window':<22}"
@@ -454,7 +451,6 @@ def render(result, runs, ds, args):
             ("lambda_peak [cells]", "lambda_peak_cells"),
             (None, None),
             ("split_max_relerr", "split_max_relerr"),
-            ("eq_ref_max_relerr", "eq_ref_max_relerr"),
         ]
         conv = result["convergence"][key]
         for name, field in rows:

@@ -17,7 +17,7 @@ import numpy as np
 TARGETS = (500.0, 1000.0, 2000.0, 4000.0)
 WINDOW = (2130.0, 2150.0)
 FF_COLUMNS = ("cell_km face_km rho_cell v_cell T_cell rho_L rho_R v_L v_R T_L T_R "
-              "cs_L cs_R a_face f_central f_diff f_total eq_residual_mass "
+              "cs_L cs_R a_face f_central f_diff f_total "
               "r_rho phi_plus_rho r_ip1_rho phi_minus_rho r_v phi_plus_v "
               "r_T phi_plus_T").split()
 # RELEASE `.outercond` layout (physical conduction only).

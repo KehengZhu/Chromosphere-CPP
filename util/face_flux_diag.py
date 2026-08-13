@@ -16,13 +16,14 @@ Definitions used below (index i = the UPPER face i+1/2 of cell i):
     f_total[i]   = f_central[i] + f_diff[i]                 what continuity differences
     R_rho[i]     = -( f_total[i] - f_total[i-1] ) / ds      continuity residual
 
-    f_ref[i]     = f_total[i] at t = 0                      frozen eq_wb reference flux
-    f_eff[i]     = f_total[i] - f_ref[i]                    the flux the update SEES
+    f_ref[i]     = f_total[i] at t = 0                      t = 0 baseline flux
+    f_eff[i]     = f_total[i] - f_ref[i]                    CHANGE in the flux since t=0
     R_eff[i]     = -( f_eff[i] - f_eff[i-1] ) / ds
 
-`f_eff` matters because the scenario runs with `eq_wb = 1`: the explicit RHS has
-the frozen reference residual subtracted, so the discrete steady state is
-`f_eff = const`, NOT `f_total = const`. Both are reported.
+`f_eff` is a diagnostic baseline subtraction, not something the solver does: the
+release RHS differences `f_total` alone. Removing the (large, nearly hydrostatic)
+t = 0 flux is simply the cleanest way to see how the transport has CHANGED since
+the initial condition. Both are reported.
 
 Roughness of a series x over a window is `mean|D2 x| / mean|x|` with D2 the second
 difference -- the same normalised-curvature definition used in
@@ -39,20 +40,32 @@ import sys
 import numpy as np
 
 COLUMNS = ("cell_km face_km rho_cell v_cell T_cell rho_L rho_R v_L v_R T_L T_R "
-           "cs_L cs_R a_face f_central f_diff f_total eq_residual_mass "
+           "cs_L cs_R a_face f_central f_diff f_total "
            "r_rho phi_plus_rho r_ip1_rho phi_minus_rho r_v phi_plus_v "
            "r_T phi_plus_T").split()
 
 
 def read_faceflux(path):
-    """-> (meta dict, [(t, step, {column: array}), ...])."""
+    """-> (meta dict, [(t, step, {column: array}), ...]).
+
+    The column names come from the sidecar's own `# columns=` header line; the
+    writer has gained columns over time (p_cell/p_L/p_R), so COLUMNS is only the
+    fallback for older files that predate the header. Every name in COLUMNS must
+    still be present.
+    """
     meta, records = {}, []
+    columns = list(COLUMNS)
     cur_t = cur_step = None
     rows = []
     with open(path) as fh:
         for line in fh:
             if line.startswith("#"):
-                if line.startswith("# t "):
+                if line.startswith("# columns="):
+                    columns = line.split("=", 1)[1].split()
+                    missing = [c for c in COLUMNS if c not in columns]
+                    if missing:
+                        raise SystemExit(f"{path}: sidecar lacks column(s) {missing}")
+                elif line.startswith("# t "):
                     if rows:
                         records.append((cur_t, cur_step, rows))
                         rows = []
@@ -70,9 +83,9 @@ def read_faceflux(path):
     out = []
     for t, step, rows in records:
         arr = np.asarray(rows, dtype=float)
-        if arr.shape[1] != len(COLUMNS):
-            raise SystemExit(f"{path}: expected {len(COLUMNS)} columns, got {arr.shape[1]}")
-        out.append((t, step, {name: arr[:, k] for k, name in enumerate(COLUMNS)}))
+        if arr.shape[1] != len(columns):
+            raise SystemExit(f"{path}: expected {len(columns)} columns, got {arr.shape[1]}")
+        out.append((t, step, {name: arr[:, k] for k, name in enumerate(columns)}))
     return meta, out
 
 
@@ -111,8 +124,8 @@ def analyse(label, meta, record, ref, ds_km, win, top_cells):
     f_tot, f_cen, f_dif = c["f_total"], c["f_central"], c["f_diff"]
     f_ref = ref["f_total"]
     f_eff = f_tot - f_ref
-    # eq_wb-corrected split: which HALF of the Rusanov flux carries the structure
-    # that survives the reference subtraction?
+    # baseline-corrected split: which HALF of the Rusanov flux carries the
+    # structure that survives the t = 0 reference subtraction?
     d_cen = f_cen - ref["f_central"]
     d_dif = f_dif - ref["f_diff"]
 
@@ -192,11 +205,6 @@ def analyse(label, meta, record, ref, ds_km, win, top_cells):
     # sanity: the captured split must reproduce the captured total
     out["split_max_relerr"] = float(np.max(
         np.abs(f_cen + f_dif - f_tot) / np.maximum(np.abs(f_tot), 1e-300)))
-    # sanity: is the t=0 flux really the frozen eq_wb reference? (its divergence
-    # must equal the captured eq_residual mass row)
-    out["eq_ref_max_relerr"] = float(np.max(np.abs(
-        (-np.diff(ref["f_total"]) / ds) - ref["eq_residual_mass"][1:]
-    )) / max(np.mean(np.abs(ref["eq_residual_mass"][1:])), 1e-300))
     return out
 
 
@@ -277,8 +285,7 @@ def main(argv=None):
     print("\n=== sanity ===")
     for r in results:
         print(f"{r['label']:<12} t={r['t']:<10.4f} step={r['step']:<7d} "
-              f"split_max_relerr={r['split_max_relerr']:.3e} "
-              f"eq_ref_max_relerr={r['eq_ref_max_relerr']:.3e}")
+              f"split_max_relerr={r['split_max_relerr']:.3e}")
 
     print(f"\n=== ripple peaks in {args.window[0]}-{args.window[1]} km ===")
     for r in results:
@@ -337,7 +344,7 @@ def make_plot(series, path, win, top_cells):
     axes[0].set_ylabel(r"cell $\rho V$  [kg m$^{-2}$ s$^{-1}$]")
     axes[1].set_ylabel(r"face $F^\rho$: total / central")
     axes[2].set_ylabel(r"face $F^\rho_{\rm diff}$")
-    axes[3].set_ylabel(r"$F^\rho_{\rm total}-F^\rho_{\rm ref}$  (what eq_wb sees)")
+    axes[3].set_ylabel(r"$F^\rho_{\rm total}-F^\rho_{\rm ref}$  (change since $t=0$)")
     axes[3].set_xlabel("height [km]")
     for ax in axes:
         ax.axvspan(win[0], win[1], color="0.85", zorder=0)

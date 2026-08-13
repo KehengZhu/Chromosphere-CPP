@@ -1,5 +1,8 @@
 # Numerical mass-flux artifact near 200–250 km in the `iso_t22k` run
 
+> **Partly superseded (see `docs/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
+
+
 ## Purpose
 
 This note summarizes the small positive mass-flux feature near 200–250 km in the run used to generate

@@ -1175,7 +1175,10 @@ Metric definitions (also in the script docstring): index `i` is the UPPER face
 `f_diff = -0.5 a (rho_R - rho_L)`; `f_total = f_central + f_diff` (read from the
 production flux, not recomputed); `f_ref` = `f_total` at t=0, i.e. the frozen
 `eq_wb` reference flux; **`f_eff = f_total - f_ref` is the flux the update actually
-sees, because `eq_wb` subtracts the reference residual from the continuity rows**;
+sees, because `eq_wb` subtracts the reference residual from the continuity rows**
+(HISTORICAL: true for the runs catalogued here, which predate the reference-free
+release; `eq_wb` has since been retired, so for new runs `f_eff` is a diagnostic
+baseline only -- see `docs/reference_free_release_recap.md`);
 `R = -(F[i]-F[i-1])/ds`; `roughness(x) = mean|D2 x| / mean|x|` (same definition as
 `util/upper_bc_decouple_diag.py`).
 
@@ -1847,3 +1850,63 @@ scripts/run_chromo_realtime.sh outputs/model_column/eqctl_lnp_roe_N1000_1000s.tx
   full no-ionization model_column - 20.0 no-cooling \
   > outputs/model_column/eqctl_lnp_roe_N1000_1000s.console.log 2>&1
 ```
+
+### `model_column/*_mass_flux.mp4` — cell-centred `rho V` vs the face mass flux
+
+Read-only comparison movie for the release finite-volume mass transport:
+cell-centred `rho V` against the production face mass flux and its
+equilibrium-reference decomposition. Everything is read from the
+`<run>.faceflux` sidecar (`CHROMO_FACE_FLUX_DIAG=1`, release solver only), so all
+four series come from the SAME `mixture_rhs_explicit` evaluation at the same step
+and the panels are synchronous by construction.
+
+Definitions (index `i` = the UPPER face `i+1/2` of cell `i`; see also the
+face-flux decomposition section above): `rhoV_cell = rho_cell * v_cell` plotted at
+the cell centres; `f_total` = the production numerical face mass flux (Roe here,
+Rusanov if selected); `f_ref` = `f_total` at `t = 0`, a **diagnostic baseline**;
+`f_eff = f_total - f_ref` = the change in face mass transport since initialization.
+Since the reference-free release (`docs/reference_free_release_recap.md`) the solver
+subtracts nothing — `f_total` is what the update sees — so `f_ref`/`f_eff` are now
+purely an analysis convenience for separating the evolving transport from the
+(round-off-level) initial hydrostatic flux. Older runs in this catalog that predate
+the retirement were produced with `eq_wb = 1`, where `f_eff` *was* what the update
+saw; their captions are left as recorded.
+
+Layout: 2x2, left column = full captured column, right column = top zoom
+(default 2100 km -> domain top), top row = cell `rho V`, bottom row = `f_total`
+(solid blue) / `f_ref` (dashed grey, time-independent) / `f_eff` (solid red). The
+bottom row **repeats** the top row's `rho V` array as a thick light-grey halo drawn
+behind `f_eff` (same curve, same y-scale): agreement shows as a grey fringe around
+the red line, and any cell-vs-face difference shows as separation. **Both rows of
+a column share one y-scale** (same units, comparable magnitude) and the scale is
+fixed over the whole movie, so time and cell-vs-face comparisons are both honest;
+the zoom column carries its own limits. The 2130--2150 km release analysis window
+is shaded, and a metrics box reports the window mean `rho V`, mean `f_eff`, and the
+`roughness(rho V)/roughness(f_eff)` ratio.
+
+The startup print is the audit trail: `f_central + f_diff == f_total` (~1e-9) and
+a `rho V` cross-check against the nearest-in-time frame of the main snapshot file
+(`mix::MOM`). The former `-div f_ref == eq_residual_mass` check was removed with the
+`eq_residual_mass` sidecar column when `eq_wb` left the release. The main-output and `.faceflux`
+cadences are independent, so that check reports its own `dt`; it is skipped with a
+message for older dumps whose main file is not a 3-row release state.
+
+Each run also gets a static last-frame `*_mass_flux_final.png` (same layout).
+
+```bash
+# 4000 s Roe + (ln rho, V, ln p) N500 production run (358 captured records)
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_face_mass_flux.py \
+  outputs/model_column/lnp_roe_N500_4000s.txt \
+  visualization/model_column/lnp_roe_N500_4000s_mass_flux.mp4 --fps 20
+
+# current release configuration, 100 s smoke capture (11 records)
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_face_mass_flux.py \
+  outputs/model_column/release_roe_lnp_N500_100s.txt \
+  visualization/model_column/release_roe_lnp_N500_100s_mass_flux.mp4 --fps 4
+```
+
+Options: `--zoom LO HI`, `--window LO HI`, `--stride N` / `--max-frames N`
+(or `ANIM_STRIDE` / `ANIM_MAX_FRAMES`), `--faceflux PATH` for a sidecar that does
+not sit next to the run, `--final-figure PATH` / `--no-final-figure`,
+`--no-check-output`. A sidecar whose first record is not `t = 0` is rejected, since
+`f_ref` is undefined without it.

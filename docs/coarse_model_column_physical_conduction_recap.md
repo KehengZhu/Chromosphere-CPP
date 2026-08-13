@@ -1,5 +1,8 @@
 # Coarse `model_column` with physical-face conduction
 
+> **Partly superseded (see `docs/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
+
+
 ## Status
 
 The reduced Gamma/Saha `model_column` now uses the validated coarse physical-conduction configuration below as its canonical release model. It removes the dominant grid-dependent artificial thermal drive while using a substantially coarser mesh.

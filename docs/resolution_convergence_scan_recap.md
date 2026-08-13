@@ -1,5 +1,8 @@
 # Resolution convergence scan: does the top-region `rho V` ripple vanish as `Delta h -> 0`?
 
+> **Partly superseded (see `docs/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
+
+
 Follow-up to `docs/top_ripple_face_flux_diagnosis.md` (which established Case A: the ripple lives in cell-centred `rho V`, not in the conserved face flux) and `docs/upper_bc_hydro_temperature_decoupling_recap.md` (which established that the fixed hydro ghost temperature explains the *last cell* only). This stage ran the one experiment those two recaps identified as the cheapest decisive next test, and nothing else. No production numerical scheme was modified.
 
 ## Headline

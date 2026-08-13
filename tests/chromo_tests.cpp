@@ -1867,27 +1867,68 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
                    th.internal_energy+0.5*th.rho*std::pow(
                        g(mix::MOM)/th.rho, 2)+th.rho*phis[j], 3e-6);
     }
-    Vec evolved = state;
+    // ---- reference-free hydrostatic regression, at the RELEASE resolution ----
+    // The release subtracts no frozen equilibrium residual (grid.eq_wb is false
+    // on the gamma path), so this is a genuine test of the discretization: the
+    // initialized Saha-HSE column has to stay at rest on its own. That makes the
+    // achievable bound resolution dependent, which is why the evolution runs on
+    // a fresh coarse-equivalent N=500 grid -- refined to 661 cells, the shipped
+    // release mesh -- instead of the 48-cell grid used for the structural checks
+    // above. Measured on that mesh after 5 steps at the production CFL 0.50:
+    //   max|V| = 5.9e-3 m/s, max|rho u| = 5.4e-13, ||dU||/||U|| = 9.2e-8
+    // (5.8e-3 / 4.2e-13 / 5.1e-8 at CFL 0.25 -- the residual is a quasi-steady
+    // balance here, not simply proportional to dt). The bounds below carry
+    // 3-5x headroom on each. For scale, the conduction-
+    // driven evaporation this model exists to study runs at 15-40 m/s, and the
+    // t=0 face mass-flux defect of this same configuration sits ~1.3x above the
+    // float32 round-off floor of the stored state. On a 14x coarser grid the
+    // same max|V| is ~0.76 m/s, so do NOT reuse these numbers off the release
+    // mesh (docs/reference_free_release_recap.md).
+    // Built through make_scenario so the run really is the release preset
+    // (1600-2153 km, outer R4 refinement, 22000 K wall, decoupled hydro ghost T),
+    // not a bare uniform grid with library defaults, and at the VALIDATED
+    // PRODUCTION CFL 0.50 rather than the solver's conservative 0.25 fallback:
+    // the predictor defect this regression exists to catch grows like dt, so an
+    // automated guard has to run at the timestep production actually uses.
+    clear_model_column_release_defaults_env();
+    Scenario release_sc = make_scenario("model_column", "");
+    setenv("ISO_HEAT_FLUX", "0", 1);   // conduction OFF: this is the HSE leg
+    Grid release_grid;
+    release_grid.init(release_sc.peek_ns(), 0.50f);
+    release_grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
+    const Vec release_state = release_sc.ic(release_grid);
+    EXPECT_TRUE(release_grid.ns == 661u);      // N=500 coarse-equivalent, R4 outer
+    EXPECT_TRUE(!release_grid.eq_wb);          // reference-free release
+    EXPECT_TRUE(release_grid.eq_residual.is_empty());
+    const auto release_sz = arma::size(release_grid.ns, num_of_mixture_eq);
+    Vec evolved = release_state;
     for (int step = 0; step < 5; ++step) {
-        model_column_update_bc(grid, evolved);
-        const MixtureField field = mixture_decode(grid, evolved);
-        const Vec dt = mixture_timestep(grid, evolved, field);
-        evolved = mixture_advance(grid, evolved, dt, field);
-        grid.sim_time += dt(0);
+        release_sc.update_bc(release_grid, evolved);
+        const MixtureField field = mixture_decode(release_grid, evolved);
+        const Vec dt = mixture_timestep(release_grid, evolved, field);
+        evolved = mixture_advance(release_grid, evolved, dt, field);
+        release_grid.sim_time += dt(0);
     }
     EXPECT_TRUE(!evolved.has_nan());
     double max_velocity = 0.0, max_total_momentum = 0.0;
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const double rho = evolved(arma::sub2ind(sz, i, mix::RHO));
-        const double momentum = evolved(arma::sub2ind(sz, i, mix::MOM));
+    for (arma::uword i = 0; i < release_grid.ns; ++i) {
+        const double rho = evolved(arma::sub2ind(release_sz, i, mix::RHO));
+        const double momentum = evolved(arma::sub2ind(release_sz, i, mix::MOM));
         max_velocity = std::max(max_velocity, std::abs(momentum/rho));
         max_total_momentum = std::max(max_total_momentum, std::abs(momentum));
     }
-    EXPECT_TRUE(max_velocity < 1.0e-3);
-    EXPECT_TRUE(max_total_momentum < 1.0e-7);
-    const double relative_state_change = arma::norm(evolved-state, 2)
-                                       / arma::norm(state, 2);
-    EXPECT_NEAR(relative_state_change, 0.0, 1e-4);
+    const double relative_state_change = arma::norm(evolved-release_state, 2)
+                                       / arma::norm(release_state, 2);
+    std::cout << "        [reference-free HSE @ N500/" << release_grid.ns
+              << " cells] max|V|=" << max_velocity
+              << " m/s  max|rho u|=" << max_total_momentum
+              << "  ||dU||/||U||=" << relative_state_change << '\n';
+    EXPECT_TRUE(max_velocity < 2.0e-2);
+    EXPECT_TRUE(max_total_momentum < 2.0e-12);
+    EXPECT_NEAR(relative_state_change, 0.0, 5e-7);
+    // make_scenario installs the release env preset process-wide; drop it again
+    // so the following tests keep their own configurations.
+    clear_model_column_release_defaults_env();
     unsetenv("ISO_TWO_FLUID"); unsetenv("ISO_IONIZATION");
     unsetenv("ISO_HEAT_FLUX"); unsetenv("ISO_COOLING");
     unsetenv("ISO_CORONA"); unsetenv("ISO_TRAC");
@@ -2055,9 +2096,8 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
 
     // ---- (8) well-balancedness: BC(q_ref) = q_g,ref in decoupled mode --------
     // The reference IC is V=0 and hydrostatic, so T_top = T_top,ref there and the
-    // decoupled ghost lands on the same equilibrium rung. eq_wb freezes the residual
-    // under the NEW boundary, so the column must still hold V=0 to the same order as
-    // baseline, with no acoustic launch off the top.
+    // decoupled ghost lands on the same equilibrium rung, so the column must still
+    // hold V=0 to the same order as baseline, with no acoustic launch off the top.
     {
         auto max_speed_after_steps = [&](bool decouple) {
             Grid grid;
@@ -2131,14 +2171,13 @@ static void test_face_flux_capture_matches_production_continuity() {
         scale = std::max(scale, std::abs(c.f_total[i])/grid.ds_i(i));
     }
     // (b) −(F_{i+1/2} − F_{i−1/2})/Δs, with F_{i−1/2} taken as the PREVIOUS cell's
-    // upper face (the scheme is telescoping in the interior), plus the frozen eq_wb
-    // residual, must reproduce the production continuity rows. B ≡ 1 here and
-    // continuity carries no source, so nothing else may appear.
+    // upper face (the scheme is telescoping in the interior), must reproduce the
+    // production continuity rows on its own. B ≡ 1 here and continuity carries no
+    // source, so nothing else may appear.
     for (arma::uword i = 1; i < ns; ++i) {
         const double produced =
             static_cast<double>(rhs_off(arma::sub2ind(sz, i, mix::RHO)));
-        const double from_faces = -(c.f_total[i] - c.f_total[i-1])/grid.ds_i(i)
-                                - c.eq_residual_mass[i];
+        const double from_faces = -(c.f_total[i] - c.f_total[i-1])/grid.ds_i(i);
         worst_continuity = std::max(worst_continuity,
             std::abs(from_faces - produced)/std::max(scale, 1e-30));
     }
@@ -2259,8 +2298,7 @@ static void test_roe_local_face_flux_and_projection() {
     for (arma::uword i = 1; i < ns; ++i) {
         const double produced =
             static_cast<double>(rhs_roe(arma::sub2ind(sz,i,mix::RHO)));
-        const double from_faces = -(c.f_total[i]-c.f_total[i-1])/grid.ds_i(i)
-                                - c.eq_residual_mass[i];
+        const double from_faces = -(c.f_total[i]-c.f_total[i-1])/grid.ds_i(i);
         rhs_scale = std::max(rhs_scale,std::abs(c.f_total[i])/grid.ds_i(i));
         worst_continuity = std::max(worst_continuity,
             std::abs(from_faces-produced)/std::max(rhs_scale,1e-30));

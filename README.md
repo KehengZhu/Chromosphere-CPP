@@ -8,7 +8,7 @@ The production configuration (`model_column`) is a **single-fluid field-aligned 
 
 | | |
 | --- | --- |
-| Code reference | [docs/doxygen/html/index.html](docs/doxygen/html/index.html) — prebuilt and committed, no install needed |
+| Code reference | **[kehengphysics.site/docs/chromosphere/](https://kehengphysics.site/docs/chromosphere/)** — physics model, numerics, scenarios, configuration, I/O formats, validation |
 | Write-up (current release) | [docs/chromosphere_paper.pdf](docs/chromosphere_paper.pdf) |
 | Write-up (engineering record) | [docs/chromosphere_writeup.pdf](docs/chromosphere_writeup.pdf) |
 | Reference papers | `docs/supporting-papers/` |
@@ -145,20 +145,20 @@ outputs/  visualization/                  run output and figures, per scenario
 
 ## Documentation
 
-The code reference is committed prebuilt at `docs/doxygen/html/index.html`, so reading it needs nothing installed — open that file from a clone, or browse it on GitHub Pages if the repository has Pages enabled.
+The code reference is published at **https://kehengphysics.site/docs/chromosphere/** — no sign-in, nothing to install. The Doxyfile sets `SOURCE_BROWSER = NO` and `VERBATIM_HEADERS = NO`, so the site carries the API reference and the narrative pages but **no verbatim source** from this private repository.
 
-To rebuild it after changing the code:
-
-```sh
-brew install doxygen             # or: sudo apt-get install doxygen
-scripts/build_docs.sh --open
-```
-
-Because the generated HTML is tracked, it has to be rebuilt and staged alongside any change to a documented source. Install the hook once per clone and that happens automatically:
+`docs/doxygen/html/` is a gitignored build artifact — the site is the only published copy, so it has to be refreshed when the code changes. Build it locally, or build and publish:
 
 ```sh
-scripts/install_hooks.sh
+brew install doxygen                 # or: sudo apt-get install doxygen
+scripts/build_docs.sh --open         # build and open it in a browser
+scripts/publish_docs.sh              # build if needed, then push to the site
+scripts/publish_docs.sh --dry-run    # show what would change
 ```
+
+**When you change documented behavior, update the narrative pages in `docs/doxygen/pages/` too** — Doxygen regenerates the API listings from the sources, but it cannot update prose, so that is the part that goes stale. Then rebuild and publish. `scripts/install_hooks.sh` installs a pre-commit hook that rebuilds and rejects the commit on any Doxygen warning; it deliberately does not publish for you.
+
+The server tree is `/srv/www/kehengphysics.site/docs/`, outside `/var/www/wordpress`, and documents itself in a `README.md` at its root: `docs/index.html` is the hand-edited landing page, `docs/chromosphere/` is the generated reference, and the serving config is the single file `/etc/nginx/snippets/kehengphysics-docs.conf`.
 
 The write-up PDFs in `docs/` are refreshed the same way, by a `latexmk` hook that calls `scripts/sync_writeup_pdf.sh` whenever `main.tex` or `paper.tex` is recompiled.
 

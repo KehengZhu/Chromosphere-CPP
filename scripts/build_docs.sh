@@ -5,7 +5,8 @@
 #   scripts/build_docs.sh --open     also open the result in the default browser
 #   scripts/build_docs.sh --strict   exit non-zero if Doxygen emitted any warning
 #
-# Output:  docs/doxygen/html/index.html   (gitignored)
+# Output:  docs/doxygen/html/index.html   (gitignored build artifact; publish it
+#          with scripts/publish_docs.sh)
 # Warnings: docs/doxygen/doxygen-warnings.log
 #
 # Doxygen must run from the repository root — every path in the Doxyfile is
@@ -34,13 +35,17 @@ if ! command -v doxygen >/dev/null 2>&1; then
 fi
 
 echo "build_docs: doxygen $(doxygen --version)"
+
+# Wipe the output tree first. Doxygen overwrites files but never deletes them,
+# so anything it no longer generates lingers -- which is how disabling
+# SOURCE_BROWSER once left 34 stale *_source.html listings in place, ready to be
+# published. The tree is tracked in git, so a failed build is recoverable with
+# `git checkout -- docs/doxygen/html`.
+rm -rf docs/doxygen/html
 doxygen docs/doxygen/Doxyfile
 
-# docs/doxygen/html/ is tracked so the reference is browsable from the
-# repository and servable by GitHub Pages. Pages runs Jekyll by default, which
-# would drop the files and directories Doxygen names with a leading underscore;
-# .nojekyll turns that off. Doxygen overwrites rather than wipes the output
-# directory, but recreate it unconditionally so a clean build cannot lose it.
+# Harmless belt-and-braces for any static host that runs Jekyll, which would
+# drop the files and directories Doxygen names with a leading underscore.
 touch docs/doxygen/html/.nojekyll
 
 log="docs/doxygen/doxygen-warnings.log"

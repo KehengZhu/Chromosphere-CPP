@@ -1,9 +1,11 @@
 #!/bin/sh
-# Keep the committed Doxygen reference in sync with the sources it documents.
+# Gate commits that change documented sources on a clean Doxygen build.
 #
-# docs/doxygen/html/ is tracked so the reference is browsable straight from the
-# repository and servable by GitHub Pages. That only works if it is rebuilt
-# whenever the code or the narrative pages change, which is what this hook does.
+# docs/doxygen/html/ is NOT tracked (see .gitignore) — the browsable copy is
+# published to https://kehengphysics.site/docs/chromosphere/ with
+# scripts/publish_docs.sh. So this hook no longer stages anything. Its job is to
+# catch the one thing that cannot be fixed after the fact: a new public entity
+# committed with no documentation, which Doxygen reports as a warning.
 #
 # Install with:  scripts/install_hooks.sh
 # Skip once with: git commit --no-verify
@@ -29,13 +31,13 @@ staged=$(git diff --cached --name-only --diff-filter=ACMR -- \
 [ -z "$staged" ] && exit 0
 
 if ! command -v doxygen >/dev/null 2>&1; then
-    echo "pre-commit: doxygen is not installed, so docs/doxygen/html/ cannot be" >&2
-    echo "            refreshed for this commit. Install it (brew install doxygen)" >&2
+    echo "pre-commit: doxygen is not installed, so the reference cannot be" >&2
+    echo "            checked for this commit. Install it (brew install doxygen)" >&2
     echo "            or run: git config chromo.docs-hook false" >&2
     exit 1
 fi
 
-echo "pre-commit: documentation inputs changed, rebuilding the Doxygen reference"
+echo "pre-commit: documentation inputs changed, checking the Doxygen build"
 if ! scripts/build_docs.sh >/dev/null 2>&1; then
     echo "pre-commit: scripts/build_docs.sh failed. Run it directly to see why." >&2
     exit 1
@@ -51,10 +53,5 @@ if [ -s "$log" ]; then
     exit 1
 fi
 
-git add docs/doxygen/html
-
-if git diff --cached --quiet -- docs/doxygen/html; then
-    echo "pre-commit: reference already current"
-else
-    echo "pre-commit: refreshed docs/doxygen/html and added it to this commit"
-fi
+echo "pre-commit: reference builds clean."
+echo "pre-commit: remember to publish it after this commit:  scripts/publish_docs.sh"

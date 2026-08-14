@@ -8,6 +8,30 @@ Changes to release physics, governing equations, thermodynamics, numerics, bound
 
 Keep `paper.tex` concise and current-release-only. Use `main.tex` for the deeper engineering record and clearly label inactive, experimental, historical, retired, and planned material. Update only the document or documents whose role is affected, avoid configuration mixing, and do not commit or push either repository unless explicitly requested.
 
+The compiled PDFs are mirrored into the main repository automatically: `main.pdf` → `docs/chromosphere_writeup.pdf` and `paper.pdf` → `docs/chromosphere_paper.pdf`. `docs/writeup-overleaf/latex-build/` is gitignored in both repositories, so those two copies are the only tracked PDFs of the writeup, and they are the ones to link from `README.md` and the Doxygen pages. The sync is a `$success_cmd` hook in `docs/writeup-overleaf/.latexmkrc` that calls `scripts/sync_writeup_pdf.sh`, so every successful `latexmk` run refreshes them; the hook no-ops where the main repository is absent, e.g. when Overleaf compiles the same sources. Do not delete the hook when editing `.latexmkrc`, and run `scripts/sync_writeup_pdf.sh` by hand if a PDF was produced some other way.
+
+## Code documentation
+
+The API reference is Doxygen: config in `docs/doxygen/Doxyfile`, narrative pages in `docs/doxygen/pages/`, built with `scripts/build_docs.sh`. `README.md` is deliberately a quick start only — configure, build, choose parameters, run, visualize — and technical detail belongs in the Doxygen pages, not in the README.
+
+**`docs/doxygen/html/` is a gitignored build artifact, not tracked.** The browsable copy is published **publicly, with no authentication** to `https://kehengphysics.site/docs/chromosphere/` by `scripts/publish_docs.sh` (rsync over ssh into `/srv/www/kehengphysics.site/docs/chromosphere/`, served by `/etc/nginx/snippets/kehengphysics-docs.conf`, documented by a `README.md` at `/srv/www/kehengphysics.site/`). That is the only published copy and the one `README.md` links, so **a stale site is a stale reference for everyone** — nothing in the repository compensates for forgetting to publish. `publish_docs.sh` builds first if the artifact is missing, so it works from a fresh clone.
+
+### Refresh the reference whenever you change what it documents
+
+This is a required step of the change, not a follow-up. Any change to code, public behavior, configuration, numerics, physics, scenarios, I/O formats, validation, or the writeup triggers all three of:
+
+1. **Update the hand-written narrative pages** in `docs/doxygen/pages/` — `configuration.md`, `numerics.md`, `physics_model.md`, `scenario_reference.md`, `io_formats.md`, `validation.md`, `architecture.md`. Doxygen regenerates the API listings from the sources automatically, but it cannot update prose, so **this is the step that actually goes stale.** Rebuilding alone is not enough. If a change alters the writeup (`paper.tex` / `main.tex`), check whether the same fact is asserted in a narrative page and in the two mirrored PDFs the pages link.
+2. **Rebuild** with `scripts/build_docs.sh`, warning-free.
+3. **Publish** with `scripts/publish_docs.sh`.
+
+`.githooks/pre-commit` rebuilds and fails the commit on any Doxygen warning, but it deliberately does **not** publish — pushing to a public website is not something a commit should do silently — and it cannot tell whether the prose is current. Publishing and prose are on you. The hook also only exists in clones that have run `scripts/install_hooks.sh` once, so never assume it is active.
+
+**The public site is only safe because the Doxyfile sets `SOURCE_BROWSER = NO` and `VERBATIM_HEADERS = NO`.** This repository is private; those two settings are what keep the generated tree free of verbatim source. Do not turn either on — and do not add any other setting that emits code (`INLINE_SOURCES`, `REFERENCES_LINK_SOURCE`) — without first deciding that publishing the entire source tree to the open internet is acceptable.
+
+Keep the build warning-free. `EXTRACT_ALL` is off and `WARN_IF_UNDOCUMENTED` is on, so a new public entity with no documentation is a warning in `docs/doxygen/doxygen-warnings.log` and the pre-commit hook rejects the commit. Every public entity gets a real statement of what it is, with physical units in square brackets where it has them — not a restatement of its name.
+
+`scripts/build_docs.sh` wipes `docs/doxygen/html/` before every run. Doxygen overwrites files but never deletes them, so output it no longer generates would otherwise linger and still be published — that is exactly how disabling `SOURCE_BROWSER` once left 34 stale source listings in place, ready to ship.
+
 ## Output directories
 
 - **Code outputs** (simulation results, data dumps, logs from `chromo_main` / scenarios): save under `outputs/`.

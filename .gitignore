@@ -30,9 +30,10 @@ output_*.log
 *.out
 *.mp4
 
-# Generated Doxygen output. docs/doxygen/html/ is DELIBERATELY TRACKED so the
-# reference is browsable straight from the repository (and servable by GitHub
-# Pages) without anyone having to install doxygen. Rebuild it with
-# scripts/build_docs.sh before committing — the pre-commit hook in .githooks/
-# does that automatically once you run scripts/install_hooks.sh.
+# Generated Doxygen output. NOT tracked: it is a build artifact of the sources
+# next to it, and committing 448 regenerated files on every documentation change
+# bloated the history for no benefit. The browsable copy lives at
+#   https://kehengphysics.site/docs/chromosphere/
+# published with scripts/publish_docs.sh. Build locally with scripts/build_docs.sh.
+docs/doxygen/html/
 docs/doxygen/doxygen-warnings.log

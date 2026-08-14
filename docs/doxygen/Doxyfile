@@ -90,16 +90,25 @@ SHOW_NAMESPACES        = YES
 FORCE_LOCAL_INCLUDES   = NO
 
 #---------------------------------------------------------------------------
-# Source browsing — the physics rationale often lives inside the function.
+# Source browsing — OFF.
+#
+# The generated reference is published publicly at
+# https://kehengphysics.site/docs/chromosphere/ while this repository is
+# private, so Doxygen must not emit verbatim source. SOURCE_BROWSER=NO drops
+# the *_source.html listings and VERBATIM_HEADERS=NO drops the per-class header
+# dumps. The call/caller relations stay on but no longer link to source.
+#
+# Turning these back on republishes the entire source tree on the next
+# scripts/publish_docs.sh — do not flip them without deciding that first.
 #---------------------------------------------------------------------------
 
-SOURCE_BROWSER         = YES
+SOURCE_BROWSER         = NO
 INLINE_SOURCES         = NO
 STRIP_CODE_COMMENTS    = NO
 REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
-REFERENCES_LINK_SOURCE = YES
-VERBATIM_HEADERS       = YES
+REFERENCES_LINK_SOURCE = NO
+VERBATIM_HEADERS       = NO
 
 #---------------------------------------------------------------------------
 # Diagnostics

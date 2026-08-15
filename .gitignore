@@ -9,6 +9,17 @@ docs/latex-build/
 # LaTeX build artifacts (LaTeX Workshop / latexmk -outdir) in any latex-build/ subfolder
 **/latex-build/
 .ai-bridge/
+
+# Local convenience symlinks, deliberately untracked: both are meaningful only
+# in this working copy.
+#   SWMF      -> an absolute path outside the repository, so it would dangle in
+#                any other clone.
+#   AGENTS.md -> CLAUDE.md, so agent tools that look for AGENTS.md read the same
+#                instructions. CLAUDE.md is the tracked source of truth; recreate
+#                the link with:  ln -s CLAUDE.md AGENTS.md
+SWMF
+AGENTS.md
+
 __pycache__/
 .venv/
 .vscode/

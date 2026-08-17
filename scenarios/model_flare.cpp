@@ -33,7 +33,7 @@ Vec model_flare_ic(Grid& grid) {
     // reads enable_radiative_cooling to gate q(T)/TRAC, hence the order above.
     Vec xn = model_c7_ic(grid);
 
-    // --- Flare beam-heating driver (docs/explosive_evaporation_plan.md) ------
+    // --- Flare beam-heating driver (docs/studies/evaporation/explosive_evaporation_plan.md) ------
     // Beam energy flux F_e [W/m²]. Default 5×10⁷ W m⁻² = 5×10¹⁰ erg cm⁻² s⁻¹ —
     // Fisher et al. (1985) middle explosive run (well above F_crit ≈ 7×10⁶ W m⁻²,
     // peaks at ~500 km/s). Overridable via FLARE_BEAM_FLUX so the gentle control

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Evolution movie for the corona-as-boundary gentle-evaporation run (model_gentle;
-docs/gentle_evaporation_plan.md, option A). A C7 column extended into a *resolved*
+docs/studies/evaporation/gentle_evaporation_plan.md, option A). A C7 column extended into a *resolved*
 corona (h ≈ 1.0 → ~11.5 Mm), with the coronal conductive flux q(T) imposed at the
 top and ramped to drive gentle conduction-driven evaporation.
 

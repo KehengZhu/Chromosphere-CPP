@@ -7,7 +7,7 @@ smooth and conservative?
 
 All face quantities come from the `<run>.faceflux` sidecar, i.e. a read-only
 copy-out of the PRODUCTION `mixture_rhs_explicit` arrays (see
-`util/face_flux_diag.py` and `docs/top_ripple_face_flux_diagnosis.md`). Nothing
+`util/face_flux_diag.py` and `docs/studies/numerics/top_ripple_face_flux_diagnosis.md`). Nothing
 here re-derives the reconstruction, the limiter or the Riemann solver.
 
 Definitions (index i is the UPPER face i+1/2 of cell i; ds = Delta h):

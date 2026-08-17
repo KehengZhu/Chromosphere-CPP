@@ -43,7 +43,7 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
 
     if (name == "model_c7") {
         sc.peek_ns   = []() -> arma::uword { return 100; };
-        // "New explanation" upper BC (docs/gentle_evaporation_downflow.md):
+        // "New explanation" upper BC (docs/studies/evaporation/gentle_evaporation_downflow.md):
         // well-balanced reconstruction + hydrostatic ghost pressure + imposed
         // TR temperature jump (downward q(T) via the Stage-D Dirichlet ghost-T)
         // + EOS ghost density. tr_jump_bc=true is exclusive to this bare scenario

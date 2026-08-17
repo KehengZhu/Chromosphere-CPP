@@ -223,7 +223,7 @@ Additionally, `CHROMO_FACE_FLUX_DIAG` and `CHROMO_OUTER_COND_DIAG` are rejected 
 
 ## Validated production defaults
 
-`CHROMO_CFL=0.50` is the validated production runtime default for the **reduced `model_column` release configuration only**: coarse-equivalent N = 500, R4 outer refinement, 661 actual cells, the 22,000 K conductive boundary at the physical outer face, and physical conduction only. Evidence: `docs/coarse_model_column_physical_conduction_recap.md`.
+`CHROMO_CFL=0.50` is the validated production runtime default for the **reduced `model_column` release configuration only**: coarse-equivalent N = 500, R4 outer refinement, 661 actual cells, the 22,000 K conductive boundary at the physical outer face, and physical conduction only. Evidence: `docs/studies/conduction/coarse_model_column_physical_conduction_recap.md`.
 
 The hard-coded C++ solver default remains `CHROMO_CFL=0.25` (`chromo_main.cpp` and `Grid::CFL`), 0.25 stays the comparison reference, and **the C++ default must not be changed**. `scripts/run_chromo_realtime.sh` supplies 0.50 as an override-preserving default and only when the scenario argument is exactly `model_column`; every other scenario keeps 0.25 unless `CHROMO_CFL` is given explicitly. Rerun the CFL sweep before trusting 0.50 on different hardware or a materially different model shape.
 

@@ -979,7 +979,7 @@ void apply_coronal_heating_stage(const Grid& grid, Vec& prim_state, float dt) {
 
 // ----------------------------------------------------------------------------
 // Stage E (writeup §5.3): point-implicit hydrogen ionization / recombination,
-// Route B network (docs/photoionization_c7_inversion_plan.md). The local ODE
+// Route B network (docs/studies/eos-ionization/photoionization_c7_inversion_plan.md). The local ODE
 // for f ≡ ρ_i / (ρ_i + ρ_n) under quasi-neutrality (n_e = n_i = f n_tot) is
 //   df/dt = (1-f) P_phot                          [photoionization,    always on]
 //         + f(1-f) n_tot S_CR                     [multilevel collisional, always on]
@@ -1254,7 +1254,7 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i) {
     apply_temperature_stage(grid, prim, dt);
     // Stage D heat conduction. Default-on; the isentropic relaxation experiment
     // (model_column Stage 1) disables it so the adiabatic atmosphere stays a
-    // conduction-free Euler steady state (docs/gentle_evaporation_downflow.md).
+    // conduction-free Euler steady state (docs/studies/evaporation/gentle_evaporation_downflow.md).
     if (grid.enable_conduction) {
         apply_conduction_stage(grid, prim, dt);
     }

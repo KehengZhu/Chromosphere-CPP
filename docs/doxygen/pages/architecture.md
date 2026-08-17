@@ -204,7 +204,7 @@ cmake -S . -B build_omp_f64 -DCMAKE_BUILD_TYPE=Release \
       -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT64=ON
 ```
 
-What it established is recorded in `docs/float32_precision_control_experiment.md` and summarized under Known limitations in @ref validation.
+What it established is recorded in `docs/studies/numerics/float32_precision_control_experiment.md` and summarized under Known limitations in @ref validation.
 
 ### OpenMP
 

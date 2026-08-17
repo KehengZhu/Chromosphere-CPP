@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Plot the imposed coronal conductive-flux ramp q(t) used by model_gentle
-(docs/q_of_T_boundary_condition.md). q(t) = q0 * [1 + (enhance-1) * w(t)] with the
+(docs/studies/boundaries/q_of_T_boundary_condition.md). q(t) = q0 * [1 + (enhance-1) * w(t)] with the
 raised-cosine (Hann) envelope w(t) implemented in scenarios/model_c7.cpp
 (model_c7_update_bc). Defaults reproduce the gentle_v3_evolution run.
 

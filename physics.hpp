@@ -155,7 +155,7 @@ inline Vec coulomb_log_ei(const Vec& n_e, const Vec& T_e) {
 ///   ν_ei = (8√(2π)/3) · m_e^{1/2} e⁴ /(m_p (4πε₀)²) · n_e lnΛ /(k_B T_e)^{3/2}
 ///        ≈ 2.030×10⁻⁴³ · n_e lnΛ /(k_B T_e)^{3/2}   (SI; the bracket evaluated
 /// for hydrogen Z=1). This is the load-bearing decoupling parameter
-/// (docs/electron_temperature_plan.md): ν_ei ∝ n_e T_e^{-3/2} is fast (T_e≈T_i)
+/// (docs/design/electron_temperature_plan.md): ν_ei ∝ n_e T_e^{-3/2} is fast (T_e≈T_i)
 /// in the dense cool chromosphere (~4×10³ s⁻¹) and slow (decoupling) at the hot
 /// tenuous loop-top / flare onset (~4×10⁻² s⁻¹ at n_e=10¹⁵, T_e=10⁶ K), matching
 /// Bradshaw (2006) and Manchester (2012).
@@ -519,7 +519,7 @@ inline Vec radiative_loss_thin(const Grid& /*grid*/, const Vec& n_i,
  *   [t_on, t_on+τ] with cosine ramps of half-width beam_ramp.
  *
  *   This is the standard Fisher/RADYN explosive-evaporation driver expressed as
- *   an interior source term (see docs/explosive_evaporation_plan.md). Explosive
+ *   an interior source term (see docs/studies/evaporation/explosive_evaporation_plan.md). Explosive
  *   evaporation requires beam_flux above the Fisher (1985) threshold
  *   F_crit ≈ 7×10⁶ W m⁻² together with an active radiative sink.
  */

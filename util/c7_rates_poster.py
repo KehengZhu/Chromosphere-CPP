@@ -10,7 +10,7 @@ the presentation: three stacked panels (ionization, recombination,
 photoionization-rate / Route-B closure) on the shared, TR-magnified height axis.
 
 Usage:  python util/c7_rates_poster.py [output.png]
-Default output: docs/poster-shine/web/c7_rates.png
+Default output: docs/posters/2026-07-11-shine/web/c7_rates.png
 """
 import os
 import sys
@@ -134,7 +134,7 @@ axT.set_xticklabels([(f"{T[i]/1e3:.0f} kK" if T[i] >= 2.0e4 else f"{T[i]:.0f} K"
 axT.set_xlabel(r"$T_e$ at selected heights", fontsize=14)
 
 fig.tight_layout()
-out = sys.argv[1] if len(sys.argv) > 1 else "docs/poster-shine/web/c7_rates.png"
+out = sys.argv[1] if len(sys.argv) > 1 else "docs/posters/2026-07-11-shine/web/c7_rates.png"
 os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 fig.savefig(out, dpi=300, bbox_inches="tight")
 fig.savefig(os.path.splitext(out)[0] + ".pdf", bbox_inches="tight")

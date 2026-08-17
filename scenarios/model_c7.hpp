@@ -50,12 +50,12 @@ namespace chromosphere {
 /// Avrett & Loeser (2008) Table 26 rows up to h ≈ 2.628 Mm (T ≈ 0.29 MK, upper
 /// TR), with q(T) computed self-consistently from C7's own conductive gradient
 /// at the new top — the corona-as-boundary configuration for gentle
-/// conduction-driven evaporation (docs/gentle_evaporation_plan.md v2; model_gentle).
+/// conduction-driven evaporation (docs/studies/evaporation/gentle_evaporation_plan.md v2; model_gentle).
 ///
 /// `tr_jump_bc` selects the upper boundary closure. false (default) ⇒ the
 /// Mach-capped RTV reservoir (model_flare / analytic_canopy / model_gentle keep
 /// this). true ⇒ the "New explanation" upper BC
-/// (docs/gentle_evaporation_downflow.md): well-balanced reconstruction +
+/// (docs/studies/evaporation/gentle_evaporation_downflow.md): well-balanced reconstruction +
 /// hydrostatic ghost pressure + a ghost temperature extrapolated continuously
 /// from the top cell + EOS ghost density — set by the bare `model_c7` scenario.
 /// Both modes keep the imposed Neumann flux q(T) as the conductive driver;
@@ -79,7 +79,7 @@ void c7_full_profile(float h_km, float& T, float& n_e, float& n_HI);
 /// fixed-gamma scenarios retain their existing interpolation exactly.
 double c7_full_temperature_pchip(double h_km);
 
-/// Route-B photoionization closure (docs/photoionization_c7_inversion_plan.md,
+/// Route-B photoionization closure (docs/studies/eos-ionization/photoionization_c7_inversion_plan.md,
 /// writeup §3.1): given cell-centered (T, n_i, n_n) and heights [km], return the
 /// per-cell photoionization rate P_phot that makes the profile a fixed point of
 /// the active Stage-E ionization network, blended above ~1500 km to the frozen

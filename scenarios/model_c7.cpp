@@ -49,7 +49,7 @@ float kOuterTtr   = 0.0f;   // TR-base temperature  [K]
 float kOuterNeTr  = 0.0f;   // TR-base electron / proton density [m^-3]
 float kOuterNnTr  = 0.0f;   // TR-base neutral density (slaved, tiny) [m^-3]
 
-// "New explanation" upper BC (docs/gentle_evaporation_downflow.md), HYBRID form:
+// "New explanation" upper BC (docs/studies/evaporation/gentle_evaporation_downflow.md), HYBRID form:
 // the hydrostatic-pressure + EOS-density ghost is applied, but the coronal heat
 // keeps entering as model_c7's imposed Neumann flux q(T) — NOT a Dirichlet
 // temperature jump. On the 100-cell C7 grid the top cell sits at chromospheric
@@ -328,7 +328,7 @@ double c7_full_temperature_pchip(double h_km) {
          + (s3-s2)*width*data.slope[i+1];
 }
 
-// Route-B photoionization closure (docs/photoionization_c7_inversion_plan.md;
+// Route-B photoionization closure (docs/studies/eos-ionization/photoionization_c7_inversion_plan.md;
 // writeup §3.1), shared by model_c7 and model_column. Given cell-centered
 // (T, n_i, n_n) and heights, returns the per-cell photoionization rate P_phot:
 // invert the LOCAL ionization-equilibrium balance of EXACTLY the active Stage-E
@@ -527,7 +527,7 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
     }
 
     // Height-dependent photoionization rate P_phot(h): Route B closure
-    // (docs/photoionization_c7_inversion_plan.md; writeup §3.1).
+    // (docs/studies/eos-ionization/photoionization_c7_inversion_plan.md; writeup §3.1).
     //
     // Equilibrium region (dense lower/mid chromosphere): set P_phot by
     // inverting the *local ionization-equilibrium balance of exactly the Stage E
@@ -629,7 +629,7 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
     // where the gas is partially neutral and well-conditioned.
     grid.enable_vacuum_floor = true;
 
-    // "New explanation" upper BC (docs/gentle_evaporation_downflow.md), HYBRID
+    // "New explanation" upper BC (docs/studies/evaporation/gentle_evaporation_downflow.md), HYBRID
     // form, gated to the bare model_c7 scenario (model_flare / analytic_canopy /
     // model_gentle keep the default RTV reservoir):
     //   * well-balanced explicit reconstruction (removes the spurious (γ−1)g
@@ -660,7 +660,7 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
 }
 
 void model_c7_update_bc(Grid& grid, const Vec& xn) {
-    // Gentle-evaporation driver (docs/gentle_evaporation_plan.md v2): ramp the
+    // Gentle-evaporation driver (docs/studies/evaporation/gentle_evaporation_plan.md v2): ramp the
     // imposed coronal conductive flux q(T) = q_base · enhance(t). enhance(t) holds
     // at 1 until t_on, then cosine-rises to outer_heat_flux_enhance over
     // [t_on, t_on+ramp]. enhance = 1 (default) ⇒ q stays at the steady base, so
@@ -681,7 +681,7 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
         grid.outer_heat_flux = grid.outer_heat_flux_base * amp;
     }
 
-    // Physically-grounded boundary closures (docs/boundary_conditions_plan.md):
+    // Physically-grounded boundary closures (docs/studies/boundaries/boundary_conditions_plan.md):
     //   * Outer face — fixed lower-TR reservoir (RTV 1978 + Bradshaw & Emslie
     //     2020 + the single-fluid slaving of Gómez Míguez et al. 2024).
     //   * Inner face — discrete-HSE photospheric reservoir, V=U=0 (Pandey 2024).
@@ -697,7 +697,7 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
     // Outer face — lower transition region (h ≈ 2153 km, T ≈ 2.3×10⁴ K).
     // ====================================================================
     if (grid.c7_tr_jump_bc) {
-        // "New explanation" upper BC (docs/gentle_evaporation_downflow.md), HYBRID
+        // "New explanation" upper BC (docs/studies/evaporation/gentle_evaporation_downflow.md), HYBRID
         // form. The boundary downflow is removed by the well-balanced
         // reconstruction + a hydrostatic/EOS ghost; the coronal HEAT keeps coming
         // from the imposed Neumann flux q(T) (not a Dirichlet T-jump, which over-

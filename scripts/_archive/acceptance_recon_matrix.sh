@@ -5,7 +5,7 @@
 # holding the Riemann solver fixed at Rusanov (the release solver AT THE TIME
 # this was run) so the reconstruction change was the only variable. It produced
 # the evidence that lnP is a reconstruction improvement rather than a
-# Roe-specific patch; see docs/pressure_reconstruction_recap.md.
+# Roe-specific patch; see docs/studies/numerics/pressure_reconstruction_recap.md.
 #
 # ARCHIVED. The release then defaulted to Roe + (ln rho,V,ln p); it now defaults to
 # the SWMF exact-Riemann Godunov flux, with Roe as a reference override.

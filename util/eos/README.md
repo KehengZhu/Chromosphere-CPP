@@ -1,7 +1,7 @@
 # Classical pure-hydrogen Saha / Γ₁ tables from SWMF/CRASH
 
 This tool builds the validation and runtime inputs for stages 0–9 of
-`docs/crash_gamma_eos_plan.md`. CRASH supplies the equilibrium sound-speed
+`docs/studies/eos-ionization/crash_gamma_eos_plan.md`. CRASH supplies the equilibrium sound-speed
 index `Γ₁(T,n_H)`; Chromosphere2026 computes the pure-H Saha ionization and
 caloric closure analytically.
 

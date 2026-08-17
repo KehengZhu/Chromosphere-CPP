@@ -3,7 +3,7 @@
 
 Reads a chromo_main multi-snapshot output .txt (the same format plot_output.py
 reads) and tracks, frame by frame, the diagnostics that decide whether the
-atmosphere has reached the V≈0 steady preflare state (docs/gentle_evaporation_plan.md
+atmosphere has reached the V≈0 steady preflare state (docs/studies/evaporation/gentle_evaporation_plan.md
 Phase 2): max|V|(t), the density-weighted mean |V|(t), the per-cell temperature
 drift max|∂T/∂t|/T, and the apex / coronal-mean temperature. The fixed point is
 declared when max|V| sits far below the expected evaporation speed (~tens–hundreds

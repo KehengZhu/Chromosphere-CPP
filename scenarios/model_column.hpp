@@ -26,7 +26,7 @@
  * 1978) evaporation.
  *
  * The numerical scheme is the well-balanced, high-order configuration validated in
- * docs/gentle_evaporation_downflow.md (the "bestwb" set) — ALWAYS ON here, no toggles:
+ * docs/studies/evaporation/gentle_evaporation_downflow.md (the "bestwb" set) — ALWAYS ON here, no toggles:
  *   - well-balanced explicit reconstruction (φ_g-consistent shifted pressures),
  *   - log-space MUSCL reconstruction of the exponentially-stratified slots,
  *   - the asymmetric MC3/Koren limiter (β = 2),

@@ -145,7 +145,7 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
     }
 
     // --- Optional ambient-coronal-heating overlay (GENTLE conduction-driven
-    // evaporation; docs/gentle_evaporation_plan.md) -------------------------
+    // evaporation; docs/studies/evaporation/gentle_evaporation_plan.md) -------------------------
     // Opt-in via GENTLE=1 (the alternative to PFSS_FLARE — gentle vs explosive).
     // Adds the steady footpoint-anchored heating H(s) that turns the resolved
     // chromosphere→TR→corona column into a true steady state — the RTV (1978) /
@@ -161,7 +161,7 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
         grid.enable_vacuum_floor      = true;   // fully-ionized corona: n_n→0 conditioning
 
         // Well-balanced explicit reconstruction (chromosphere.hpp::well_balanced,
-        // docs/gentle_evaporation_downflow.md). Undoes the φ_g inconsistency in the
+        // docs/studies/evaporation/gentle_evaporation_downflow.md). Undoes the φ_g inconsistency in the
         // MUSCL slope that otherwise gives every hydrostatic atmosphere a spurious
         // (γ−1)g downforce — the resolution-independent root of the persistent
         // chromosphere/TR downflow. Validated on model_column and ported to

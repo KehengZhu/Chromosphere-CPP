@@ -16,7 +16,7 @@ Catalog of the exact command that regenerates every file under `visualization/`.
 ## 1. Model C7 chromosphere (single column)
 
 ### `model_c7_evolution.mp4`
-9-panel time evolution of a Model C7 chromosphere run: a 2×4 block (neutral/ion density, velocity, pressure, temperature) plus a wide bottom panel with the number-density-weighted bulk velocity `(n_n u + n_i v)/(n_n + n_i)`. Input `model_c7_movie.txt` is a 1.5× run (`time_mult=1.5`, t≈829 s, 976 frames); rendered at 45 fps. **As of the "New explanation" hybrid upper BC** (docs/gentle_evaporation_downflow.md): `model_c7` now runs with `well_balanced` + a hydrostatic-pressure + EOS-density TR-base ghost (heat still via the imposed RTV flux q(T), not a Dirichlet T-jump). This removes the *spurious* part of the persistent TR downflow (interior V min ≈ −2 km/s → ≈ −1 km/s) and shifts the top from a ~200 kK corona to a ~10–20 kK TR base; the movie shows the rest → relaxation-upflow → mild-residual-downflow transient.
+9-panel time evolution of a Model C7 chromosphere run: a 2×4 block (neutral/ion density, velocity, pressure, temperature) plus a wide bottom panel with the number-density-weighted bulk velocity `(n_n u + n_i v)/(n_n + n_i)`. Input `model_c7_movie.txt` is a 1.5× run (`time_mult=1.5`, t≈829 s, 976 frames); rendered at 45 fps. **As of the "New explanation" hybrid upper BC** (docs/studies/evaporation/gentle_evaporation_downflow.md): `model_c7` now runs with `well_balanced` + a hydrostatic-pressure + EOS-density TR-base ghost (heat still via the imposed RTV flux q(T), not a Dirichlet T-jump). This removes the *spurious* part of the persistent TR downflow (interior V min ≈ −2 km/s → ≈ −1 km/s) and shifts the top from a ~200 kK corona to a ~10–20 kK TR base; the movie shows the rest → relaxation-upflow → mild-residual-downflow transient.
 ```bash
 # regenerate the 1.5x run dump first:
 build/chromo_main outputs/model_c7/model_c7_movie.txt full ionization model_c7 "" 1.5
@@ -410,7 +410,7 @@ Embarrassingly-parallel ensemble runner: one `chromo_main` per field line, writi
 
 ## 8. Presentation movie posters (linked, not embedded)
 
-The "Evolution movies" slides in `docs/presentation.tex` show a **first-frame poster** that is a
+The "Evolution movies" slides in `docs/presentations/2026-07-11-group-meeting/presentation.tex` show a **first-frame poster** that is a
 clickable link to the movie file: `\href{run:<movie>.mp4}{\includegraphics{poster}}`.
 Clicking fires a PDF `/Launch` action → Adobe Acrobat/Reader opens the `.mp4` in the system default
 video player (a one-time "open this file?" confirmation appears). **macOS Preview cannot** — it
@@ -457,9 +457,9 @@ ffmpeg -y -i visualization/events/event_20240801_o00_1040Mm_Te.mp4 -frames:v 1 -
 
 ---
 
-## 9. Gentle conduction-driven evaporation (docs/gentle_evaporation_plan.md)
+## 9. Gentle conduction-driven evaporation (docs/studies/evaporation/gentle_evaporation_plan.md)
 
-> **Reconciliation note (2026-07-11, docs/scenario_reconciliation_plan.md):** the standalone
+> **Reconciliation note (2026-07-11, docs/design/scenario_reconciliation_plan.md):** the standalone
 > `model_gentle` scenario was merged into **`model_column`**; `model_gentle` is now a backward-compat
 > alias that applies the documented stable resolved-corona full-physics preset
 > (`ISO_CORONA ISO_H_BASE=1003 ISO_HEAT_FLUX ISO_COOLING ISO_IONIZATION ISO_TWO_FLUID`). The former
@@ -469,7 +469,7 @@ ffmpeg -y -i visualization/events/event_20240801_o00_1040Mm_Te.mp4 -frames:v 1 -
 
 The `GENTLE=1` overlay (scenarios/pfss_field_line.cpp) adds the ambient coronal heating H(s)=E_H0·exp(−d/s_H) that makes a resolved chromosphere→TR→corona loop a true steady state, then a ×3 heating ramp drives gentle (subsonic, conduction-driven) evaporation. Run from the project root with `.venv` active.
 
-**Improvement (2026-06-25): the well-balanced reconstruction (`Grid::well_balanced`, docs/gentle_evaporation_downflow.md) is now ON in the GENTLE overlay** (default on; `GENTLE_WELL_BALANCED=0` reverts). It undoes the φ_g MUSCL-slope inconsistency that gave every hydrostatic atmosphere a spurious (γ−1)g downforce, so the relaxed preflare baseline sits closer to V≈0 (ρ-weighted mean|V| 112 → **68 m/s**) and the gentle upflow is measured against a quieter zero. The 5958-test baseline is byte-for-byte unchanged (GENTLE is opt-in). The commands below are unchanged; the numbers were re-run with the fix on.
+**Improvement (2026-06-25): the well-balanced reconstruction (`Grid::well_balanced`, docs/studies/evaporation/gentle_evaporation_downflow.md) is now ON in the GENTLE overlay** (default on; `GENTLE_WELL_BALANCED=0` reverts). It undoes the φ_g MUSCL-slope inconsistency that gave every hydrostatic atmosphere a spurious (γ−1)g downforce, so the relaxed preflare baseline sits closer to V≈0 (ρ-weighted mean|V| 112 → **68 m/s**) and the gentle upflow is measured against a quieter zero. The 5958-test baseline is byte-for-byte unchanged (GENTLE is opt-in). The commands below are unchanged; the numbers were re-run with the fix on.
 
 ```bash
 # (0) build the heating-consistent loop IC (prints the auto-calibrated E_H0, s_H)
@@ -533,7 +533,7 @@ python util/animate_gentle_column.py outputs/model_column/gentle_v2_evap.txt \
 
 ### §9c. Gentle evaporation v3 — boundary lifted HIGH into a resolved corona (model_gentle)
 
-The fix for v2's null result (docs/gentle_evaporation_plan.md, option A): the extended C7 table (Avrett & Loeser 2008 Table 26) now reaches 68 Mm / 1.59 MK, and `model_gentle` lifts the upper `q(T)` boundary to `GENTLE_TOP_KM` (default 10 Mm, T ≈ 1.1 MK after relaxation) — a genuine resolved coronal **volume** for the evaporated mass to fill. `GENTLE_NS ≈ 300` keeps both the TR (TRAC-broadened) and the corona resolved.
+The fix for v2's null result (docs/studies/evaporation/gentle_evaporation_plan.md, option A): the extended C7 table (Avrett & Loeser 2008 Table 26) now reaches 68 Mm / 1.59 MK, and `model_gentle` lifts the upper `q(T)` boundary to `GENTLE_TOP_KM` (default 10 Mm, T ≈ 1.1 MK after relaxation) — a genuine resolved coronal **volume** for the evaporated mass to fill. `GENTLE_NS ≈ 300` keeps both the TR (TRAC-broadened) and the corona resolved.
 
 ```bash
 # Phase B — relaxation: does the resolved C7 corona hold under a q(T) top BC?
@@ -558,7 +558,7 @@ python util/plot_gentle_summary.py
 
 - `gentle_v3_evolution.mp4` — relaxation → q(T)-ramp ×3 in the resolved corona. **Evaporation now appears**: across the ramp the coronal (h > 2.3 Mm) emission measure ∫n_e² ds **× 2.0**, coronal mass ∫n_e ds ×1.42, T_top 1.14 → 1.50 MK, n_e(top) ×1.47, TR burns down 1.595 → 1.526 Mm, with a transient +1 km/s upflow during the ramp. Contrast §9b (same driver, boundary at 2.628 Mm): EM flat, no evaporation. **Confirms the v2 null was geometric** — the boundary needed coronal volume above the TR, not a different mechanism. Caveat: the relaxed baseline carries a steady ~8 km/s cap-throttled coronal downflow (no volumetric heating to pin V=0), so the *sustained* signature is the EM/density rise rather than a fast bulk upflow; the resolved-corona-with-heating run (§9a/v1) gives the cleaner upflow (15.6 km/s, EM ×2.6).
   - 7 panels (T / P / ion velocity V / bulk velocity (n_iV+n_nU)/(n_i+n_n) — both upflow-downflow shaded / n_e,n_n / ionization / conductive flux q∥) on a **split x-axis** (zoom sub-Mm chromosphere+TR, compress the corona; region bands chromo|TR|corona), with a live phase chip + time readout and a bottom timeline marking the **slow-motion ×4** window [3000,4000] s that stretches the evaporation onset. Nature-figure styling (restrained blue/red palette, despined axes, direct labels).
-- `q_ramp.png` / `.pdf` — the imposed conductive-flux driver q(t) vs time: flat at q₀ ≈ 230 W m⁻² through relaxation, raised-cosine (Hann) ramp ×3 over [t_on, t_on+Δ] = [3000, 3300] s, then flat at 3q₀ ≈ 690 W m⁻². The ramp envelope is a code construct (smooth-start, not from a paper — see docs/q_of_T_boundary_condition.md); only q₀ and the slow-ramp requirement are physics.
+- `q_ramp.png` / `.pdf` — the imposed conductive-flux driver q(t) vs time: flat at q₀ ≈ 230 W m⁻² through relaxation, raised-cosine (Hann) ramp ×3 over [t_on, t_on+Δ] = [3000, 3300] s, then flat at 3q₀ ≈ 690 W m⁻². The ramp envelope is a code construct (smooth-start, not from a paper — see docs/studies/boundaries/q_of_T_boundary_condition.md); only q₀ and the slow-ramp requirement are physics.
 
 ### §9d. Heat-flux–driven (A&S78) gentle evaporation — hotter corona, NO ramp (`gentle_hotcorona_evolution.mp4`)
 
@@ -609,9 +609,9 @@ No current script in `util/` or `visualization/` writes these names (verified by
 
 ---
 
-## 11. Isentropic chromosphere → conduction-driven evaporation (`model_isentropic`, docs/gentle_evaporation_downflow.md)
+## 11. Isentropic chromosphere → conduction-driven evaporation (`model_isentropic`, docs/studies/evaporation/gentle_evaporation_downflow.md)
 
-> **Reconciliation note (2026-07-11, docs/scenario_reconciliation_plan.md):** `model_isentropic`
+> **Reconciliation note (2026-07-11, docs/design/scenario_reconciliation_plan.md):** `model_isentropic`
 > was renamed to **`model_column`** (the unified default scenario) with `model_isentropic` kept as a
 > backward-compat alias, so every command below still runs. The "bestwb" numeric toggles
 > (`ISO_LOG_RECON`, `ISO_MC3`/`ISO_MC3_BETA`, `ISO_EQ_WB`, `ISO_INNER_WB`, `ISO_INNER_WB_RHO`,
@@ -695,7 +695,7 @@ ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py outputs/model_column/
 ### `iso_t22k_evolution_ns2000_gamma105_mc3.mp4` / `..._mc3_wbrho.mp4` — base mass-flux fixes (MC3 limiter + inner-BC density well-balancing)
 Two ns=2000 γ=1.05 variants probing the **base mass-flux truncation error** (the O(Δs) chromospheric downflow near the ρV zero crossing). Both extend the standard iso_t22k config; decode with `ISO_GAMMA=1.05`.
 - **`..._mc3.mp4`** — MC3 / Koren limiter (`ISO_MC3=1 ISO_MC3_BETA=2`) instead of the default minmod. The asymmetric third-order (κ=1/3) limiter (BATSRUS `mc3`; `flux_lim_mc3_plus/minus` in `src/state.cpp`, gated by `grid.mc3_limiter`) is less diffusive, so it clips the under-resolved TR gradient less. Flat-ρ inner ghost (no density fix).
-- **`..._mc3_wbrho.mp4`** — MC3 **plus** the inner-BC density well-balancing (`ISO_INNER_WB_RHO=1`), the current **best** config. The default inner reservoir pins the ghost density FLAT while the outer ghost is EOS-stratified; that flat ρ makes the inner-face reconstruction give ρ_L≠ρ_R → a Rusanov/LLF diffusive MASS flux at V=0 → a spurious base-cell downflow (see `docs/boundary_conditions_plan.md`). `ISO_INNER_WB_RHO` sets the ghost density from the EOS at the reservoir T₀ (ρ∝p, isothermal), mirroring the outer ghost, so ρ_L=ρ_R and the leak → O(Δs²).
+- **`..._mc3_wbrho.mp4`** — MC3 **plus** the inner-BC density well-balancing (`ISO_INNER_WB_RHO=1`), the current **best** config. The default inner reservoir pins the ghost density FLAT while the outer ghost is EOS-stratified; that flat ρ makes the inner-face reconstruction give ρ_L≠ρ_R → a Rusanov/LLF diffusive MASS flux at V=0 → a spurious base-cell downflow (see `docs/studies/boundaries/boundary_conditions_plan.md`). `ISO_INNER_WB_RHO` sets the ghost density from the EOS at the reservoir T₀ (ρ∝p, isothermal), mirroring the outer ghost, so ρ_L=ρ_R and the leak → O(Δs²).
 
 **Base ρV at t≈2300 s (ns=2000, γ=1.05), by config** (min ρV [kg m⁻² s⁻¹] / base V[0]):
 
@@ -718,7 +718,7 @@ ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py outputs/model_column/
 ```
 
 ### `iso_t22k_evolution_ns2000_gamma105_bestwb.mp4` + `..._bestwb_condcompare.mp4` — full well-balancing stack + conduction on/off mass-flux demo
-The **best well-balanced** ns=2000 γ=1.05 config: `ISO_INNER_WB=1` (2nd-ghost pressure) + `ISO_INNER_WB_RHO=1` (ghost density) + `ISO_EQ_WB=1` (equilibrium-reference δ-form: subtract the frozen explicit-RHS residual at the IC so V=0 is an EXACT discrete fixed point for the non-isothermal C7 column) + `ISO_MC3=1` (Koren limiter) + `ISO_LOG_RECON=1`. Together these remove the O(Δs) numerical base-drainage entirely (root-caused in `docs/boundary_conditions_plan.md`).
+The **best well-balanced** ns=2000 γ=1.05 config: `ISO_INNER_WB=1` (2nd-ghost pressure) + `ISO_INNER_WB_RHO=1` (ghost density) + `ISO_EQ_WB=1` (equilibrium-reference δ-form: subtract the frozen explicit-RHS residual at the IC so V=0 is an EXACT discrete fixed point for the non-isothermal C7 column) + `ISO_MC3=1` (Koren limiter) + `ISO_LOG_RECON=1`. Together these remove the O(Δs) numerical base-drainage entirely (root-caused in `docs/studies/boundaries/boundary_conditions_plan.md`).
 - **`..._bestwb.mp4`** — the newest best result (conduction ON): the standard 2×3 `animate_isentropic.py` panels, decoded with `ISO_GAMMA=1.05`. The base ρV panel now sits ~flat while the TR evaporation upflow (+0.90 km/s) proceeds.
 - **`..._bestwb_condcompare.mp4`** — the well-balancing demonstration: overlays ρV from two best-WB runs differing ONLY in conduction. `util/animate_iso_condcompare.py` (3 panels: ρV full domain, ρV zoomed h>1800 km, V zoomed; ρV/V decoded from RHO/MOM ⇒ NO γ needed). **conduction OFF stays flat at ~round-off everywhere (ρV∈[−5×10⁻⁶,+1×10⁻⁵], mean|V|base≈35 m/s, "upflow" ≈2 m/s) — the equilibrium is held to round-off with no driver — while conduction ON develops the physical TR evaporation (ρV up to +2.7×10⁻⁴, upflow +0.90 km/s).** So with the stack on, essentially ALL the mass flux is physical (conduction-driven); the former base "downflow" (−8×10³ m/s at cell 0 in the original flat-ρ minmod run) was numerical truncation and is gone.
 ```bash
@@ -756,7 +756,7 @@ Uses the Stage-D diagnostic CSVs from the best-WB ns=2000/3000/4000 sweep. It li
 ```
 
 ### `iso_cond_hydro_local4_convergence_t100.png` — static-local-refinement split conduction-to-hydro diagnostic
-The same best-WB conduction-ON diagnostic, but with **static local refinement** (`docs/static_local_refinement.md`): each run refines the lower domain 0–700 km by 4× and retains its outer coarse spacing (transition 700–800 km, ratio ≤ 1.1). The coarse-equivalent counts `ISO_NS=2000/3000/4000` therefore share the SAME outer column while the local cell width at 250 km shrinks 4× (to the fine spacing 0.269/0.179/0.135 km), so the fit is against the **interpolated local `cell_width_m` at 250 km** — not the median domain spacing. **Result (t≈100 s):** the total mass flux ρ_iV+ρ_nU at 250 km is 6.37/4.50/3.24×10⁻⁴ kg m⁻² s⁻¹, a clean linear scaling in the local Δs (R²=0.994) with a Δs→0 intercept 2.5×10⁻⁵ (≈0). This isolates the ~250 km positive-ρV maximum as a **split conduction-to-hydro coupling artifact** (conduction-gated, well-balancing-invariant; scales with the local cell width and vanishes under local base refinement) rather than a physical flow or a pure conduction-operator artifact. The per-step dp_cond/dt at 250 km instead *rises* on finer grids (physical local-gradient resolution, R²≈0.74) and the total momentum-RHS difference sits at the ~10⁻⁷ noise floor (R²≈0.01). The physical +0.9 km/s TR evaporation upflow is ~100× larger and grid-converged. Cooling is a physical sensitivity test, not part of the numerical remedy (grid/local refinement or improved conduction–hydro coupling).
+The same best-WB conduction-ON diagnostic, but with **static local refinement** (`docs/studies/numerics/static_local_refinement.md`): each run refines the lower domain 0–700 km by 4× and retains its outer coarse spacing (transition 700–800 km, ratio ≤ 1.1). The coarse-equivalent counts `ISO_NS=2000/3000/4000` therefore share the SAME outer column while the local cell width at 250 km shrinks 4× (to the fine spacing 0.269/0.179/0.135 km), so the fit is against the **interpolated local `cell_width_m` at 250 km** — not the median domain spacing. **Result (t≈100 s):** the total mass flux ρ_iV+ρ_nU at 250 km is 6.37/4.50/3.24×10⁻⁴ kg m⁻² s⁻¹, a clean linear scaling in the local Δs (R²=0.994) with a Δs→0 intercept 2.5×10⁻⁵ (≈0). This isolates the ~250 km positive-ρV maximum as a **split conduction-to-hydro coupling artifact** (conduction-gated, well-balancing-invariant; scales with the local cell width and vanishes under local base refinement) rather than a physical flow or a pure conduction-operator artifact. The per-step dp_cond/dt at 250 km instead *rises* on finer grids (physical local-gradient resolution, R²≈0.74) and the total momentum-RHS difference sits at the ~10⁻⁷ noise floor (R²≈0.01). The physical +0.9 km/s TR evaporation upflow is ~100× larger and grid-converged. Cooling is a physical sensitivity test, not part of the numerical remedy (grid/local refinement or improved conduction–hydro coupling).
 ```bash
 # three matched best-WB conduction-ON runs, refined 0–700 km by 4× (delete /tmp .txt after).
 # time_mult is set so the 10000·time_mult step cap reaches ≳100 s at the fine-cell dt.
@@ -830,7 +830,7 @@ Publication-styled (nature-figure) combined movie that concatenates **Stage 1 (r
 # or: util/animate_iso_combined.py <stage1.txt> <stage2b.txt> <out.mp4> [fps]
 ```
 
-### `docs/poster-shine/figs/iso_t22k_snapshots.pdf` (+ `.png`) — SHINE poster Result 2 figure
+### `docs/posters/2026-07-11-shine/figs/iso_t22k_snapshots.pdf` (+ `.png`) — SHINE poster Result 2 figure
 Poster-styled (nature-figure) **initial-vs-final overlay** snapshot of the **γ=1.05** `iso_t22k_ns2000_gamma105` run (real Model-C7 atmosphere, photosphere → 22 kK lower-TR base, h = 0 → 2.15 Mm, HSE-rebuilt density, frozen ionization, conduction-driven from a hydrostatic V=0 start; **near-isothermal γ=1.05** as a polytropic stand-in for the omitted radiative sink). Four panels, each overlaying the **initial** (t=0, navy) and **final** (t≈2300 s, orange) frames on a single linear height axis (Mm): **(a)** Temperature — the upper chromosphere is **held near-isothermal at ~6.6 kK** (conductive heat absorbed at constant T; init/final overlap); **(b)** Velocity (hero) — a gentle **+0.95 km/s** subsonic upflow develops at the TR (Mach ≈ 0.07); **(c)** Density (log) — the TR/top fills modestly **~1.2×**; **(d)** Mass flux ρV — **whole-domain** view (the dense base carries a large **numerical O(Δs)** drainage spike that dominates the scale) **plus a zoomed inset for h > 1.8 Mm** (the TR), where the grid-converged evaporative upflow (~10⁻⁶) lives. The figure decode reads γ via `ISO_GAMMA` (default 1.05 here; `animate_isentropic.primitives` is reused, with `A.GM1` overridden). ρV and V are γ-independent; only T/p need the γ. UM navy/maize palette/fonts match `iso_corona_poster.py`. The upper-chromosphere+TR region is shaded. Written into `docs/poster-shine/figs/` (the poster's `\graphicspath`); this is the **Result 2 figure** in `poster.tex` (which was likewise updated to the γ=1.05 setup/numbers). `util/iso_t22k_poster.py [input.txt] [output.pdf]` (defaults to the γ=1.05 ns=2000 file).
 ```bash
 .venv/bin/python util/iso_t22k_poster.py   # defaults to outputs/model_column/iso_t22k_ns2000_gamma105.txt, γ=1.05
@@ -839,7 +839,7 @@ Poster-styled (nature-figure) **initial-vs-final overlay** snapshot of the **γ=
 ```
 
 ### `iso_local4_ns2000_bestwb_evolution.mp4` — validated short run, best-WB C7-HSE + static local refinement 0–700 km ×4
-Validation re-run (2026-07-10) of the full best-well-balanced `model_isentropic` stack (`ISO_LOG_RECON`+`ISO_INNER_WB`+`ISO_INNER_WB_RHO`+`ISO_EQ_WB`+`ISO_MC3`, γ=1.05) combined with **static local refinement** (`docs/static_local_refinement.md`) of the lower domain 0–700 km by 4× (transition 700–800 km, ratio ≤1.1), same config as the `iso_cond_hydro_local4_*` sweep. Build: `cmake --build build` (no changes, already up to date). Tests: `./build/chromo_tests` → **6351/6351 passed**. Sanity run (`ISO_NS=2000`, time_mult=1, step_cap=10000, t≈63 s, ~33 s wall) confirmed no NaN/Inf across all 1001 frames before committing to the longer run. Main run extends to t≈189 s (time_mult=3, step_cap=30000, ~101 s wall) with the split conduction-to-hydro diagnostic CSV enabled. **Result: numerically sane** — base held at the C7 photospheric 6578 K (well-balanced, no drift), upper chromosphere temperature-minimum (~4400 K @570 km) and plateau (~6600 K) intact, top relaxes toward the 20–22 kK target; velocity is ~round-off through most of the column with a physical **+0.86 km/s** evaporative upflow developing at the top (matches the documented bestwb signature); the well-known **positive ρV maximum near ~150–250 km** (the split conduction-to-hydro coupling artifact, `outputs/_archive/iso_cond_hydro_local4_ns2000_main.csv`, 604 804 rows, 0 NaN/Inf) is visibly present but small (peak ≈5.8–8.5×10⁻⁴ kg m⁻² s⁻¹, decaying over the run) — consistent with local refinement suppressing it relative to an unrefined ns=2000 run. All 3001 native frames finite; animation used 400 uniformly-sampled frames, none dropped.
+Validation re-run (2026-07-10) of the full best-well-balanced `model_isentropic` stack (`ISO_LOG_RECON`+`ISO_INNER_WB`+`ISO_INNER_WB_RHO`+`ISO_EQ_WB`+`ISO_MC3`, γ=1.05) combined with **static local refinement** (`docs/studies/numerics/static_local_refinement.md`) of the lower domain 0–700 km by 4× (transition 700–800 km, ratio ≤1.1), same config as the `iso_cond_hydro_local4_*` sweep. Build: `cmake --build build` (no changes, already up to date). Tests: `./build/chromo_tests` → **6351/6351 passed**. Sanity run (`ISO_NS=2000`, time_mult=1, step_cap=10000, t≈63 s, ~33 s wall) confirmed no NaN/Inf across all 1001 frames before committing to the longer run. Main run extends to t≈189 s (time_mult=3, step_cap=30000, ~101 s wall) with the split conduction-to-hydro diagnostic CSV enabled. **Result: numerically sane** — base held at the C7 photospheric 6578 K (well-balanced, no drift), upper chromosphere temperature-minimum (~4400 K @570 km) and plateau (~6600 K) intact, top relaxes toward the 20–22 kK target; velocity is ~round-off through most of the column with a physical **+0.86 km/s** evaporative upflow developing at the top (matches the documented bestwb signature); the well-known **positive ρV maximum near ~150–250 km** (the split conduction-to-hydro coupling artifact, `outputs/_archive/iso_cond_hydro_local4_ns2000_main.csv`, 604 804 rows, 0 NaN/Inf) is visibly present but small (peak ≈5.8–8.5×10⁻⁴ kg m⁻² s⁻¹, decaying over the run) — consistent with local refinement suppressing it relative to an unrefined ns=2000 run. All 3001 native frames finite; animation used 400 uniformly-sampled frames, none dropped.
 ```bash
 # sanity check (t≈63 s, ~33 s wall) — run first, confirm no NaN before the longer run
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 \
@@ -1115,7 +1115,7 @@ domain, IC, EOS table, back-pressure `kOuterPRef = 0.0102845 Pa`, Mach cap, cool
 TRAC, CFL, output cadence -- is identical. Result: the last-cell velocity reversal
 disappears (`V_last` -31.6 -> +91.3 m/s) but the 2130--2150 km mass-flux ripple is
 unchanged-to-slightly-worse. Full analysis in
-`docs/upper_bc_hydro_temperature_decoupling_recap.md`.
+`docs/studies/boundaries/upper_bc_hydro_temperature_decoupling_recap.md`.
 
 `upper_bc_hydroT_decouple_500s_top90.png` -- top-90-cell `rho V`, `V` and `T`
 profiles of the two runs at 500 s (the figure that shows the ripple is common to
@@ -1166,7 +1166,7 @@ ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
 
 Answers whether the cell-centred `rho V` ripple below the top boundary also exists
 in the finite-volume Rusanov face mass flux. It does not -- see
-`docs/top_ripple_face_flux_diagnosis.md`. All numbers come from a read-only
+`docs/studies/numerics/top_ripple_face_flux_diagnosis.md`. All numbers come from a read-only
 copy-out of the production `rhs_explicit_mixture` arrays (`.faceflux` sidecar),
 never from a Python reimplementation of the reconstruction.
 
@@ -1178,7 +1178,7 @@ production flux, not recomputed); `f_ref` = `f_total` at t=0, i.e. the frozen
 sees, because `eq_wb` subtracts the reference residual from the continuity rows**
 (HISTORICAL: true for the runs catalogued here, which predate the reference-free
 release; `eq_wb` has since been retired, so for new runs `f_eff` is a diagnostic
-baseline only -- see `docs/reference_free_release_recap.md`);
+baseline only -- see `docs/studies/numerics/reference_free_release_recap.md`);
 `R = -(F[i]-F[i-1])/ds`; `roughness(x) = mean|D2 x| / mean|x|` (same definition as
 `util/upper_bc_decouple_diag.py`).
 
@@ -1241,7 +1241,7 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/face_flux_diag.py \
 
 Follow-up to the section above: does the cell-centred `rho V` ripple in
 2130-2150 km converge as `Delta h -> 0`, while `f_eff = f_total - f_ref` stays
-smooth? See `docs/resolution_convergence_scan_recap.md`. Same physical domain
+smooth? See `docs/studies/validation/resolution_convergence_scan_recap.md`. Same physical domain
 (1600-2153 km), same C7/pchip IC, same gamma/Saha table, same decoupled-hydro-T
 upper BC, same 22 000 K conduction wall, cooling off, TRAC off, MC3 beta=2,
 CFL 0.25, Mach cap 0.1, production `numerical_diffusivity = 2e3 * Delta h`
@@ -1307,7 +1307,7 @@ face quantities, not a cell-centred proxy. The new diagnostic override
 `ISO_NUMERICAL_DIFFUSIVITY_MULT=0` zeroes ONLY that coefficient (physical
 conductivity, hydro, boundaries, EOS, limiter, CFL, well-balancing untouched);
 unset = production. 2x2 = (ns 1000, 2000) x (production, `D_num=0`). See
-`docs/numerical_conduction_convergence_recap.md`.
+`docs/studies/conduction/numerical_conduction_convergence_recap.md`.
 
 Answer: `q_num/q_total` = 0.577 (ns=1000) and 0.385 (ns=2000), and with `D_num=0`
 the outer flux collapses ~7x and `mean(F_eff)` ~6x — so most of the production
@@ -1365,7 +1365,7 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_physical_flux_
 
 ### Outer (upper-TR) static local refinement: does it reduce the top-region `rho V` ripple?
 
-`docs/static_local_refinement.md` (§ `outer` profile) + `docs/outer_tr_refinement_recap.md`.
+`docs/studies/numerics/static_local_refinement.md` (§ `outer` profile) + `docs/studies/numerics/outer_tr_refinement_recap.md`.
 Same physical domain 1600-2153 km, same coarse-equivalent `ISO_NS=1000`, same
 gamma-table / decoupled-hydro-T / conduction-wall / cooling-off configuration as the
 resolution-convergence and numerical-conduction stages -- only the mesh changes. The
@@ -1820,7 +1820,7 @@ ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
 
 Six-panel diagnosis figure for the broad low-chromosphere velocity / mass-flux oscillation
 in the Roe + `(ln rho, V, ln p)` N1000 4000 s run
-(`docs/roe_n1000_lower_chromosphere_sloshing_diagnosis.md`). Top row: `V(h, t)` space-time
+(`docs/studies/numerics/roe_n1000_lower_chromosphere_sloshing_diagnosis.md`). Top row: `V(h, t)` space-time
 heatmaps for Roe N1000 and Roe N500 over 1600--2130 km, plus a high-cadence (2.8 s)
 `.faceflux` capture of the first 220 s that resolves the conduction-launched downgoing
 acoustic front (base arrival ~58 s, matching the integral of ds/c_s) and its reflection off
@@ -1865,7 +1865,7 @@ face-flux decomposition section above): `rhoV_cell = rho_cell * v_cell` plotted 
 the cell centres; `f_total` = the production numerical face mass flux (Roe here; the release flux is now the SWMF Godunov flux,
 Rusanov if selected); `f_ref` = `f_total` at `t = 0`, a **diagnostic baseline**;
 `f_eff = f_total - f_ref` = the change in face mass transport since initialization.
-Since the reference-free release (`docs/reference_free_release_recap.md`) the solver
+Since the reference-free release (`docs/studies/numerics/reference_free_release_recap.md`) the solver
 subtracts nothing — `f_total` is what the update sees — so `f_ref`/`f_eff` are now
 purely an analysis convenience for separating the evolving transport from the
 (round-off-level) initial hydrostatic flux. Older runs in this catalog that predate
@@ -2050,7 +2050,7 @@ increment measured in float32 ULPs of `rho`. Findings, in order of size:
    `rho` every step and the density in the lower chromosphere is frozen at
    representation round-off. This also explains the previously recorded and
    unexplained `.faceflux` divergence anomaly in
-   `docs/roe_n1000_lower_chromosphere_sloshing_diagnosis.md` section "Unrelated issue
+   `docs/studies/numerics/roe_n1000_lower_chromosphere_sloshing_diagnosis.md` section "Unrelated issue
    found": the captured flux values are right, but their divergence cannot be
    reconciled with a density evolution that float32 will not let happen.
 
@@ -2122,7 +2122,7 @@ column mass budget closes to 6 % instead of failing by a factor of 200 with the
 wrong sign. The first-interior-face artifact is **precision-independent** and
 survives unchanged, so it is a real scheme/boundary-closure effect. The
 evaporation observables at the top of the domain are only mildly affected (~3 %).
-Full record: `docs/float32_precision_control_experiment.md`.
+Full record: `docs/studies/numerics/float32_precision_control_experiment.md`.
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
@@ -2145,4 +2145,55 @@ ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
 .venv/bin/python util/animate_isentropic.py \
   outputs/model_column/lnp_godunov_N500_4000s_f64.txt \
   visualization/model_column/lnp_godunov_N500_4000s_f64_evolution.mp4 25
+```
+
+---
+
+## 15. Presentation figure crops (2026-08-17 group meeting)
+
+The deck at `docs/presentations/2026-08-17-group-meeting/` keeps its own figures so it
+builds from a fresh clone — `visualization/` is gitignored, so a deck reaching into it
+would not build for anyone else. Two provenances:
+
+**Copied unchanged** from `visualization/reference/`:
+
+```bash
+cp visualization/reference/c7_ionization_profile_compare.png \
+   docs/presentations/2026-08-17-group-meeting/figures/
+```
+
+Note that `util/plot_c7_ionization_profile.py --mode compare` writes to
+`visualization/eos_gamma/`, and the `visualization/reference/` copy was placed by hand;
+regenerating it also needs `outputs/eos_gamma/gamma_hydrogen_excitation.dat`, which is
+not in the tree (`bash util/eos/build_and_run.sh excitation`).
+
+**Cropped** from the six-panel comparison of section 14 — one panel per slide, because the
+whole figure is unreadable at slide size:
+
+```bash
+.venv/bin/python - <<'PY'
+from PIL import Image
+src = Image.open("visualization/model_column/precision_control_N500_4000s.png")
+W, H = src.size
+top = int(0.045 * H); mid = top + (H - top) // 2; pad = 34   # 0.045 = the suptitle band
+rows = [(top, mid + pad), (mid + pad, H)]
+cols = [(0, W // 3), (W // 3, 2 * W // 3), (2 * W // 3, W)]
+out = "docs/presentations/2026-08-17-group-meeting/figures/"
+for name, (r, c) in {"precision_ftotal_4000s": (0, 1),   # (b) f_total at 4000 s
+                     "precision_base_zoom":    (0, 2),   # (c) base zoom
+                     "precision_mass_budget":  (1, 1),   # (e) column mass budget
+                     "precision_ulp_mechanism":(1, 2)}.items():   # (f) the ULP mechanism
+    src.crop((cols[c][0], rows[r][0], cols[c][1], rows[r][1])).save(out + name + ".png")
+PY
+```
+
+Only `precision_ftotal_4000s.png` appears in the deck — the precision result is a single
+aside slide — and the other three are backup-slide assets. See
+`docs/presentations/2026-08-17-group-meeting/figures/README.md`.
+
+### `presentation.pdf`
+
+```bash
+cd docs/presentations/2026-08-17-group-meeting
+latexmk -pdf -output-directory=build presentation.tex
 ```

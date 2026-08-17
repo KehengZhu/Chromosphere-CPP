@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Evolution movie for a GENTLE conduction-driven evaporation run
-(docs/gentle_evaporation_plan.md). The gentle counterpart of animate_loop_flare.py:
+(docs/studies/evaporation/gentle_evaporation_plan.md). The gentle counterpart of animate_loop_flare.py:
 it reuses that module's topology-aware split x-axis (zoom the sub-Mm chromosphere+TR,
 compress the extended corona; region bands marked) and parallel frame rendering, but
 relabels the timeline for the heating-ramp driver instead of a beam:

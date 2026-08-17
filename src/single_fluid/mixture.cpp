@@ -442,7 +442,7 @@ void build_roe_flux(const Grid& grid, const MixtureFaceArrays& left,
 // index Gamma1 (median ~1.09 in this column), and that is what the reference Roe
 // flux linearizes. The two are different physical limits, not a correct and an
 // incorrect one; the release takes the frozen limit. See the writeup and
-// docs/swmf_godunov_flux_experiment.md.
+// docs/studies/numerics/swmf_godunov_flux_experiment.md.
 //
 // Numerical consequence: the frozen index is the LARGER of the two here, so this
 // flux propagates FASTER waves than the equilibrium system does, and the release

@@ -16,7 +16,7 @@ touch the C++; it schedules chromo_main invocations across a process pool.
 Two ways to specify the jobs:
 
   (A) Manifest (full per-line control — the production path; per-line beam params
-      come from STIX + the AIA ribbon mask, see docs/event-data-to-code.md §5):
+      come from STIX + the AIA ribbon mask, see docs/design/event-data-to-code.md §5):
 
         python util/run_ensemble.py --manifest outputs/events/event_ensemble_jobs.json [--workers 16]
 

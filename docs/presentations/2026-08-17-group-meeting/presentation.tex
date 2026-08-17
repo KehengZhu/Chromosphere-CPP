@@ -1,0 +1,271 @@
+% Group meeting, 2026-08-17 — Keheng Zhu
+% Release path only: the Saha closure and the 1600 km truncation, the SWMF
+% exact-Riemann Godunov flux, and a short note on a storage-precision fix.
+%
+% Scope note: this deck deliberately presents ONLY the release path. The
+% equilibrium-Gamma1 Roe reference flux, the Roe-vs-Godunov comparison and the
+% CFL signal-speed audit are not on these slides; the full record lives in
+% docs/studies/numerics/swmf_godunov_flux_experiment.md.
+%
+% Build (keeps aux files out of the source directory):
+%   cd docs/presentations/2026-08-17-group-meeting
+%   latexmk -pdf -output-directory=build presentation.tex
+%
+% Every number traces to a file named on the backup "Sources" frame.
+\documentclass[aspectratio=169]{beamer}
+
+\usetheme{AnnArbor}          % Michigan maize & blue, as in the 2026-07-11 talk
+\usecolortheme{rose}
+\useinnertheme{rectangles}
+\setbeamertemplate{navigation symbols}{}
+\setbeamerfont{frametitle}{size=\normalsize}
+\setbeamertemplate{itemize items}[circle]
+\setbeamertemplate{blocks}[rounded]
+
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+
+% Figures live in this talk's own figures/ directory so the deck builds from a
+% fresh clone; visualization/ is gitignored. See figures/README.md.
+\graphicspath{{figures/}}
+
+\newcommand{\src}[1]{{\scriptsize\color{gray}#1}}
+\definecolor{f32}{RGB}{214,39,40}
+\definecolor{f64}{RGB}{31,119,180}
+
+\title[Release numerics update]{Release numerics update}
+\subtitle{The ionization closure, the domain, and the new face solver}
+\author{Keheng Zhu}
+\institute{University of Michigan}
+\date{17 August 2026}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+% ============================================================ roadmap
+\begin{frame}{Where we are}
+  \vfill
+  \begin{columns}[T]
+    \begin{column}{0.60\textwidth}
+      \begin{enumerate}
+        \item Which ionization closure, and where can we trust it?
+        \item[]
+        \item A new face solver: the SWMF exact Riemann problem.
+        \item[]
+        \item {\color{gray}A precision fix, briefly.}
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \footnotesize
+      \textbf{The release model}\\[4pt]
+      1.5D field-aligned single fluid\\[2pt]
+      $U=(\rho,\ \rho u,\ E)$\\[6pt]
+      Saha equilibrium EOS\\[2pt]
+      MUSCL--Hancock $\rightarrow$ Godunov\\[2pt]
+      $\rightarrow$ implicit conduction\\[6pt]
+      1600--2153\,km, 661 cells
+    \end{column}
+  \end{columns}
+  \vfill
+\end{frame}
+
+% ============================================================ A. ionization
+\section{Ionization closure and the domain}
+
+\begin{frame}{What sets hydrogen ionization in the chromosphere?}
+  \begin{columns}[c]
+    \begin{column}{0.61\textwidth}
+      \includegraphics[width=\textwidth]{c7_ionization_profile_compare.png}
+    \end{column}
+    \begin{column}{0.37\textwidth}
+      \footnotesize
+      \begin{itemize}\itemsep8pt
+        \item Above $\sim$1.8\,Mm, Saha \textbf{tracks} the semi-empirical C7.
+              Both cross $x=0.5$ within 7\,km.
+        \item Lower down they part --- and the \textbf{sign flips}: C7 is
+              $10\times$ higher at 500\,km, $3\times$ lower at 1200\,km.
+        \item Excitation physics does \textbf{not} close the gap.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \vspace{4pt}
+  \src{\hfill C7 is non-LTE (Avrett \& Loeser 2008); the other curves are LTE
+       equilibrium on C7's own $(T,n_{\rm H})$.}
+\end{frame}
+
+\begin{frame}{Two consequences}
+  \vfill
+  \begin{columns}[T]
+    \begin{column}{0.47\textwidth}
+      \textbf{We adopt Saha equilibrium}
+      \vspace{6pt}
+      \begin{itemize}\itemsep6pt
+        \item One consistent, differentiable closure: $x$, $n_e$, $p$,
+              $e_{\rm int}$ from $(\rho,T)$.
+        \item $x$ is \textbf{derived} --- never stored, never advanced.
+        \item Ionization energy is carried in $e_{\rm int}$.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \textbf{We truncate at 1600\,km}
+      \vspace{6pt}
+      \begin{itemize}\itemsep6pt
+        \item A mid-chromospheric reservoir --- \alert{not the photosphere}.
+        \item Where we stop claiming the closure applies. Below is
+              \emph{outside the model}.
+        \item Quasi-static, stratified, $v=0$.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \vfill
+  \begin{center}\footnotesize
+    \color{gray} 1600\,km is a judgement call, not a derived height.
+  \end{center}
+\end{frame}
+
+% ============================================================ B. Godunov
+\section{The release face solver}
+
+\begin{frame}{The release face solver: SWMF exact Riemann}
+  \textbf{Ported, not reinvented:}
+  \vspace{2pt}
+  \begin{itemize}\footnotesize\itemsep1pt
+    \item \texttt{SWMF/util/CRASH/src/test\_godunov.f90} :: \texttt{get\_godunov\_flux}
+    \item \texttt{SWMF/share/Library/src/ModExactRS.f90} ::
+          \texttt{exact\_rs\_pu\_star}, \texttt{exact\_rs\_sample}
+  \end{itemize}
+  \vspace{10pt}
+  The Saha internal energy \textbf{splits exactly}:
+  \vspace{-2pt}
+  \begin{equation*}
+    e_{\rm int} \;=\;
+      \underbrace{\frac{p}{5/3-1}}_{\text{monatomic translation}}
+      \;+\;
+      \underbrace{e_{\rm ion}}_{\text{rides in the offset } E_0}
+  \end{equation*}
+  \vspace{2pt}
+  \begin{center}
+    \textbf{Split $\rightarrow$ solve $\rightarrow$ sample $\rightarrow$ carry $E_0$}
+  \end{center}
+\end{frame}
+
+\begin{frame}{Split $\rightarrow$ solve $\rightarrow$ sample $\rightarrow$ carry}
+  \vfill
+  \begin{enumerate}\itemsep10pt
+    \item \textbf{Split.} Translational gas at $\gamma=5/3$; ionization energy
+          and gravitational potential into an offset
+          $E_0=\bigl(E-\tfrac12\rho u^2-p/(\gamma-1)\bigr)/\rho$.
+    \item \textbf{Solve} the local \emph{ideal-gas} Riemann problem exactly.
+    \item \textbf{Sample} the self-similar solution at $x/t=0$.
+    \item \textbf{Carry $E_0$} with the contact, then rebuild the energy flux.
+  \end{enumerate}
+  \vfill
+  \begin{block}{Why freezing composition is the right limit}
+    Chromospheric hydrogen cannot re-equilibrate on a wave timescale:
+    $\tau_{\rm ion}\sim10^5$\,s in the mid-chromosphere, still $10$--$10^3$\,s
+    inside shocks --- against a dynamical time of $\sim$1\,minute.
+    \src{Carlsson \& Stein 2002; Leenaarts+ 2007, 2020}
+  \end{block}
+\end{frame}
+
+\begin{frame}{Verification}
+  \vfill
+  \begin{itemize}\itemsep10pt
+    \item Toro's \textbf{five standard tests}, to the 6 published digits.
+    \item Degenerate cases \emph{exact}: a stationary contact carries
+          identically zero mass.
+    \item $E_0$ verified to advect passively --- no effect beyond round-off.
+    \item 4000\,s production run: \textbf{941\,679\,108 faces, all solved
+          exactly, zero fallbacks.}\\
+          \src{Release validation now fails on a nonzero fallback count.}
+  \end{itemize}
+  \vfill
+  \begin{center}\footnotesize
+    \color{gray} The bulk EOS is still Saha equilibrium. Composition is frozen
+    only \emph{across the wave interaction} --- this is not a finite-rate
+    ionization model.
+  \end{center}
+\end{frame}
+
+% ============================================================ C. precision
+\section{A precision fix}
+
+\begin{frame}{Aside: the lower-chromosphere mass flux was a storage bug}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      Continuity: a quasi-steady column must carry a \textbf{height-independent}
+      mass flux. Ours did not.
+      \vspace{10pt}
+      \[ \rho \mathrel{+}= \Delta t\cdot\mathrm{rhs} \]
+      \vspace{-6pt}
+
+      In \textbf{619 of 660 cells} that increment is below half a float32 ULP of
+      $\rho$ --- it rounds straight back. The density cannot respond.
+      \vspace{12pt}
+
+      {\color{gray}A double-precision control, everything else identical, makes
+      it flat. Not physics, not the solver, not the boundary --- and evaporation
+      at the top moves only $\sim$3\%.}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \includegraphics[width=\textwidth]{precision_ftotal_4000s.png}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ============================================================ status
+\section{Status}
+\begin{frame}{Status and open questions}
+  \begin{center}\footnotesize
+    \color{gray}Release: single-fluid Saha equilibrium mixture; MUSCL--Hancock +
+    SWMF exact Riemann; implicit conduction; 107 test cases green.
+  \end{center}
+  \vfill
+  \begin{enumerate}\itemsep12pt
+    \item \textbf{Saha vs.\ finite relaxation --- the real open question.}
+          We freeze composition \emph{inside} the Riemann problem, then re-impose
+          instantaneous Saha equilibrium \emph{after every step}. Not justified
+          when $\tau_{\rm ion}$ is long. Finite-rate network, or a relaxation
+          source?
+    \item \textbf{Resolution.} N500 long-duration evaporation mass flux is not
+          established as $<$10\% grid-converged.
+    \item \textbf{Minor, tracked:} one localized artifact at the first interior
+          face --- survives the precision control, so it is a real
+          boundary-closure effect.
+  \end{enumerate}
+  \vfill
+\end{frame}
+
+% ============================================================ backup
+\appendix
+\begin{frame}{Backup: sources}
+  \scriptsize
+  \begin{tabular}{ll}
+    \toprule
+    Claim & Where it comes from \\
+    \midrule
+    C7 vs Saha vs CRASH ionization & \texttt{util/plot\_c7\_ionization\_profile.py --mode compare} \\
+    1600\,km truncation & \texttt{docs/doxygen/pages/physics\_model.md}; \texttt{scenarios/model\_column.cpp} \\
+    Relaxation timescales & Carlsson \& Stein 2002; Leenaarts et al.\ 2007; Leenaarts 2020 \\
+    Toro tests, $E_0$ passivity, 0 fallbacks & \texttt{tests/chromo\_tests.cpp}; \\
+      & \texttt{docs/studies/numerics/swmf\_godunov\_flux\_experiment.md} \\
+    float32 vs float64 control & \texttt{docs/studies/numerics/float32\_precision\_control\_experiment.md} \\
+    Figure provenance & \texttt{figures/README.md}; \texttt{visualize\_commands.md} \S14--15 \\
+    Test counts & \texttt{./build\_omp/chromo\_tests}, current tree \\
+    \bottomrule
+  \end{tabular}
+  \vspace{12pt}
+  \begin{center}
+    Flux cutover: \texttt{022ea34}\quad$\cdot$\quad
+    Reference-free release: \texttt{34ecb00}\quad$\cdot$\quad
+    Precision control: \texttt{ac3d9e0}
+  \end{center}
+\end{frame}
+
+\end{document}

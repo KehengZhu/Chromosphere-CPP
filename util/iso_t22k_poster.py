@@ -21,7 +21,7 @@ upper-chromosphere + TR "evaporation region" is shaded. Deeply subsonic upflow
 
 Usage:
     python util/iso_t22k_poster.py [input.txt] [output.pdf]
-Defaults: outputs/model_column/iso_t22k_ns2000.txt -> docs/poster-shine/figs/iso_t22k_snapshots.pdf
+Defaults: outputs/model_column/iso_t22k_ns2000.txt -> docs/posters/2026-07-11-shine/figs/iso_t22k_snapshots.pdf
 """
 import os
 import sys
@@ -76,7 +76,7 @@ EVAP_LO_MM = 1.5     # Mm -- below this the final state is unchanged from C7
 def main():
     in_path = sys.argv[1] if len(sys.argv) > 1 else "outputs/model_column/iso_t22k_ns2000_gamma105.txt"
     out_path = (sys.argv[2] if len(sys.argv) > 2
-                else "docs/poster-shine/figs/iso_t22k_snapshots.pdf")
+                else "docs/posters/2026-07-11-shine/figs/iso_t22k_snapshots.pdf")
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
     h, frames = A.load(in_path)            # h in km

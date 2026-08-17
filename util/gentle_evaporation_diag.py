@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gentle-evaporation signature diagnostic (docs/gentle_evaporation_plan.md Phase 3).
+"""Gentle-evaporation signature diagnostic (docs/studies/evaporation/gentle_evaporation_plan.md Phase 3).
 
 Reads a chromo_main output .txt from a GENTLE run in which the ambient coronal
 heating is ramped up (GENTLE_ENHANCE>1) from a relaxed preflare state, and shows

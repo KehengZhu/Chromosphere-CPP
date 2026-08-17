@@ -40,7 +40,7 @@ constexpr int kMaximumParallelThreads = 256;
 /// nonlinear Newton sequence around a serial Thomas solve, so on production-shaped
 /// meshes it stops scaling and then regresses: measured per 0.1 physical-second
 /// probe at 2638 cells, 2 threads ~0.092 s and 4 threads ~0.087 s, versus ~0.132 s
-/// at 8 and ~0.204 s at 12 (docs/openmp_parallelization_recap.md). Every other
+/// at 8 and ~0.204 s at 12 (docs/studies/performance/openmp_parallelization_recap.md). Every other
 /// stage still uses the full requested team.
 constexpr int kMaximumConductionThreads = 4;
 

@@ -59,7 +59,7 @@ The release numerical flux follows SWMF `util/CRASH/src/test_godunov.f90::get_go
 
 The competing closure — Saha equilibrium re-established *instantaneously within the wave* — instead gives the equilibrium acoustic index `Gamma1`, which the production CRASH table puts at a median `1.090` in this column. **Neither index is universally "wrong"**: `Gamma1` is the equilibrium acoustic response and `5/3` the frozen one, and the release chooses the frozen one on the physical argument above and on the SWMF methodology. The consequence is that the release flux propagates waves about `1.24x` faster than the equilibrium system does, which is why the timestep is sized from the frozen speed as well (see **Timestep control** below).
 
-Measured behaviour on the release model: zero fallbacks over `2.8 x 10^7` face solves, and the star-pressure Newton solve converging in a single iteration at every face. Evidence: `docs/swmf_godunov_flux_experiment.md`.
+Measured behaviour on the release model: zero fallbacks over `2.8 x 10^7` face solves, and the star-pressure Newton solve converging in a single iteration at every face. Evidence: `docs/studies/numerics/swmf_godunov_flux_experiment.md`.
 
 ### Reference face solvers
 
@@ -75,7 +75,7 @@ Both are retained for regression and controlled numerical comparison. Neither is
 
 What replaced them: the predictor source term described above, plus a second-order trapezoidal, EOS-closed lower ghost ladder. Together these cut the raw discrete hydrostatic face mass-flux defect by roughly a factor of 560, down to a level comparable to the estimated float32 round-off scale of the stored state at release resolution — no clean truncation-error trend survives between `N = 500` and `N = 1000`.
 
-Be precise about what this claims. The release is **not** a well-balanced scheme in the constructive sense. It removes the dominant discretization inconsistencies and leaves a small, resolution-dependent residual. The boundary closures still capture fixed reservoir data once from the initial condition, as any truncated-domain problem must. Evidence: `docs/reference_free_release_recap.md`.
+Be precise about what this claims. The release is **not** a well-balanced scheme in the constructive sense. It removes the dominant discretization inconsistencies and leaves a small, resolution-dependent residual. The boundary closures still capture fixed reservoir data once from the initial condition, as any truncated-domain problem must. Evidence: `docs/studies/numerics/reference_free_release_recap.md`.
 
 ## Implicit conduction
 
@@ -104,7 +104,7 @@ This is what keeps `CHROMO_CFL` meaning the CFL of the scheme actually running. 
 
 **Measured effect on the canonical release configuration: none.** The CFL-limiting cell of the `N = 500`/R4 column is the topmost cell (2153 km, ~22 kK, hydrogen fully ionized), where the tabulated `Gamma1` is already `5/3`; the 1.24x speed gap lives in the partial-ionization interior, which is nowhere near the limit. The rule therefore leaves `dt`, the step count (17781 over 100 s) and the end time unchanged on this model, and the residual solution difference is at the established float32 round-off sensitivity of this solver. **This also corrects an earlier claim** that running the Godunov flux at `CHROMO_CFL=0.50` gave an effective CFL of about 0.62: measured against the frozen wave speeds, the equilibrium-sized step gave an effective CFL of exactly 0.500. The rule matters as a guarantee for other mesh or model shapes, where a partial-ionization cell could become limiting and the step would then be up to 1.24x shorter than the equilibrium rule would give.
 
-`CHROMO_CFL=0.50` is the validated production value for the reduced release configuration; the conservative hard-coded default remains 0.25 and stays the comparison reference. Rerun the sweep before trusting 0.50 on different hardware or a materially different model shape. The original sweep was run with the Roe flux and the equilibrium signal speed, and it carries over to the release flux only because the step is unchanged on this configuration, as measured above. Evidence: `docs/coarse_model_column_physical_conduction_recap.md`, `docs/swmf_godunov_flux_experiment.md`.
+`CHROMO_CFL=0.50` is the validated production value for the reduced release configuration; the conservative hard-coded default remains 0.25 and stays the comparison reference. Rerun the sweep before trusting 0.50 on different hardware or a materially different model shape. The original sweep was run with the Roe flux and the equilibrium signal speed, and it carries over to the release flux only because the step is unchanged on this configuration, as measured above. Evidence: `docs/studies/conduction/coarse_model_column_physical_conduction_recap.md`, `docs/studies/numerics/swmf_godunov_flux_experiment.md`.
 
 Two run-control variables matter for long runs. `CHROMO_T_END` sets an absolute stop time in physical seconds and disables the legacy `time_mult`-derived step cap, so a long run cannot be silently truncated. `CHROMO_FRAME_DT` sets the snapshot cadence in physical seconds rather than steps, and is required whenever output is enabled on a long run — without it the wall time is dominated by ASCII formatting. Every run prints `termination=end_time|step_cap|other`; always check that a long run ended with `end_time`. See @ref configuration.
 
@@ -119,4 +119,4 @@ For contrast: the historical solver uses TVD-MUSCL with the symmetric minmod lim
 
 ## See also
 
-@ref validation for what is verified and what is not, @ref release_solver for the API, `docs/model_column_release_numerics_recap.md` for the full decision record.
+@ref validation for what is verified and what is not, @ref release_solver for the API, `docs/studies/numerics/model_column_release_numerics_recap.md` for the full decision record.

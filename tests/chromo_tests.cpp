@@ -1898,7 +1898,7 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
     // t=0 face mass-flux defect of this same configuration sits ~1.3x above the
     // float32 round-off floor of the stored state. On a 14x coarser grid the
     // same max|V| is ~0.76 m/s, so do NOT reuse these numbers off the release
-    // mesh (docs/reference_free_release_recap.md).
+    // mesh (docs/studies/numerics/reference_free_release_recap.md).
     // Built through make_scenario so the run really is the release preset
     // (1600-2153 km, outer R4 refinement, 22000 K wall, decoupled hydro ghost T),
     // not a bare uniform grid with library defaults, and at the VALIDATED
@@ -3203,7 +3203,7 @@ static void test_stage_e_photoionization_drives_low_T_equilibrium() {
 }
 
 // `model_c7_ic` populates `grid.photoionization_rate_i` with the Route B
-// closure (writeup §3.1; docs/photoionization_c7_inversion_plan.md): below
+// closure (writeup §3.1; docs/studies/eos-ionization/photoionization_c7_inversion_plan.md): below
 // ~1500 km, P_phot is the C7-context equilibrium inversion of the *full Route B
 // network*, so C7 is a self-consistent Stage-E fixed point there; above ~1500
 // km it is blended (tanh window) to the frozen Chae (2021) FAL-C rate, the NEQ
@@ -4063,7 +4063,7 @@ static void test_model_c7_bc_discrete_hse_inner_mach_capped_outer() {
 }
 
 // "New explanation" model_c7 upper BC, HYBRID form (tr_jump_bc=true,
-// docs/gentle_evaporation_downflow.md): turns on well_balanced and imposes at the
+// docs/studies/evaporation/gentle_evaporation_downflow.md): turns on well_balanced and imposes at the
 // top face a hydrostatic ghost pressure + EOS ghost density with a CONTINUOUS
 // ghost temperature (T_ghost0 = a·T_top, a=b=1 defaults — no jump). The coronal
 // heat keeps entering via the imposed Neumann flux q(T) (NOT a Dirichlet T-jump,

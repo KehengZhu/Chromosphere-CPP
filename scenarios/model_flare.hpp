@@ -14,7 +14,7 @@
  * cannot radiate the deposited energy, is heated to coronal temperatures, and
  * drives an explosive upflow into the corona with a condensation downflow below.
  *
- * See docs/explosive_evaporation_plan.md.
+ * See docs/studies/evaporation/explosive_evaporation_plan.md.
  */
 
 #pragma once

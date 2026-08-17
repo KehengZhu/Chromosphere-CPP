@@ -110,7 +110,7 @@ const arma::uword num_of_eq = 7;
 
 /// Conserved-variable indices (writeup eq 61).
 ///
-/// Three-temperature extension (docs/electron_temperature_plan.md): a 7th
+/// Three-temperature extension (docs/design/electron_temperature_plan.md): a 7th
 /// variable E_E carries the electron internal energy. To keep the change a
 /// clean, energy-conserving generalization, E_I retains its original meaning —
 /// the TOTAL charged-fluid energy (protons + electrons + bulk KE + gravity) —
@@ -579,7 +579,7 @@ struct Grid {
     bool single_fluid = false;
 
     /// LEGACY TWO-FLUID ONLY. Separate electron temperature T_e ≠ T_i
-    /// (docs/electron_temperature_plan.md). The release solver is a common-temperature
+    /// (docs/design/electron_temperature_plan.md). The release solver is a common-temperature
     /// equilibrium mixture and never evolves a separate electron energy.
     /// The 7th conserved variable E_E (electron internal energy) is ALWAYS carried;
     /// this flag only decides whether the electrons evolve independently:
@@ -614,7 +614,7 @@ struct Grid {
     /// explicit reconstruction is affected.) When true, rhs_explicit_state corrects
     /// the shifted-state pressures with the shifted φ_g, so a hydrostatic profile is
     /// a discrete fixed point (V≈0) and the isentropic relaxation
-    /// (docs/gentle_evaporation_downflow.md, model_column) holds. Default false
+    /// (docs/studies/evaporation/gentle_evaporation_downflow.md, model_column) holds. Default false
     /// keeps every existing scenario / the 5950-test baseline byte-for-byte; set by
     /// model_column. (Candidate to enable globally — it is the physically
     /// correct reconstruction and removes the spurious chromospheric downflow.)
@@ -708,7 +708,7 @@ struct Grid {
     /// hydrostatic atmosphere (e.g. Model C7, with a temperature minimum) is only
     /// reproduced to O(Δs) by the reconstruction, so the explicit MUSCL step applies
     /// a small spurious force even at rest ⇒ a residual O(Δs) base drainage
-    /// (docs/boundary_conditions_plan.md). This device removes it for ANY
+    /// (docs/studies/boundaries/boundary_conditions_plan.md). This device removes it for ANY
     /// stratification: capture the scheme's explicit-RHS residual at a frozen
     /// reference equilibrium once, R_eq = RHS(eq_state), and subtract it every step.
     /// Then RHS(eq_state) − R_eq ≡ 0, so eq_state is an EXACT discrete steady state
@@ -722,7 +722,7 @@ struct Grid {
     Vec  eq_state;  ///< frozen reference equilibrium (conserved), set by scenario IC
     Vec  eq_residual;  ///< cached explicit-RHS residual at eq_state (empty until computed)
 
-    /// model_c7 "New explanation" upper BC (docs/gentle_evaporation_downflow.md),
+    /// model_c7 "New explanation" upper BC (docs/studies/evaporation/gentle_evaporation_downflow.md),
     /// in its HYBRID form: when set, model_c7_update_bc imposes at the TR-base top
     /// face a hydrostatic ghost pressure (centered HSE ⇒ V = 0 is a boundary fixed
     /// point, so no spurious boundary downflow), a ghost temperature extrapolated
@@ -746,7 +746,7 @@ struct Grid {
     /// conduction stage of the release timestep, and Stage D of the two-fluid
     /// advance_Euler_state. Default ON so the existing scenarios / test suite are
     /// byte-for-byte unchanged. A relaxation phase
-    /// (docs/gentle_evaporation_downflow.md, model_column Stage 1) sets this false
+    /// (docs/studies/evaporation/gentle_evaporation_downflow.md, model_column Stage 1) sets this false
     /// to switch OFF all heat flux, so the relaxation holds its profile with
     /// V ≈ 0; Stage 2 flips it back on, with the imposed top temperature supplying
     /// the downward conductive flux.
@@ -802,7 +802,7 @@ struct Grid {
     bool  inner_conduction_neumann = false;
 
     /// Time-ramp on the imposed coronal conductive flux q(T) — the gentle
-    /// conduction-driven evaporation driver (docs/gentle_evaporation_plan.md v2).
+    /// conduction-driven evaporation driver (docs/studies/evaporation/gentle_evaporation_plan.md v2).
     /// The scenario stores the steady quiet value in outer_heat_flux_base; the
     /// boundary update sets outer_heat_flux = base · enhance(sim_time), where
     /// enhance(t) rises with a cosine ramp from 1 to outer_heat_flux_enhance over

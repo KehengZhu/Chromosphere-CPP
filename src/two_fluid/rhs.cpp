@@ -251,10 +251,10 @@ Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
         const float RHO_FLOOR = grid.m_i * 1.0e10f;
         const float P_FLOOR   = 1.0e-8f;
         for (arma::uword i = 0; i < grid.ns; ++i) {
-            float& ri = prim_xt_state(arma::sub2ind(sz, i, prim::RHO_I));
-            float& rn = prim_xt_state(arma::sub2ind(sz, i, prim::RHO_N));
-            float& pi = prim_xt_state(arma::sub2ind(sz, i, prim::P_I));
-            float& pn = prim_xt_state(arma::sub2ind(sz, i, prim::P_N));
+            auto& ri = prim_xt_state(arma::sub2ind(sz, i, prim::RHO_I));
+            auto& rn = prim_xt_state(arma::sub2ind(sz, i, prim::RHO_N));
+            auto& pi = prim_xt_state(arma::sub2ind(sz, i, prim::P_I));
+            auto& pn = prim_xt_state(arma::sub2ind(sz, i, prim::P_N));
             if (ri < RHO_FLOOR) ri = RHO_FLOOR;
             if (rn < RHO_FLOOR) rn = RHO_FLOOR;
             if (pi < P_FLOOR)   pi = P_FLOOR;
@@ -319,10 +319,10 @@ Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
         for (Vec* fp : faces) {
             Vec& F = *fp;
             for (arma::uword i = 0; i < grid.ns; ++i) {
-                float& ri = F(arma::sub2ind(sz, i, prim::RHO_I));
-                float& rn = F(arma::sub2ind(sz, i, prim::RHO_N));
-                float& pi = F(arma::sub2ind(sz, i, prim::P_I));
-                float& pn = F(arma::sub2ind(sz, i, prim::P_N));
+                auto& ri = F(arma::sub2ind(sz, i, prim::RHO_I));
+                auto& rn = F(arma::sub2ind(sz, i, prim::RHO_N));
+                auto& pi = F(arma::sub2ind(sz, i, prim::P_I));
+                auto& pn = F(arma::sub2ind(sz, i, prim::P_N));
                 if (ri < RHO_FLOOR) ri = RHO_FLOOR;
                 if (rn < RHO_FLOOR) rn = RHO_FLOOR;
                 if (pi < P_FLOOR)   pi = P_FLOOR;

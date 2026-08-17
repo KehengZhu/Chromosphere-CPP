@@ -2061,3 +2061,88 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
   "Roe, pre predictor-source fix=outputs/model_column/lnp_roe_N500_4000s.txt" \
   visualization/model_column/godunov_N500_4000s_base_mass_flux_diagnosis.png
 ```
+
+---
+
+## 14. Double-precision control experiment (DIAGNOSTIC — not a release configuration)
+
+A matched control for the lower-chromosphere mass-flux gradient of section 13.
+Everything is identical to the `lnp_godunov_N500_4000s` release run — physics,
+grid, boundary conditions, reconstruction, Godunov flux, CFL, diagnostics, and
+the launcher — except that `chromosphere::Vec` is promoted from `float` to
+`double` by the default-off CMake option `CHROMO_STATE_FLOAT64`, built into a
+separate tree. **Release defaults are untouched and this build must never be
+used for a quoted release number.** Note the promotion also covers the static
+mesh metric arrays, which share the `Vec` type; they are geometry, computed once,
+so this only removes their representation error.
+
+Both legs ran to `termination=end_time` at 4000 s in the **identical 712,314
+steps** with 941,679,108 exact face solves and zero fallbacks; 502 s (float32)
+against 507 s (float64) wall on 12 threads.
+
+```bash
+cmake -S . -B build_omp_f64 -DCMAKE_BUILD_TYPE=Release \
+      -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT64=ON
+cmake --build build_omp_f64 -j 12
+
+CHROMO_BINARY=$PWD/build_omp_f64/chromo_main \
+CHROMO_T_END=4000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=20 \
+CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_STRIDE=3300 \
+/usr/bin/time -p scripts/run_chromo_realtime.sh \
+  outputs/model_column/lnp_godunov_N500_4000s_f64.txt \
+  full no-ionization model_column - 20.0 no-cooling \
+  > outputs/model_column/lnp_godunov_N500_4000s_f64.console.log 2>&1
+```
+
+### `precision_control_N500_4000s.png`
+
+Six panels: `f_total(h)` at 2000 s and at 4000 s for both legs; a base zoom
+comparing `f_total` against cell-centred `rho*V`; the final velocity profile; the
+column mass budget — the recorded density change over the run against what each
+leg's own time-integrated `f_total` divergence implies it should have been; and
+the per-step mass-density increment measured in ULPs of each leg's storage type.
+Result:
+
+| | float32 (release) | float64 (control) |
+| --- | --- | --- |
+| `f_total` base/top, t = 2000 s | 2.682 | **1.008** |
+| `f_total` base/top, t = 4000 s | 2.811 | **0.996** |
+| 1600–1850 km spread of `f_total`, t = 4000 s | 119 % | **2 %** |
+| base velocity, t = 4000 s | 1.392 m/s | **0.506 m/s** |
+| top velocity, t = 4000 s | 13.18 m/s | 13.58 m/s |
+| cells with per-step mass increment below 0.5 ULP | 619 / 660 | **0 / 660** |
+| `f_diff` at face 0, as a fraction of `f_total[0]` | 16.3 % | 15.9 % |
+| cell 0 `rho*V` / `f_total[0]` | 1.280 | 1.275 |
+| mass budget over 1605–1850 km, predicted / observed | **-215** | **+0.94** |
+
+The broad gradient is **entirely a float32 artifact**: in double precision the
+column reaches a genuinely constant mass flux from base to top, which is what
+continuity demands of a quasi-steady state on a constant-area tube, and the
+column mass budget closes to 6 % instead of failing by a factor of 200 with the
+wrong sign. The first-interior-face artifact is **precision-independent** and
+survives unchanged, so it is a real scheme/boundary-closure effect. The
+evaporation observables at the top of the domain are only mildly affected (~3 %).
+Full record: `docs/float32_precision_control_experiment.md`.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
+  util/plot_precision_control.py \
+  outputs/model_column/lnp_godunov_N500_4000s.txt \
+  outputs/model_column/lnp_godunov_N500_4000s_f64.txt \
+  visualization/model_column/precision_control_N500_4000s.png
+```
+
+### `lnp_godunov_N500_4000s_f64_evolution.mp4`
+
+The control run animated with the same script, panels, frame cap and fps as
+`lnp_godunov_N500_4000s_evolution.mp4`, so the two movies are directly
+comparable. The mass-flux panel is the conservative face flux in both; in the
+float64 movie it is flat from the first frame onward instead of decaying with
+height.
+
+```bash
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/lnp_godunov_N500_4000s_f64.txt \
+  visualization/model_column/lnp_godunov_N500_4000s_f64_evolution.mp4 25
+```

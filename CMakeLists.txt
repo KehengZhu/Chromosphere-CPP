@@ -14,6 +14,15 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 option(CHROMO_ENABLE_OPENMP "Enable OpenMP parallel execution" OFF)
 
+# DIAGNOSTIC ONLY. Promotes the conserved state and the mesh metric arrays
+# (chromosphere::Vec) from float to double, to isolate float32 representation
+# round-off. Not a supported configuration; never use it for a release number.
+option(CHROMO_STATE_FLOAT64 "Store the conserved state in double (experiment)" OFF)
+if(CHROMO_STATE_FLOAT64)
+    add_compile_definitions(CHROMO_STATE_FLOAT64=1)
+    message(STATUS "CHROMO_STATE_FLOAT64=ON — DIAGNOSTIC build, not the release")
+endif()
+
 # Vendored Armadillo (header-only path in include/).
 # Built without LAPACK/BLAS: the solver only uses element-wise ops, sqrt, abs,
 # min/max, and sub2ind, which are all header-only.

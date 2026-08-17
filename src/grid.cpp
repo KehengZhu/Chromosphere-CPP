@@ -167,8 +167,8 @@ void Grid::force_rebuild_metrics() {
     auto pack = [&](Vec& dst, const Vec& src) {
         dst.set_size(n_state);
         for (arma::uword k = 0; k < num_of_eq; ++k) {
-            float* out = dst.memptr() + k * ns;
-            for (arma::uword i = 0; i < ns; ++i) out[i] = 0.0f + src[i];
+            Vec::elem_type* out = dst.memptr() + k * ns;
+            for (arma::uword i = 0; i < ns; ++i) out[i] = src[i];
         }
     };
     pack(B_state_imh,    B_imh);

@@ -55,8 +55,25 @@ namespace chromosphere {
  *  @{
  */
 
-/// Armadillo float column vector — the workhorse type for cell-wise data.
+/// Armadillo column vector — the workhorse type for cell-wise data, including
+/// the conserved state and the static mesh metric arrays.
+///
+/// **The release storage type is `float`.** `CHROMO_STATE_FLOAT64` promotes it to
+/// `double` and exists for ONE purpose: a controlled experiment isolating float32
+/// representation round-off, which is a known and documented limitation of this
+/// solver (the per-step mass-density increment falls below half a float32 ULP of
+/// rho through most of the lower chromosphere, so the density there cannot
+/// evolve). It is **not** a supported configuration, it is not exercised by the
+/// release validation, and it must not be enabled for production or for any
+/// quoted release number. Build it into a separate tree:
+///
+///     cmake -S . -B build_omp_f64 -DCMAKE_BUILD_TYPE=Release \
+///           -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT64=ON
+#ifdef CHROMO_STATE_FLOAT64
+typedef arma::Col<double> Vec;
+#else
 typedef arma::Col<float> Vec;
+#endif
 
 // ============================================================================
 // Release state indices — the single-fluid equilibrium-mixture solver
@@ -183,7 +200,7 @@ struct MixtureField {
     ///@{
     const Grid* source_grid = nullptr;     ///< Grid the decode was performed on
     const Vec* source_state = nullptr;     ///< state object that was decoded
-    const float* source_memory = nullptr;  ///< its backing buffer, as `Vec::memptr()`
+    const Vec::elem_type* source_memory = nullptr;  ///< its backing buffer, as `Vec::memptr()`
     arma::uword source_elements = 0;       ///< its element count
     ///@}
 

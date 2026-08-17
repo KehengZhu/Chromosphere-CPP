@@ -38,14 +38,14 @@ Vec model_flare_ic(Grid& grid) {
     // Fisher et al. (1985) middle explosive run (well above F_crit ≈ 7×10⁶ W m⁻²,
     // peaks at ~500 km/s). Overridable via FLARE_BEAM_FLUX so the gentle control
     // (1×10⁶ W m⁻² = 1×10⁹ erg cm⁻² s⁻¹, below threshold) reuses this build.
-    auto env_f = [](const char* key, float fallback) -> float {
+    auto env_f = [](const char* key, Real fallback) -> Real {
         if (const char* e = std::getenv(key)) {
             try { return std::stof(std::string(e)); } catch (...) {}
         }
         return fallback;
     };
 
-    float beam_flux = env_f("FLARE_BEAM_FLUX", 5.0e7f);
+    Real beam_flux = env_f("FLARE_BEAM_FLUX", 5.0e7f);
 
     grid.enable_beam_heating    = true;
     grid.beam_flux              = beam_flux;

@@ -183,9 +183,9 @@ void mixture_pack_ghost(const Grid& grid, Vec& ghost, double rho,
     grid.eos_gamma_table.require_n_h_in_bounds(
         rho/eos_constants::m_h, grid.eos_gamma_debug_clamp);
     const double e_int = equilibrium_internal_energy(rho, temperature);
-    ghost(mix::RHO)    = static_cast<float>(rho);
-    ghost(mix::MOM)    = static_cast<float>(rho*velocity);
-    ghost(mix::ENERGY) = static_cast<float>(
+    ghost(mix::RHO)    = static_cast<Real>(rho);
+    ghost(mix::MOM)    = static_cast<Real>(rho*velocity);
+    ghost(mix::ENERGY) = static_cast<Real>(
         mixture_total_energy(rho, rho*velocity, e_int, phi));
 }
 
@@ -796,7 +796,7 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
             // with a spurious upward dt*|g| velocity, which the corrector then
             // reconstructed into every face: that, not the numerical flux, was
             // the dominant discrete hydrostatic defect of the release scheme.
-            predicted(k) = static_cast<float>(
+            predicted(k) = static_cast<Real>(
                 static_cast<double>(state(k))
                 - scale*(fl_iph.flux(k) - fr_imh.flux(k))
                 + dt_predictor*source(k));
@@ -868,7 +868,7 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
         const double inv_ds = 1.0/static_cast<double>(grid.ds_i(i));
         for (arma::uword row = 0; row < num_of_mixture_eq; ++row) {
             const arma::uword k = arma::sub2ind(sz, i, row);
-            rhs(k) = static_cast<float>(
+            rhs(k) = static_cast<Real>(
                 -B_i*(flux_iph(k)*inv_B_iph - flux_imh(k)*inv_B_imh)*inv_ds
                 + source(k));
         }
@@ -917,7 +917,7 @@ Vec mixture_timestep(const Grid& grid, const Vec& state,
             ? std::max(th.gamma1, kGodunovGamma) : th.gamma1;
         const double speed = std::abs(momentum/th.rho)
                            + std::sqrt(gamma_signal*th.p/th.rho);
-        dt_i(i) = static_cast<float>(grid.CFL*grid.ds_i(i)/speed);
+        dt_i(i) = static_cast<Real>(grid.CFL*grid.ds_i(i)/speed);
     }
     profile_note_timestep_limiter(TimestepLimiter::Acoustic);
     return arma::min(dt_i)*arma::ones<Vec>(grid.ns);

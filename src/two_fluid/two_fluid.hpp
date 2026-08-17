@@ -125,10 +125,10 @@ Vec flux_lim(const Vec& r);
 ///
 /// The '+' branch φ₊(r) = max(0, min(β r, β, (2r+1)/3)), used for the
 /// right-face (Lxn) reconstruction term.
-Vec flux_lim_mc3_plus (const Vec& r, float beta);
+Vec flux_lim_mc3_plus (const Vec& r, Real beta);
 /// The '−' branch φ₋(r) = max(0, min(β r, β, (r+2)/3)), used for the left-face
 /// (Rxn) reconstruction term. See flux_lim_mc3_plus for the shared derivation.
-Vec flux_lim_mc3_minus(const Vec& r, float beta);
+Vec flux_lim_mc3_minus(const Vec& r, Real beta);
 
 /// Cell-centered flux F(U).
 Vec cal_flux_state(const Grid& grid, const Vec& xn_state);
@@ -171,19 +171,19 @@ Vec advance_Euler_state(Grid& grid, const Vec& xn_state, const Vec& dt_i);
 /// quadratic solve in ionization fraction f = ρ_i / (ρ_i + ρ_n). Operates on
 /// primitive state in place; intended for the operator-split integrator but
 /// exposed for direct testing. (writeup §5.3.)
-void apply_ionization_stage(const Grid& grid, Vec& prim_state, float dt);
+void apply_ionization_stage(const Grid& grid, Vec& prim_state, Real dt);
 
 /// Stage R (writeup §2.4): backward-Euler optically-thick chromospheric
 /// radiative cooling on the folded ion+electron thermal pressure. Carlsson
 /// & Leenaarts 2012 recipe summed over H I + Ca II + Mg II; tables in
 /// physics.hpp::cl2012. Activated by Grid::enable_radiative_cooling.
-void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, float dt);
+void apply_radiative_cooling_stage(const Grid& grid, Vec& prim_state, Real dt);
 
 /// Flare beam-heating stage: deposits grid.beam_flux into the upper-chromosphere
 /// electron/ion thermal pool (p_i) over a finite layer, gated by the temporal
 /// window around grid.sim_time, to drive chromospheric evaporation (Fisher et
 /// al. 1985). No-op unless grid.enable_beam_heating. Mutates p_i in place.
-void apply_beam_heating_stage(const Grid& grid, Vec& prim_state, float dt);
+void apply_beam_heating_stage(const Grid& grid, Vec& prim_state, Real dt);
 
 /// Ambient coronal heating stage: deposits the steady footpoint-anchored
 /// volumetric heating H(s) (physics.hpp::coronal_heating_rate) into the charged
@@ -191,14 +191,14 @@ void apply_beam_heating_stage(const Grid& grid, Vec& prim_state, float dt);
 /// enable_Te), driving the conductive flux that sustains the corona and, when
 /// ramped up (coronal_heat_enhance > 1), gentle chromospheric evaporation
 /// (Antiochos & Sturrock 1978). No-op unless grid.enable_coronal_heating.
-void apply_coronal_heating_stage(const Grid& grid, Vec& prim_state, float dt);
+void apply_coronal_heating_stage(const Grid& grid, Vec& prim_state, Real dt);
 
 /// TRAC adaptive cutoff temperature T_c (Johnston et al. 2020 Eq. 8): the
 /// maximum temperature among grid cells where the charged-fluid TR is
 /// under-resolved (L_R/L_T > 1/2, with L_T = T/|dT/ds|, L_R = Δs), clamped to
 /// [grid.trac_T_chrom, 0.2 T_peak]. Used by the conduction and cooling stages to
 /// broaden the unresolved TR. Exposed for testing.
-float compute_trac_cutoff_T(const Grid& grid, const Vec& prim_state);
+Real compute_trac_cutoff_T(const Grid& grid, const Vec& prim_state);
 
 /// Pure-explicit forward-Euler step — only the MUSCL+Rusanov R_E predictor of
 /// advance_Euler_state, with the implicit drag / temperature / conduction

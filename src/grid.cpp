@@ -15,7 +15,7 @@
 
 namespace chromosphere {
 
-void Grid::init(arma::uword ns_in, float CFL_in) {
+void Grid::init(arma::uword ns_in, Real CFL_in) {
     ns              = ns_in;
     n_mixture_state = ns * num_of_mixture_eq;
     n_state         = ns * num_of_eq;
@@ -24,14 +24,14 @@ void Grid::init(arma::uword ns_in, float CFL_in) {
     // Physical constants are already set by the default member initializers
     // in the header. (Re-stated here for clarity.)
     gamma_mono = 5.0f / 3.0f;
-    m_i        = static_cast<float>(eos_constants::m_h);
+    m_i        = static_cast<Real>(eos_constants::m_h);
     m_n        = m_i;
-    m_e        = static_cast<float>(eos_constants::m_e);
+    m_e        = static_cast<Real>(eos_constants::m_e);
     g          = 0.27395e3f;
-    mu_0       = 4.0f * static_cast<float>(arma::datum::pi) * 1.0e-7f;
-    k_b        = static_cast<float>(eos_constants::k_b);
+    mu_0       = 4.0f * static_cast<Real>(arma::datum::pi) * 1.0e-7f;
+    k_b        = static_cast<Real>(eos_constants::k_b);
     q_e        = 1.602176634e-19f;
-    chi_H_J    = static_cast<float>(eos_constants::chi_h);
+    chi_H_J    = static_cast<Real>(eos_constants::chi_h);
 
     ds_i.zeros(ns);
     B_imh.zeros(ns); B_iph.zeros(ns); B_i.zeros(ns);
@@ -134,8 +134,8 @@ void Grid::force_rebuild_metrics() {
     // the ghost (Neumann) at both ends so ds_iph_i[ns-1]/ds_imh_i[0] reproduce the
     // legacy 0.5*(ds_i + ip1/im1(ds_i,SLICE)) expressions used by rhs/conduction.
     if (ds_i.n_elem == ns && ns > 0) {
-        const float dmin = ds_i.min();
-        const float dmax = ds_i.max();
+        const Real dmin = ds_i.min();
+        const Real dmax = ds_i.max();
         // Reject a genuinely broken mesh. The all-zero state right after init()
         // (dmax == 0) is treated as "not yet populated" and skipped, not rejected.
         if (dmax > 0.0f) {
@@ -150,8 +150,8 @@ void Grid::force_rebuild_metrics() {
                 s_face(i + 1) = s_face(i) + ds_i(i);
             for (arma::uword i = 0; i < ns; ++i) {
                 s_i(i) = 0.5f * (s_face(i) + s_face(i + 1));
-                const float ds_ip1 = (i + 1 < ns) ? ds_i(i + 1) : ds_i(i);   // mirror
-                const float ds_im1 = (i > 0)      ? ds_i(i - 1) : ds_i(i);   // mirror
+                const Real ds_ip1 = (i + 1 < ns) ? ds_i(i + 1) : ds_i(i);   // mirror
+                const Real ds_im1 = (i > 0)      ? ds_i(i - 1) : ds_i(i);   // mirror
                 ds_iph_i(i) = 0.5f * (ds_i(i) + ds_ip1);
                 ds_imh_i(i) = 0.5f * (ds_im1 + ds_i(i));
             }

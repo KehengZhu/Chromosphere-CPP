@@ -96,8 +96,8 @@ static const char* g_current = "";
 // Inner/outer ghost cells are pinned to the interior values so all boundary
 // fluxes match interior fluxes (true fixed point of the explicit scheme).
 static Vec setup_uniform(Grid& grid, arma::uword n_cells,
-                         float ni_val, float nn_val,
-                         float Ti_val, float Tn_val) {
+                         Real ni_val, Real nn_val,
+                         Real Ti_val, Real Tn_val) {
     grid.init(n_cells, 0.25f);
 
     grid.ds_i.fill(1.0f);
@@ -127,7 +127,7 @@ static Vec setup_uniform(Grid& grid, arma::uword n_cells,
 
     // Pin inner/outer ghosts to the (uniform) interior values.
     for (arma::uword k = 0; k < num_of_eq; ++k) {
-        const float val = cons(arma::sub2ind(arma::size(n_cells, num_of_eq), 0, k));
+        const Real val = cons(arma::sub2ind(arma::size(n_cells, num_of_eq), 0, k));
         grid.inner_boundary0_i(k) = val;
         grid.inner_boundary1_i(k) = val;
         grid.outer_boundary0_i(k) = val;
@@ -145,7 +145,7 @@ static void test_scalar_to_get_scalar_inverse() {
     Grid grid;
     grid.init(8, 0.25f);
     Vec v(grid.ns);
-    for (arma::uword i = 0; i < grid.ns; ++i) v(i) = (float)i * 1.5f + 0.3f;
+    for (arma::uword i = 0; i < grid.ns; ++i) v(i) = (Real)i * 1.5f + 0.3f;
 
     for (arma::uword k = 0; k < num_of_eq; ++k) {
         Vec back = get_scalar(grid, scalar_to(grid, v, k), k);
@@ -161,7 +161,7 @@ static void test_ip1_im1_interior_shift() {
 
     Vec xn(grid.n_state, arma::fill::zeros);
     for (arma::uword i = 0; i < grid.ns; ++i)
-        xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_I)) = (float)(i + 1) * 10.0f;
+        xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_I)) = (Real)(i + 1) * 10.0f;
 
     const Vec xp = ip1(grid, xn);
     const Vec xm = im1(grid, xn);
@@ -183,7 +183,7 @@ static void test_flux_lim_is_minmod() {
     r(2) =  0.5f;
     r(3) =  1.0f;
     r(4) =  2.0f;
-    r(5) =  std::numeric_limits<float>::quiet_NaN();
+    r(5) =  std::numeric_limits<Real>::quiet_NaN();
     Vec out = flux_lim(r);
     EXPECT_NEAR(out(0), 0.0f, 1e-6);
     EXPECT_NEAR(out(1), 0.0f, 1e-6);
@@ -221,11 +221,11 @@ static void test_saha_ionization_fraction_log_domain() {
 
     Grid grid;
     grid.init(1, 0.25f);
-    EXPECT_TRUE(grid.k_b == static_cast<float>(eos_constants::k_b));
-    EXPECT_TRUE(grid.m_e == static_cast<float>(eos_constants::m_e));
-    EXPECT_TRUE(grid.m_i == static_cast<float>(eos_constants::m_h));
-    EXPECT_TRUE(grid.m_n == static_cast<float>(eos_constants::m_h));
-    EXPECT_TRUE(grid.chi_H_J == static_cast<float>(eos_constants::chi_h));
+    EXPECT_TRUE(grid.k_b == static_cast<Real>(eos_constants::k_b));
+    EXPECT_TRUE(grid.m_e == static_cast<Real>(eos_constants::m_e));
+    EXPECT_TRUE(grid.m_i == static_cast<Real>(eos_constants::m_h));
+    EXPECT_TRUE(grid.m_n == static_cast<Real>(eos_constants::m_h));
+    EXPECT_TRUE(grid.chi_H_J == static_cast<Real>(eos_constants::chi_h));
 }
 
 static void write_gamma_metadata(std::ofstream& out, const std::string& variant) {
@@ -780,8 +780,8 @@ static void test_mixture_state_round_trip_and_carrier_derivation() {
     Grid grid;
     grid.init(1, 0.25f);
     grid.eos_gamma_table = table;
-    grid.phi_g_imh.fill(static_cast<float>(phi));
-    grid.phi_g_iph.fill(static_cast<float>(phi));
+    grid.phi_g_imh.fill(static_cast<Real>(phi));
+    grid.phi_g_iph.fill(static_cast<Real>(phi));
     EXPECT_TRUE(grid.n_mixture_state == 3);
     Vec state(grid.n_mixture_state, arma::fill::zeros);
     mixture_pack_cell(grid, state, 0, rho, velocity, temperature, phi);
@@ -1247,35 +1247,56 @@ static void test_openmp_thread_safety_contracts() {
 
 static Vec setup_gamma_uniform_point(Grid& grid, const EosGammaTable& table,
                                      double n_h, double temperature) {
+    using Store = Vec::elem_type;
     Vec state = setup_gamma_equilibrium(grid, table, 4, false);
-    // Pick the closest float density/energy on the legal side of an exact table
-    // endpoint: the production policy is a hard domain error, so a state packed
-    // exactly AT an endpoint must not round outside it.
-    float rho_f = static_cast<float>(n_h*eos_constants::m_h);
-    while (rho_f/eos_constants::m_h > table.max_n_h())
-        rho_f = std::nextafter(rho_f, -std::numeric_limits<float>::infinity());
-    while (rho_f/eos_constants::m_h < table.min_n_h())
-        rho_f = std::nextafter(rho_f, std::numeric_limits<float>::infinity());
-    const double rho = rho_f;
+    // Pick the closest representable density/energy on the legal side of an exact
+    // table endpoint: the production policy is a hard domain error, so a state
+    // packed exactly AT an endpoint must not round outside it. Every step is one
+    // ULP of the STORAGE type, so the construction is the same experiment at any
+    // precision (a float ULP walk on a double state would take ~2^29 times as
+    // many iterations, and vice versa).
+    Store rho_s = static_cast<Store>(n_h*eos_constants::m_h);
+    while (rho_s/eos_constants::m_h > table.max_n_h())
+        rho_s = std::nextafter(rho_s, -std::numeric_limits<Store>::infinity());
+    while (rho_s/eos_constants::m_h < table.min_n_h())
+        rho_s = std::nextafter(rho_s, std::numeric_limits<Store>::infinity());
+    const double rho = rho_s;
     for (arma::uword i = 0; i < grid.ns; ++i)
         mixture_pack_cell(grid, state, i, rho, 0.0, temperature, 0.0);
     const auto packed_sz = arma::size(grid.ns, num_of_mixture_eq);
-    const double e_min = equilibrium_internal_energy(rho, table.min_temperature());
-    const double e_max = equilibrium_internal_energy(rho, table.max_temperature());
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        // Step by ULPs of the STORAGE type: with the diagnostic
-        // CHROMO_STATE_FLOAT64 build this is a double, and stepping by float
-        // infinities would make the loop take ~2^29 times as many iterations.
-        using Store = Vec::elem_type;
-        auto& e = state(arma::sub2ind(packed_sz, i, mix::ENERGY));
-        while (static_cast<double>(e) < e_min)
+    // Nudge against the SOLVER's own acceptance, not against a test-side
+    // recomputation of the endpoint energy. The two differ by O(1e-14) relative
+    // because the solver inverts through a log-domain n_h path, which is coarser
+    // than the 64-eps bracket tolerance in temperature_from_rho_eint: at float
+    // storage one ULP (6e-8) hides that mismatch, at double storage (1.1e-16) it
+    // does not. Using the real predicate makes the walk precision-independent.
+    auto accepted = [&](Store e_trial) {
+        Vec probe = state;
+        for (arma::uword i = 0; i < grid.ns; ++i)
+            probe(arma::sub2ind(packed_sz, i, mix::ENERGY)) = e_trial;
+        return !throws_any([&] { mixture_decode(grid, probe); });
+    };
+    {
+        // A handful of ULPs is expected; the cap only guarantees termination.
+        const int max_ulp_steps = 4096;
+        Store e = state(arma::sub2ind(packed_sz, 0, mix::ENERGY));
+        const Store e_packed = e;
+        int steps = 0;
+        while (!accepted(e) && steps++ < max_ulp_steps)
             e = std::nextafter(e, std::numeric_limits<Store>::infinity());
-        while (static_cast<double>(e) > e_max)
-            e = std::nextafter(e, -std::numeric_limits<Store>::infinity());
+        if (!accepted(e)) {
+            e = e_packed;
+            steps = 0;
+            while (!accepted(e) && steps++ < max_ulp_steps)
+                e = std::nextafter(e, -std::numeric_limits<Store>::infinity());
+        }
+        EXPECT_TRUE(accepted(e));
+        for (arma::uword i = 0; i < grid.ns; ++i)
+            state(arma::sub2ind(packed_sz, i, mix::ENERGY)) = e;
     }
     const auto sz = arma::size(grid.ns, num_of_mixture_eq);
     for (arma::uword k = 0; k < num_of_mixture_eq; ++k) {
-        const float value = state(arma::sub2ind(sz, 0, k));
+        const Store value = state(arma::sub2ind(sz, 0, k));
         grid.mix_inner_boundary0(k) = grid.mix_inner_boundary1(k) = value;
         grid.mix_outer_boundary0(k) = grid.mix_outer_boundary1(k) = value;
     }
@@ -1285,15 +1306,6 @@ static Vec setup_gamma_uniform_point(Grid& grid, const EosGammaTable& table,
 
 // The release solver must run at every corner of the EOS validity domain.
 static void test_release_production_table_domain_corners() {
-#ifdef CHROMO_STATE_FLOAT64
-    // This case exists to pin behaviour when a state packed AT an EOS table
-    // endpoint rounds outside it, and it walks the packed energy by single ULPs
-    // of the storage type to construct that state. Both the premise and the walk
-    // are specific to float32 storage; under the diagnostic double build the walk
-    // does not terminate in useful time and the case has nothing to assert.
-    std::cout << "        [skipped: float32-storage-specific]\n";
-    return;
-#else
     const EosGammaTable table = EosGammaTable::load(production_gamma_table_path());
     const double n_mid = std::sqrt(table.min_n_h()*table.max_n_h());
     const double t_mid = std::sqrt(table.min_temperature()*table.max_temperature());
@@ -1316,7 +1328,6 @@ static void test_release_production_table_domain_corners() {
         Vec dt(grid.ns, arma::fill::zeros);
         EXPECT_TRUE(!mixture_advance(grid, state, dt, decoded).has_nan());
     }
-#endif
 }
 
 static void test_stage9_acoustic_characteristic_speed() {
@@ -1492,7 +1503,7 @@ static void test_mixture_roe_flux_and_rusanov_fallback() {
     fallback.roe_characteristic_flux = true;
     fallback.pressure_reconstruct = true;
     const auto fsz = arma::size(fallback.ns, num_of_mixture_eq);
-    const float rho4 = extreme(arma::sub2ind(fsz, 4, mix::RHO));
+    const Real rho4 = extreme(arma::sub2ind(fsz, 4, mix::RHO));
     extreme(arma::sub2ind(fsz, 4, mix::MOM)) = rho4*3.0e5f;
     extreme(arma::sub2ind(fsz, 4, mix::ENERGY)) =
         extreme(arma::sub2ind(fsz, 4, mix::ENERGY))
@@ -1510,7 +1521,7 @@ static void test_mixture_integrator_path_and_guards() {
     const Vec state = setup_gamma_equilibrium(grid, table, 6, false);
     // The release solver never reads the legacy fixed gamma: a NaN there is
     // harmless because every thermodynamic factor comes from the Saha closure.
-    grid.gamma_mono = std::numeric_limits<float>::quiet_NaN();
+    grid.gamma_mono = std::numeric_limits<Real>::quiet_NaN();
     Vec dt(grid.ns); dt.fill(1.0e-4f);
     const MixtureField decoded = mixture_decode(grid, state);
     const Vec result = mixture_advance(grid, state, dt, decoded);
@@ -1787,9 +1798,9 @@ static void test_mixture_field_cache_contract() {
     // change, preventing silent stale-state and stale-boundary reads.
     Vec changed=state;
     EXPECT_TRUE(throws_any([&] { decoded.require_matches(grid,changed); }));
-    const float saved=grid.mix_inner_boundary0(mix::ENERGY);
+    const Real saved=grid.mix_inner_boundary0(mix::ENERGY);
     grid.mix_inner_boundary0(mix::ENERGY)=std::nextafter(
-        saved,std::numeric_limits<float>::infinity());
+        saved,std::numeric_limits<Real>::infinity());
     EXPECT_TRUE(throws_any([&] { decoded.require_matches(grid,state); }));
     grid.mix_inner_boundary0(mix::ENERGY)=saved;
     decoded.require_matches(grid,state);
@@ -1823,7 +1834,7 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
     unsetenv("ISO_TRAC");
     setenv("ISO_HEAT_FLUX", "0", 1);
     // Historical fixed-gamma helper remains exactly piecewise linear.
-    float linear_t, linear_ne, linear_nhi;
+    Real linear_t, linear_ne, linear_nhi;
     c7_full_profile(587.5f, linear_t, linear_ne, linear_nhi);
     EXPECT_NEAR(linear_t, 4417.5, 1e-6);
     // Gamma-mode PCHIP is nodal and C1 across representative C7 knots.
@@ -2053,7 +2064,7 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
         const double p_back = g0.p;               // the captured reservoir back-pressure
 
         // (7) second ghost: EOS-closed density on a one-sided HSE rung off the first.
-        const float ds = grid.ds_i(grid.ns-1);
+        const Real ds = grid.ds_i(grid.ns-1);
         EXPECT_REL(g1.p, p_back - ds*0.5*(g0.rho+g1.rho)*grid.g, 1e-5);
         EXPECT_REL(g0.rho, saha_density_from_pressure(p_back, g0.T), 2e-6);
         EXPECT_REL(g1.rho, saha_density_from_pressure(g1.p, g1.T), 2e-6);
@@ -2641,7 +2652,7 @@ static void test_swmf_godunov_flux_mode() {
         fallback.swmf_godunov_flux = true;
         fallback.godunov_stats.clear();
         const auto fsz = arma::size(fallback.ns, num_of_mixture_eq);
-        const float rho4 = extreme(arma::sub2ind(fsz, 4, mix::RHO));
+        const Real rho4 = extreme(arma::sub2ind(fsz, 4, mix::RHO));
         extreme(arma::sub2ind(fsz, 4, mix::MOM)) = rho4*3.0e5f;
         extreme(arma::sub2ind(fsz, 4, mix::ENERGY)) =
             extreme(arma::sub2ind(fsz, 4, mix::ENERGY))
@@ -2847,7 +2858,7 @@ static void test_flux_lim_mc3() {
     Vec r(7);
     r(0) = -1.0f; r(1) = 0.0f; r(2) = 0.5f; r(3) = 1.0f;
     r(4) = 2.0f;  r(5) = 10.0f;
-    r(6) = std::numeric_limits<float>::quiet_NaN();
+    r(6) = std::numeric_limits<Real>::quiet_NaN();
 
     Vec p = flux_lim_mc3_plus(r, 2.0f);
     EXPECT_NEAR(p(0), 0.0f,        1e-6);   // r<0 (sign disagreement) ⇒ 0
@@ -2882,20 +2893,20 @@ static void test_cons_prim_roundtrip() {
 // =========================================================================
 
 static void test_pressure_relation_eq38() {
-    const float Ti = 6500.0f, Tn = 6500.0f;
-    const float ni = 2.0e17f, nn = 1.0e19f;
+    const Real Ti = 6500.0f, Tn = 6500.0f;
+    const Real ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
     Vec cons = setup_uniform(grid, 4, ni, nn, Ti, Tn);
     Vec prim = cons2prim(grid, cons);
-    const float p_i = prim(arma::sub2ind(arma::size(grid.ns, num_of_eq), 0, prim::P_I));
-    const float p_n = prim(arma::sub2ind(arma::size(grid.ns, num_of_eq), 0, prim::P_N));
+    const Real p_i = prim(arma::sub2ind(arma::size(grid.ns, num_of_eq), 0, prim::P_I));
+    const Real p_n = prim(arma::sub2ind(arma::size(grid.ns, num_of_eq), 0, prim::P_N));
     EXPECT_REL(p_i, 2.0f * ni * grid.k_b * Ti, 1e-4);
     EXPECT_REL(p_n, 1.0f * nn * grid.k_b * Tn, 1e-4);
 }
 
 static void test_spectral_radius_uniform_at_rest() {
-    const float Ti = 6500.0f, Tn = 6500.0f;
-    const float ni = 2.0e17f, nn = 1.0e19f;
+    const Real Ti = 6500.0f, Tn = 6500.0f;
+    const Real ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
     Vec cons = setup_uniform(grid, 4, ni, nn, Ti, Tn);
 
@@ -2911,7 +2922,7 @@ static void test_spectral_radius_uniform_at_rest() {
 static void test_nu_in_collision_formula() {
     Grid grid;
     grid.init(1, 0.25f);
-    const float nn_val = 1.0e19f, Ti = 6500.0f, Tn = 6500.0f;
+    const Real nn_val = 1.0e19f, Ti = 6500.0f, Tn = 6500.0f;
     Vec nn_v(1), Ti_v(1), Tn_v(1);
     nn_v(0) = nn_val; Ti_v(0) = Ti; Tn_v(0) = Tn;
     const Vec nuin = nu_in(grid, nn_v, Ti_v, Tn_v);
@@ -2923,7 +2934,7 @@ static void test_nu_in_collision_formula() {
 }
 
 static void test_kappa_e_eq53() {
-    const float ne_val = 2.0e17f, nn_val = 1.0e19f, Te = 6500.0f;
+    const Real ne_val = 2.0e17f, nn_val = 1.0e19f, Te = 6500.0f;
     Vec ne_v(1), nn_v(1), Te_v(1);
     ne_v(0) = ne_val; nn_v(0) = nn_val; Te_v(0) = Te;
     Vec ke = kappa_e(ne_v, nn_v, Te_v);
@@ -2938,7 +2949,7 @@ static void test_kappa_e_eq53() {
 }
 
 static void test_kappa_n_eq59() {
-    const float ni_val = 2.0e17f, nn_val = 1.0e19f, Ti = 6500.0f, Tn = 6500.0f;
+    const Real ni_val = 2.0e17f, nn_val = 1.0e19f, Ti = 6500.0f, Tn = 6500.0f;
     Vec ni_v(1), nn_v(1), Ti_v(1), Tn_v(1);
     ni_v(0) = ni_val; nn_v(0) = nn_val; Ti_v(0) = Ti; Tn_v(0) = Tn;
     Vec kn = kappa_n(ni_v, nn_v, Ti_v, Tn_v);
@@ -2952,8 +2963,8 @@ static void test_kappa_n_eq59() {
 }
 
 static void test_kappa_n_dominates_in_chromosphere() {
-    const float Te = 6500.0f, Ti = 6500.0f, Tn = 6500.0f;
-    const float ne = 2.0e17f, nn = 1.0e19f;
+    const Real Te = 6500.0f, Ti = 6500.0f, Tn = 6500.0f;
+    const Real ne = 2.0e17f, nn = 1.0e19f;
     Vec ne_v(1); ne_v(0) = ne;
     Vec nn_v(1); nn_v(0) = nn;
     Vec Te_v(1); Te_v(0) = Te;
@@ -2974,7 +2985,7 @@ static void test_cal_dt_respects_cfl() {
     Vec cons = setup_uniform(grid, 10, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
     Vec dt   = cal_dt_i(grid, cons);
     Vec maxv = cal_max_v_i(grid, cons);
-    const float expected_dt = grid.CFL * arma::min(grid.ds_i) / arma::max(maxv);
+    const Real expected_dt = grid.CFL * arma::min(grid.ds_i) / arma::max(maxv);
     EXPECT_REL(dt(0), expected_dt, 1e-3);
     for (arma::uword i = 0; i < grid.ns; ++i)
         EXPECT_TRUE(dt(i) * maxv(i) / grid.ds_i(i) <= grid.CFL + 1e-6f);
@@ -2990,7 +3001,7 @@ static void test_cal_max_v_matches_spectral_radius() {
 }
 
 static void test_uniform_state_is_fixed_point() {
-    const float Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
+    const Real Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
     Vec cons  = setup_uniform(grid, 16, ni, nn, Ti, Tn);
     Vec cons0 = cons;
@@ -3002,7 +3013,7 @@ static void test_uniform_state_is_fixed_point() {
 }
 
 static void test_mass_conservation_on_uniform_state() {
-    const float ni = 2.0e17f, nn = 1.0e19f;
+    const Real ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
     Vec cons = setup_uniform(grid, 16, ni, nn, 6500.0f, 6500.0f);
     Vec dt   = cal_dt_i(grid, cons);
@@ -3019,7 +3030,7 @@ static void test_mass_conservation_on_uniform_state() {
 }
 
 static void test_rk4_uniform_fixed_point() {
-    const float Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
+    const Real Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
     Vec cons  = setup_uniform(grid, 8, ni, nn, Ti, Tn);
     Vec cons0 = cons;
@@ -3046,7 +3057,7 @@ static void test_ionization_rate_S_voronov_at_1e4K() {
 
     const double U  = (double)grid.chi_H_J / ((double)grid.k_b * 1.0e4);
     const double expected = 2.91e-14 * std::pow(U, 0.39) * std::exp(-U) / (0.232 + U);
-    EXPECT_REL(S(0), (float)expected, 1e-3);
+    EXPECT_REL(S(0), (Real)expected, 1e-3);
     // Sanity range: tiny at 10^4 K.
     EXPECT_TRUE(S(0) > 1e-23f && S(0) < 1e-20f);
 }
@@ -3070,7 +3081,7 @@ static void test_recombination_rate_alpha_hummer() {
 
     // Power-law check at T = 1e3 K: α(1e3)/α(1e4) = 10^0.75 ≈ 5.62.
     Vec T_low(1); T_low(0) = 1.0e3f;
-    EXPECT_REL(recombination_rate_alpha(grid, T_low)(0) / a(0), (float)std::pow(10.0, 0.75), 1e-3);
+    EXPECT_REL(recombination_rate_alpha(grid, T_low)(0) / a(0), (Real)std::pow(10.0, 0.75), 1e-3);
 }
 
 // Photoionization rate P_phot(grid) returns the Grid-configured rate
@@ -3104,28 +3115,28 @@ static void test_photoionization_rate_default_uniform() {
 // Voronov S_i in the chromosphere, so the fixed point now depends on the full
 // network (and on n_e, via the three-body f³ term).
 // ----------------------------------------------------------------------------
-static float network_dfdt(const Grid& grid, float T, float n_tot, float f, float P) {
+static Real network_dfdt(const Grid& grid, Real T, Real n_tot, Real f, Real P) {
     Vec Tv(1); Tv(0) = T;
     // Respect the same grid flags as apply_ionization_stage so the helper
     // stays consistent with the integrator's active network.
-    const float Si   = grid.enable_direct_collisional_ionization
+    const Real Si   = grid.enable_direct_collisional_ionization
                      ? ionization_rate_S(grid, Tv)(0) : 0.0f;
-    const float ar   = recombination_rate_alpha(grid, Tv)(0);
-    const float Scr  = ionization_rate_S_CR(grid, Tv)(0);
-    const float kc   = grid.enable_threebody_recombination
+    const Real ar   = recombination_rate_alpha(grid, Tv)(0);
+    const Real Scr  = ionization_rate_S_CR(grid, Tv)(0);
+    const Real kc   = grid.enable_threebody_recombination
                      ? recombination_rate_kappa_c(grid, Tv)(0) : 0.0f;
-    const float Stot = Si + Scr;
+    const Real Stot = Si + Scr;
     // Group κ_c into the three-body product before squaring n_tot (n_tot²
     // alone overflows float32 for n_tot ≳ 1e19).
     return (1.0f - f) * P + f * (1.0f - f) * n_tot * Stot
          - f * f * n_tot * ar - (f * f * f) * n_tot * (n_tot * kc);
 }
-static float network_equilibrium_f(const Grid& grid, float T, float n_tot, float P) {
+static Real network_equilibrium_f(const Grid& grid, Real T, Real n_tot, Real P) {
     // df/dt > 0 at f→0+ (when ionization can win) and < 0 at f=1, so the
     // physical equilibrium is bracketed by (ε, 1].
-    float lo = 1.0e-12f, hi = 1.0f;
+    Real lo = 1.0e-12f, hi = 1.0f;
     for (int it = 0; it < 200; ++it) {
-        const float mid = 0.5f * (lo + hi);
+        const Real mid = 0.5f * (lo + hi);
         if (network_dfdt(grid, T, n_tot, mid, P) > 0.0f) lo = mid; else hi = mid;
     }
     return 0.5f * (lo + hi);
@@ -3138,21 +3149,21 @@ static float network_equilibrium_f(const Grid& grid, float T, float n_tot, float
 // Stage E relaxes to the full-network equilibrium in both cases, and that the
 // photoionization-on equilibrium exceeds the photoionization-off one.
 static void test_stage_e_photoionization_drives_low_T_equilibrium() {
-    const float T = 6.5e3f;
-    const float n_tot_target = 1.0e19f;
-    const float f0 = 1.0e-3f;   // start very nearly neutral
+    const Real T = 6.5e3f;
+    const Real n_tot_target = 1.0e19f;
+    const Real f0 = 1.0e-3f;   // start very nearly neutral
 
     Grid grid_probe;
     grid_probe.init(1, 0.25f);
 
     // Full-network equilibria with photoionization on (P=1e-4) and off (P=0).
-    const float eq_on  = network_equilibrium_f(grid_probe, T, n_tot_target, 1.0e-4f);
-    const float eq_off = network_equilibrium_f(grid_probe, T, n_tot_target, 0.0f);
+    const Real eq_on  = network_equilibrium_f(grid_probe, T, n_tot_target, 1.0e-4f);
+    const Real eq_off = network_equilibrium_f(grid_probe, T, n_tot_target, 0.0f);
     // Photoionization is an extra ionization source, so it raises f_eq.
     EXPECT_TRUE(eq_on > eq_off);
 
     // -- Case A: photoionization ON (default) --
-    auto run_to_eq = [&](float P_phot) {
+    auto run_to_eq = [&](Real P_phot) {
         Grid grid;
         Vec cons = setup_uniform(grid, 1,
                                  f0 * n_tot_target,
@@ -3164,8 +3175,8 @@ static void test_stage_e_photoionization_drives_low_T_equilibrium() {
 
         // dt large enough to walk to equilibrium quickly via backward Euler.
         Vec Tv(1); Tv(0) = T;
-        const float a_probe = recombination_rate_alpha(grid, Tv)(0);
-        const float dt = 1.0f / std::max(grid.photoionization_rate,
+        const Real a_probe = recombination_rate_alpha(grid, Tv)(0);
+        const Real dt = 1.0f / std::max(grid.photoionization_rate,
                                          n_tot_target * a_probe);
         for (arma::uword step = 0; step < 4000; ++step) {
             // Re-pin T (test f-only kinetics).
@@ -3189,8 +3200,8 @@ static void test_stage_e_photoionization_drives_low_T_equilibrium() {
         return rho_i_f(0) / (rho_i_f(0) + rho_n_f(0));
     };
 
-    const float f_on  = run_to_eq(1.0e-4f);
-    const float f_off = run_to_eq(0.0f);
+    const Real f_on  = run_to_eq(1.0e-4f);
+    const Real f_off = run_to_eq(0.0f);
 
     // Each run must lock onto its own full-network equilibrium, and the
     // photoionization-on equilibrium must exceed the photoionization-off one
@@ -3221,12 +3232,12 @@ static void test_model_c7_photoionization_uses_route_b_closure() {
 
     // Reconstruct cell-center heights (model_c7_ic builds faces uniformly over
     // [1003, 2153] km — chromosphere + lower TR — with nF = ns + 5).
-    const float h0 = 1003.0f, h1 = 2153.0f;
+    const Real h0 = 1003.0f, h1 = 2153.0f;
     const arma::uword nF = grid.ns + 5;
     Vec h_cell(grid.ns);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float hFi  = h0 + (h1 - h0) * (float)i       / (float)(nF - 1);
-        const float hFi1 = h0 + (h1 - h0) * (float)(i + 1) / (float)(nF - 1);
+        const Real hFi  = h0 + (h1 - h0) * (Real)i       / (Real)(nF - 1);
+        const Real hFi1 = h0 + (h1 - h0) * (Real)(i + 1) / (Real)(nF - 1);
         h_cell(i) = 0.5f * (hFi + hFi1);
     }
 
@@ -3254,8 +3265,8 @@ static void test_model_c7_photoionization_uses_route_b_closure() {
     Vec rho_i_a = get_scalar(grid, prim_after, prim::RHO_I);
     Vec rho_n_a = get_scalar(grid, prim_after, prim::RHO_N);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float f_b = rho_i_b(i) / (rho_i_b(i) + rho_n_b(i));
-        const float f_a = rho_i_a(i) / (rho_i_a(i) + rho_n_a(i));
+        const Real f_b = rho_i_b(i) / (rho_i_b(i) + rho_n_b(i));
+        const Real f_a = rho_i_a(i) / (rho_i_a(i) + rho_n_a(i));
         EXPECT_TRUE(f_a > 0.0f && f_a < 1.0f);             // no runaway
         if (h_cell(i) < 1200.0f) {
             EXPECT_TRUE(std::fabs(f_a - f_b) < 5.0e-3f);   // near fixed point (inversion)
@@ -3266,8 +3277,8 @@ static void test_model_c7_photoionization_uses_route_b_closure() {
 }
 
 static void test_stage_e_no_chi_H_drain_from_photoionization() {
-    const float T = 6.5e3f;
-    const float ni = 1.0e15f, nn = 1.0e19f;
+    const Real T = 6.5e3f;
+    const Real ni = 1.0e15f, nn = 1.0e19f;
     Grid grid;
     Vec cons0 = setup_uniform(grid, 4, ni, nn, T, T);
     grid.enable_ionization    = true;
@@ -3277,7 +3288,7 @@ static void test_stage_e_no_chi_H_drain_from_photoionization() {
     Vec p_n_old = get_scalar(grid, cons2prim(grid, cons0), prim::P_N);
 
     Vec prim = cons2prim(grid, cons0);
-    const float dt = 1.0f;
+    const Real dt = 1.0f;
     apply_ionization_stage(grid, prim, dt);
 
     Vec rho_i_new = get_scalar(grid, prim, prim::RHO_I);
@@ -3286,8 +3297,8 @@ static void test_stage_e_no_chi_H_drain_from_photoionization() {
     Vec p_n_new   = get_scalar(grid, prim, prim::P_N);
 
     // f must have *grown* (photoionization is creating ions).
-    const float f_old = ni / (ni + nn);
-    const float f_new = rho_i_new(0) / (rho_i_new(0) + rho_n_new(0));
+    const Real f_old = ni / (ni + nn);
+    const Real f_new = rho_i_new(0) / (rho_i_new(0) + rho_n_new(0));
     EXPECT_TRUE(f_new > f_old + 1.0e-5f);
 
     // Photoionization contributes NO χ_H drain (its energy is supplied by the
@@ -3297,20 +3308,20 @@ static void test_stage_e_no_chi_H_drain_from_photoionization() {
     // (super-elastic). So Δ(e_i+e_n) must equal −(Γ_coll+Γ_mlvl−Γ_3b)·χ_H even
     // though a large photoionization rate is creating ions. The thermal/KE
     // exchange between species cancels in the sum (KE = 0 here, T_i = T_n).
-    const float chi = grid.chi_H_J;
+    const Real chi = grid.chi_H_J;
     Vec T_v(1); T_v(0) = T;
-    const float S    = ionization_rate_S(grid, T_v)(0);
-    const float Scr  = ionization_rate_S_CR(grid, T_v)(0);
-    const float kc   = recombination_rate_kappa_c(grid, T_v)(0);
-    const float n_i_n = rho_i_new(0) / grid.m_i;
-    const float n_n_n = rho_n_new(0) / grid.m_i;
-    const float Gamma_coll = dt * n_i_n * n_n_n * S;
-    const float Gamma_mlvl = dt * n_i_n * n_n_n * Scr;
-    const float Gamma_3b   = dt * n_i_n * n_i_n * (kc * n_i_n);
-    const float expected_dE_sum = -(Gamma_coll + Gamma_mlvl - Gamma_3b) * chi;
+    const Real S    = ionization_rate_S(grid, T_v)(0);
+    const Real Scr  = ionization_rate_S_CR(grid, T_v)(0);
+    const Real kc   = recombination_rate_kappa_c(grid, T_v)(0);
+    const Real n_i_n = rho_i_new(0) / grid.m_i;
+    const Real n_n_n = rho_n_new(0) / grid.m_i;
+    const Real Gamma_coll = dt * n_i_n * n_n_n * S;
+    const Real Gamma_mlvl = dt * n_i_n * n_n_n * Scr;
+    const Real Gamma_3b   = dt * n_i_n * n_i_n * (kc * n_i_n);
+    const Real expected_dE_sum = -(Gamma_coll + Gamma_mlvl - Gamma_3b) * chi;
 
-    const float delta_p_sum = (p_i_new(0) + p_n_new(0)) - (p_i_old(0) + p_n_old(0));
-    const float delta_e_sum = 1.5f * delta_p_sum;
+    const Real delta_p_sum = (p_i_new(0) + p_n_new(0)) - (p_i_old(0) + p_n_old(0));
+    const Real delta_e_sum = 1.5f * delta_p_sum;
 
     // The drain matches the collisional balance (independent of the large
     // photoionization rate). Absolute tolerance set well below |expected_dE_sum|.
@@ -3322,25 +3333,25 @@ static void test_stage_e_no_chi_H_drain_from_photoionization() {
 //  (2) ρ_i V + ρ_n U remains identically zero (no velocity)
 //  (3) Δ(e_i + e_n) per step equals -Γ_ion·χ_H (the optically-thin Lyman loss)
 static void test_stage_e_mass_momentum_chi_H_drain() {
-    const float ni = 2.0e17f, nn = 1.0e19f, T = 1.5e4f;  // high enough that S_i is non-negligible
+    const Real ni = 2.0e17f, nn = 1.0e19f, T = 1.5e4f;  // high enough that S_i is non-negligible
     Grid grid;
     Vec cons0 = setup_uniform(grid, 4, ni, nn, T, T);
     grid.enable_ionization = true;
 
     Vec prim = cons2prim(grid, cons0);
-    const float m = grid.m_i;
-    const float rho_i_old = ni * m;
-    const float rho_n_old = nn * m;
-    const float rho_tot   = rho_i_old + rho_n_old;
-    const float n_tot     = rho_tot / m;
+    const Real m = grid.m_i;
+    const Real rho_i_old = ni * m;
+    const Real rho_n_old = nn * m;
+    const Real rho_tot   = rho_i_old + rho_n_old;
+    const Real n_tot     = rho_tot / m;
     Vec T_v(1); T_v(0) = T;
-    const float S = ionization_rate_S(grid, T_v)(0);
+    const Real S = ionization_rate_S(grid, T_v)(0);
 
     // Stage E with a small dt: the multilevel S_CR drain is large at 1.5e4 K,
     // so dt is kept small enough that the χ_H drain stays well below the
     // available thermal energy (no pressure-floor clamp), keeping the clean
     // Δ(e_i+e_n) = −(drain) balance testable.
-    const float dt = 1.0e-5f;
+    const Real dt = 1.0e-5f;
     apply_ionization_stage(grid, prim, dt);
 
     // Mass: ρ_i + ρ_n unchanged per cell.
@@ -3364,11 +3375,11 @@ static void test_stage_e_mass_momentum_chi_H_drain() {
     Vec p_n_old = get_scalar(grid, cons2prim(grid, cons0), prim::P_N);
     Vec p_i_new = get_scalar(grid, prim, prim::P_I);
     Vec p_n_new = get_scalar(grid, prim, prim::P_N);
-    const float n_i_new = rho_i_new(0) / m;
-    const float n_n_new = rho_n_new(0) / m;
-    const float Scr = ionization_rate_S_CR(grid, T_v)(0);
-    const float kc  = recombination_rate_kappa_c(grid, T_v)(0);
-    const float chi = grid.chi_H_J;
+    const Real n_i_new = rho_i_new(0) / m;
+    const Real n_n_new = rho_n_new(0) / m;
+    const Real Scr = ionization_rate_S_CR(grid, T_v)(0);
+    const Real kc  = recombination_rate_kappa_c(grid, T_v)(0);
+    const Real chi = grid.chi_H_J;
 
     // The thermal/KE exchange between species cancels in the SUM Δ(e_i+e_n),
     // leaving only the χ_H balance with the electron thermal pool: collisional
@@ -3376,12 +3387,12 @@ static void test_stage_e_mass_momentum_chi_H_drain() {
     // returns it (super-elastic). Radiative recombination radiates χ_H away and
     // photoionization is photon-powered — neither touches the thermal pool. So
     //   Δ(e_i+e_n) = -(Γ_coll + Γ_mlvl - Γ_3b)·χ_H.
-    const float Gamma_coll = dt * n_i_new * n_n_new * S;
-    const float Gamma_mlvl = dt * n_i_new * n_n_new * Scr;
-    const float Gamma_3b   = dt * n_i_new * n_i_new * (kc * n_i_new);
-    const float delta_p_sum  = (p_i_new(0) + p_n_new(0)) - (p_i_old(0) + p_n_old(0));
-    const float delta_e_sum  = 1.5f * delta_p_sum;
-    const float expected_dE  = -(Gamma_coll + Gamma_mlvl - Gamma_3b) * chi;
+    const Real Gamma_coll = dt * n_i_new * n_n_new * S;
+    const Real Gamma_mlvl = dt * n_i_new * n_n_new * Scr;
+    const Real Gamma_3b   = dt * n_i_new * n_i_new * (kc * n_i_new);
+    const Real delta_p_sum  = (p_i_new(0) + p_n_new(0)) - (p_i_old(0) + p_n_old(0));
+    const Real delta_e_sum  = 1.5f * delta_p_sum;
+    const Real expected_dE  = -(Gamma_coll + Gamma_mlvl - Gamma_3b) * chi;
     EXPECT_REL(delta_e_sum, expected_dE, 1e-2);
 }
 
@@ -3390,23 +3401,23 @@ static void test_stage_e_mass_momentum_chi_H_drain() {
 // ionization = recombination including the multilevel S_CR and three-body α_c
 // channels (no longer the two-coefficient f = S_i/(S_i+α_r)).
 static void test_stage_e_kinetic_equilibrium() {
-    const float T = 3.0e4f;  // pick T so S_i/α_r is moderate (not tiny, not huge)
-    const float ni0 = 5.0e17f, nn0 = 5.0e18f;
-    const float n_tot = ni0 + nn0;
+    const Real T = 3.0e4f;  // pick T so S_i/α_r is moderate (not tiny, not huge)
+    const Real ni0 = 5.0e17f, nn0 = 5.0e18f;
+    const Real n_tot = ni0 + nn0;
     Grid grid;
     Vec cons = setup_uniform(grid, 1, ni0, nn0, T, T);
     grid.enable_ionization    = true;
     grid.photoionization_rate = 0.0f;   // isolate the collisional/recombination network
 
     Vec T_v(1); T_v(0) = T;
-    const float S = ionization_rate_S(grid, T_v)(0);
-    const float a = recombination_rate_alpha(grid, T_v)(0);
+    const Real S = ionization_rate_S(grid, T_v)(0);
+    const Real a = recombination_rate_alpha(grid, T_v)(0);
 
     Vec prim = cons2prim(grid, cons);
     // dt scaled so a single Stage E call sees τ_rec ~ 1/(n_e α_r) per step
     // (i.e., we relax over many "rate times").
-    const float n_e = ni0;
-    const float dt  = 0.5f / (n_e * (S + a));  // moderate per-step relaxation
+    const Real n_e = ni0;
+    const Real dt  = 0.5f / (n_e * (S + a));  // moderate per-step relaxation
     const arma::uword n_steps = 200;
 
     for (arma::uword step = 0; step < n_steps; ++step) {
@@ -3431,10 +3442,10 @@ static void test_stage_e_kinetic_equilibrium() {
 
     Vec rho_i_f = get_scalar(grid, prim, prim::RHO_I);
     Vec rho_n_f = get_scalar(grid, prim, prim::RHO_N);
-    const float f_final = rho_i_f(0) / (rho_i_f(0) + rho_n_f(0));
+    const Real f_final = rho_i_f(0) / (rho_i_f(0) + rho_n_f(0));
 
     // Compare against the full-network equilibrium (ionization = recombination).
-    const float f_eq_expected = network_equilibrium_f(grid, T, n_tot, 0.0f);
+    const Real f_eq_expected = network_equilibrium_f(grid, T, n_tot, 0.0f);
     EXPECT_REL(f_final, f_eq_expected, 1e-2);
 }
 
@@ -3443,10 +3454,10 @@ static void test_stage_e_kinetic_equilibrium() {
 // solve at its algebraic root, where catastrophic cancellation would show up
 // if the safeguarded-Newton logic were wrong.
 static void test_stage_e_fixed_point_at_kinetic_equilibrium() {
-    const float T = 8.0e3f;   // moderate f_eq (~0.3), so both species are well
+    const Real T = 8.0e3f;   // moderate f_eq (~0.3), so both species are well
                               // resolved in float32 (avoids the 1-f≈0 minority
                               // precision loss that T=3e4, f_eq→1 would cause)
-    const float n_tot_target = 1.0e19f;
+    const Real n_tot_target = 1.0e19f;
     // Enable the full network (including three-body κ_c) so the Stage-E cubic
     // is exercised at its algebraic root — the cubic solver is the target here.
     Grid g_probe;
@@ -3454,10 +3465,10 @@ static void test_stage_e_fixed_point_at_kinetic_equilibrium() {
     g_probe.photoionization_rate                  = 0.0f;
     g_probe.enable_direct_collisional_ionization  = true;
     g_probe.enable_threebody_recombination        = true;
-    const float f_eq = network_equilibrium_f(g_probe, T, n_tot_target, 0.0f);
+    const Real f_eq = network_equilibrium_f(g_probe, T, n_tot_target, 0.0f);
 
-    const float ni = f_eq * n_tot_target;
-    const float nn = (1.0f - f_eq) * n_tot_target;
+    const Real ni = f_eq * n_tot_target;
+    const Real nn = (1.0f - f_eq) * n_tot_target;
     Grid grid;
     Vec cons = setup_uniform(grid, 4, ni, nn, T, T);
     grid.enable_ionization                       = true;
@@ -3495,7 +3506,7 @@ static void test_stage_e_large_dt_bounded() {
     Vec rho_i = get_scalar(grid, prim, prim::RHO_I);
     Vec rho_n = get_scalar(grid, prim, prim::RHO_N);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float f = rho_i(i) / (rho_i(i) + rho_n(i));
+        const Real f = rho_i(i) / (rho_i(i) + rho_n(i));
         EXPECT_TRUE(std::isfinite(f) && f >= 0.0f && f <= 1.0f);
         EXPECT_TRUE(std::isfinite(rho_i(i)) && rho_i(i) >= 0.0f);
         EXPECT_TRUE(std::isfinite(rho_n(i)) && rho_n(i) >= 0.0f);
@@ -3512,9 +3523,9 @@ static void test_stage_e_large_dt_bounded() {
 // dominated (cool, high f), kinetic equilibrium, and absurd time steps. This
 // test sweeps the (T, f_old, dt) cube to catch any branch that breaks it.
 static void test_stage_e_conserves_rho_tot_per_cell() {
-    const float T_table[]    = {5.0e3f, 8.0e3f, 1.2e4f, 2.0e4f};      // K
-    const float f_old_table[] = {0.01f, 0.20f, 0.50f, 0.80f, 0.99f};   // ionization fraction
-    const float dt_table[]   = {1.0e-6f, 1.0e-3f, 1.0f, 1.0e3f};      // s — last one is well past saturation
+    const Real T_table[]    = {5.0e3f, 8.0e3f, 1.2e4f, 2.0e4f};      // K
+    const Real f_old_table[] = {0.01f, 0.20f, 0.50f, 0.80f, 0.99f};   // ionization fraction
+    const Real dt_table[]   = {1.0e-6f, 1.0e-3f, 1.0f, 1.0e3f};      // s — last one is well past saturation
 
     Grid grid;
     grid.init(static_cast<arma::uword>(sizeof(T_table)/sizeof(T_table[0])
@@ -3524,8 +3535,8 @@ static void test_stage_e_conserves_rho_tot_per_cell() {
     // Lay out every (T, f_old) pair across the grid cells, with a fixed total
     // number density n_tot so ρ_tot is the same in every cell. Then we can
     // assert per-cell ρ_tot equals the same scalar before AND after the stage.
-    const float n_tot = 1.0e19f;                  // m^-3
-    const float rho_tot_target = n_tot * grid.m_i;
+    const Real n_tot = 1.0e19f;                  // m^-3
+    const Real rho_tot_target = n_tot * grid.m_i;
 
     // Table header — printed once so the manual reader can scan the matrix.
     std::cout << "  [stage E ρ_tot conservation table]  "
@@ -3544,15 +3555,15 @@ static void test_stage_e_conserves_rho_tot_per_cell() {
               << "\n";
     std::cout << "  " << std::string(96, '-') << "\n";
 
-    auto run_one_dt = [&](float dt) {
+    auto run_one_dt = [&](Real dt) {
         Vec prim = arma::zeros<Vec>(grid.n_state);
         // Remember each cell's (T, f_old) so we can label the table rows.
-        std::vector<std::pair<float,float>> cell_label(grid.ns);
+        std::vector<std::pair<Real,Real>> cell_label(grid.ns);
         arma::uword cell = 0;
-        for (float T : T_table) {
-            for (float f_old : f_old_table) {
-                const float n_i = f_old * n_tot;
-                const float n_n = (1.0f - f_old) * n_tot;
+        for (Real T : T_table) {
+            for (Real f_old : f_old_table) {
+                const Real n_i = f_old * n_tot;
+                const Real n_n = (1.0f - f_old) * n_tot;
                 const auto sz = arma::size(grid.ns, num_of_eq);
                 prim(arma::sub2ind(sz, cell, prim::RHO_I)) = n_i * grid.m_i;
                 prim(arma::sub2ind(sz, cell, prim::RHO_N)) = n_n * grid.m_n;
@@ -3582,8 +3593,8 @@ static void test_stage_e_conserves_rho_tot_per_cell() {
         Vec rho_i_after = get_scalar(grid, prim, prim::RHO_I);
         Vec rho_n_after = get_scalar(grid, prim, prim::RHO_N);
         for (arma::uword i = 0; i < grid.ns; ++i) {
-            const float rho_tot_before_i = rho_i_before(i) + rho_n_before(i);
-            const float rho_tot_after_i  = rho_i_after (i) + rho_n_after (i);
+            const Real rho_tot_before_i = rho_i_before(i) + rho_n_before(i);
+            const Real rho_tot_after_i  = rho_i_after (i) + rho_n_after (i);
             EXPECT_REL(rho_tot_after_i, rho_tot_before_i, 1e-5);
             EXPECT_REL(rho_tot_after_i, rho_tot_target,    1e-5);
 
@@ -3608,7 +3619,7 @@ static void test_stage_e_conserves_rho_tot_per_cell() {
         std::cout << "  " << std::string(96, '-') << "\n";
     };
 
-    for (float dt : dt_table) run_one_dt(dt);
+    for (Real dt : dt_table) run_one_dt(dt);
 }
 
 // End-to-end: enable Stage E and drive the Model C7 atmosphere for many steps.
@@ -3650,7 +3661,7 @@ static void test_advance_euler_stable_under_model_c7_with_ionization() {
 // With ionization disabled, advance_Euler_state must be byte-identical to
 // the previous (pre-Stage E) behavior — a clean regression baseline.
 static void test_advance_euler_no_op_when_ionization_disabled() {
-    const float Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
+    const Real Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
     Vec cons  = setup_uniform(grid, 16, ni, nn, Ti, Tn);
     EXPECT_TRUE(!grid.enable_ionization);  // default off
@@ -3779,7 +3790,7 @@ static void test_pfss_ic_grid_invariants() {
 
     // dinvB_ds_i matches the finite-difference of 1/B that flux.cpp:74 uses.
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float expected = (1.0f / grid.B_iph(i) - 1.0f / grid.B_imh(i)) / grid.ds_i(i);
+        const Real expected = (1.0f / grid.B_iph(i) - 1.0f / grid.B_imh(i)) / grid.ds_i(i);
         EXPECT_REL(grid.dinvB_ds_i(i), expected, 1e-5);
     }
 
@@ -3795,9 +3806,9 @@ static void test_pfss_ic_grid_invariants() {
     // 2 * T_K, where T_K = 6700.
     {
         const Vec& ob = grid.outer_boundary0_i;
-        const float n_i = ob(cons::RHO_I) / grid.m_i;
-        const float phi_g = grid.phi_g_iph(grid.ns - 1);
-        const float T_eff = (2.0f/3.0f * ob(cons::E_I) - 2.0f/3.0f * grid.m_i * n_i * phi_g)
+        const Real n_i = ob(cons::RHO_I) / grid.m_i;
+        const Real phi_g = grid.phi_g_iph(grid.ns - 1);
+        const Real T_eff = (2.0f/3.0f * ob(cons::E_I) - 2.0f/3.0f * grid.m_i * n_i * phi_g)
                           / (2.0f * n_i * grid.k_b);
         EXPECT_REL(T_eff, 2.0f * 6700.0f, 1e-4);
     }
@@ -3826,7 +3837,7 @@ static void test_analytic_canopy_B_profile() {
     Vec xn = analytic_canopy_ic(grid);
 
     // Recipe constants (mirror analytic_canopy.cpp):
-    const float B0 = 1.0e-2f, Binf = 1.5e-3f, HB = 3.0e5f;
+    const Real B0 = 1.0e-2f, Binf = 1.5e-3f, HB = 3.0e5f;
 
     // Foot (i=0 imh face) should sit at B0; far end should approach Binf.
     EXPECT_REL(grid.B_imh(0), B0, 1e-4);
@@ -3834,13 +3845,13 @@ static void test_analytic_canopy_B_profile() {
     EXPECT_TRUE(grid.B_iph(grid.ns - 1) < 1.05f * B0);
 
     // Exponential decay rate at the foot: dB/ds ≈ -(B0 - Binf)/HB.
-    const float dBds = (grid.B_iph(0) - grid.B_imh(0)) / grid.ds_i(0);
-    const float expected = -(B0 - Binf) / HB * std::exp(-grid.ds_i(0) / (2.0f * HB));
+    const Real dBds = (grid.B_iph(0) - grid.B_imh(0)) / grid.ds_i(0);
+    const Real expected = -(B0 - Binf) / HB * std::exp(-grid.ds_i(0) / (2.0f * HB));
     EXPECT_REL(dBds, expected, 5e-2);  // first-order in ds/HB
 
     // dinvB_ds_i is consistent with the B(s) finite difference.
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float expected_d = (1.0f / grid.B_iph(i) - 1.0f / grid.B_imh(i)) / grid.ds_i(i);
+        const Real expected_d = (1.0f / grid.B_iph(i) - 1.0f / grid.B_imh(i)) / grid.ds_i(i);
         EXPECT_REL(grid.dinvB_ds_i(i), expected_d, 1e-5);
     }
 }
@@ -3861,13 +3872,13 @@ static void test_apply_open_bcs_mirrors_and_extrapolates() {
     // outflow path; lower cells get a negative V to exercise the wall mirror.
     Vec xn = arma::zeros<Vec>(grid.n_state);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float n_i = 1.0e17f * (1.0f + 0.1f * (float)i);
-        const float n_n = 2.0e19f * (1.0f - 0.05f * (float)i);
-        const float T   = 6500.0f + 50.0f * (float)i;
-        const float V   = (i < grid.ns / 2) ? -120.0f - 5.0f * (float)i :  80.0f + 5.0f * (float)i;
-        const float U   = (i < grid.ns / 2) ? -100.0f - 4.0f * (float)i :  60.0f + 4.0f * (float)i;
-        const float rho_i = n_i * grid.m_i;
-        const float rho_n = n_n * grid.m_n;
+        const Real n_i = 1.0e17f * (1.0f + 0.1f * (Real)i);
+        const Real n_n = 2.0e19f * (1.0f - 0.05f * (Real)i);
+        const Real T   = 6500.0f + 50.0f * (Real)i;
+        const Real V   = (i < grid.ns / 2) ? -120.0f - 5.0f * (Real)i :  80.0f + 5.0f * (Real)i;
+        const Real U   = (i < grid.ns / 2) ? -100.0f - 4.0f * (Real)i :  60.0f + 4.0f * (Real)i;
+        const Real rho_i = n_i * grid.m_i;
+        const Real rho_n = n_n * grid.m_n;
         const auto sz = arma::size(grid.ns, num_of_eq);
         xn(arma::sub2ind(sz, i, cons::RHO_I)) = rho_i;
         xn(arma::sub2ind(sz, i, cons::RHO_N)) = rho_n;
@@ -3924,13 +3935,13 @@ static void test_apply_open_bcs_outer_velocity_halving_pattern() {
     grid.init(8, 0.25f);
     Vec xn = arma::zeros<Vec>(grid.n_state);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float n_i = 1.0e17f;
-        const float n_n = 2.0e19f;
-        const float T   = 6500.0f;
-        const float V   = -250.0f;  // negative — inflow case, should still pass through
-        const float U   = -200.0f;
-        const float rho_i = n_i * grid.m_i;
-        const float rho_n = n_n * grid.m_n;
+        const Real n_i = 1.0e17f;
+        const Real n_n = 2.0e19f;
+        const Real T   = 6500.0f;
+        const Real V   = -250.0f;  // negative — inflow case, should still pass through
+        const Real U   = -200.0f;
+        const Real rho_i = n_i * grid.m_i;
+        const Real rho_n = n_n * grid.m_n;
         const auto sz = arma::size(grid.ns, num_of_eq);
         xn(arma::sub2ind(sz, i, cons::RHO_I)) = rho_i;
         xn(arma::sub2ind(sz, i, cons::RHO_N)) = rho_n;
@@ -3942,16 +3953,16 @@ static void test_apply_open_bcs_outer_velocity_halving_pattern() {
 
     apply_open_bcs(grid, xn);
 
-    const float V_int = -250.0f;
-    const float U_int = -200.0f;
+    const Real V_int = -250.0f;
+    const Real U_int = -200.0f;
 
-    const float V_g0 = grid.outer_boundary0_i(cons::MOM_I) / grid.outer_boundary0_i(cons::RHO_I);
-    const float U_g0 = grid.outer_boundary0_i(cons::MOM_N) / grid.outer_boundary0_i(cons::RHO_N);
+    const Real V_g0 = grid.outer_boundary0_i(cons::MOM_I) / grid.outer_boundary0_i(cons::RHO_I);
+    const Real U_g0 = grid.outer_boundary0_i(cons::MOM_N) / grid.outer_boundary0_i(cons::RHO_N);
     EXPECT_REL(V_g0, V_int, 1e-4);
     EXPECT_REL(U_g0, U_int, 1e-4);
 
-    const float V_g1 = grid.outer_boundary1_i(cons::MOM_I) / grid.outer_boundary1_i(cons::RHO_I);
-    const float U_g1 = grid.outer_boundary1_i(cons::MOM_N) / grid.outer_boundary1_i(cons::RHO_N);
+    const Real V_g1 = grid.outer_boundary1_i(cons::MOM_I) / grid.outer_boundary1_i(cons::RHO_I);
+    const Real U_g1 = grid.outer_boundary1_i(cons::MOM_N) / grid.outer_boundary1_i(cons::RHO_N);
     EXPECT_REL(V_g1, V_int, 1e-4);
     EXPECT_REL(U_g1, U_int, 1e-4);
 }
@@ -3970,11 +3981,11 @@ static void test_open_bcs_stability_under_model_c7() {
     Vec xn = model_c7_ic(grid);
 
     auto column_mass = [&]() {
-        float M = 0.0f;
+        Real M = 0.0f;
         for (arma::uword i = 0; i < grid.ns; ++i) {
             const auto sz = arma::size(grid.ns, num_of_eq);
-            const float rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
-            const float rho_n = xn(arma::sub2ind(sz, i, cons::RHO_N));
+            const Real rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
+            const Real rho_n = xn(arma::sub2ind(sz, i, cons::RHO_N));
             M += (rho_i + rho_n) * grid.ds_i(i);
         }
         return M;
@@ -3993,7 +4004,7 @@ static void test_open_bcs_stability_under_model_c7() {
         EXPECT_TRUE(arma::min(rho_i) > 0.0f);
         EXPECT_TRUE(arma::min(rho_n) > 0.0f);
     }
-    const float M_end = column_mass();
+    const Real M_end = column_mass();
     EXPECT_TRUE(std::isfinite(M_end) && M_end > 0.0f);
 }
 
@@ -4009,20 +4020,20 @@ static void test_model_c7_bc_discrete_hse_inner_mach_capped_outer() {
     const auto sz = arma::size(grid.ns, num_of_eq);
 
     // IC-pinned inner reservoir (Dirichlet ρ) and decoded cell-0 pressure.
-    const float rho_i_pinned = grid.inner_boundary0_i(cons::RHO_I);
-    const float rho_n_pinned = grid.inner_boundary0_i(cons::RHO_N);
-    const float phi_g_inner  = grid.phi_g_imh(0);
+    const Real rho_i_pinned = grid.inner_boundary0_i(cons::RHO_I);
+    const Real rho_n_pinned = grid.inner_boundary0_i(cons::RHO_N);
+    const Real phi_g_inner  = grid.phi_g_imh(0);
     auto ghost_p = [&](const Vec& ob, arma::uword E, arma::uword RHO, arma::uword MOM) {
-        const float rho = ob(RHO);
-        const float V   = ob(MOM) / rho;
+        const Real rho = ob(RHO);
+        const Real V   = ob(MOM) / rho;
         return 2.0f/3.0f * (ob(E) - 0.5f * rho * V * V - rho * phi_g_inner);
     };
     // Cell-0 pressures for the discrete-HSE comparison.
-    const float rho_i_0 = xn(arma::sub2ind(sz, 0, cons::RHO_I));
-    const float n_i_0   = rho_i_0 / grid.m_i;
-    const float phi_g_c0 = 0.5f * (grid.phi_g_imh(0) + grid.phi_g_iph(0));
-    const float V0       = xn(arma::sub2ind(sz, 0, cons::MOM_I)) / rho_i_0;
-    const float p_i_cell0 = 2.0f/3.0f * (xn(arma::sub2ind(sz, 0, cons::E_I))
+    const Real rho_i_0 = xn(arma::sub2ind(sz, 0, cons::RHO_I));
+    const Real n_i_0   = rho_i_0 / grid.m_i;
+    const Real phi_g_c0 = 0.5f * (grid.phi_g_imh(0) + grid.phi_g_iph(0));
+    const Real V0       = xn(arma::sub2ind(sz, 0, cons::MOM_I)) / rho_i_0;
+    const Real p_i_cell0 = 2.0f/3.0f * (xn(arma::sub2ind(sz, 0, cons::E_I))
                             - 0.5f * rho_i_0 * V0 * V0 - rho_i_0 * phi_g_c0);
 
     model_c7_update_bc(grid, xn);
@@ -4034,28 +4045,28 @@ static void test_model_c7_bc_discrete_hse_inner_mach_capped_outer() {
     EXPECT_TRUE(grid.inner_boundary0_i(cons::MOM_I) == 0.0f);   // V = 0
     EXPECT_TRUE(grid.inner_boundary0_i(cons::MOM_N) == 0.0f);   // U = 0
     // Hydrostatic ghost pressure: p_ghost = p_0 + ρ_0 g ds0 > p_0.
-    const float p_i_ghost = ghost_p(grid.inner_boundary0_i, cons::E_I, cons::RHO_I, cons::MOM_I);
+    const Real p_i_ghost = ghost_p(grid.inner_boundary0_i, cons::E_I, cons::RHO_I, cons::MOM_I);
     EXPECT_TRUE(p_i_ghost > p_i_cell0);
-    const float ds0 = grid.ds_i(0);
+    const Real ds0 = grid.ds_i(0);
     EXPECT_REL(p_i_ghost, p_i_cell0 + rho_i_0 * grid.g * ds0, 1e-3);
 
     // --- Outer: Mach-capped outflow, U locked to V ---
     // Force a large outflow in cell ns-1; the ghost V must be capped at
     // 0.05 c_s(T_TR) and the neutral ghost U must equal V.
     const arma::uword L = grid.ns - 1;
-    const float rho_i_L = xn(arma::sub2ind(sz, L, cons::RHO_I));
-    const float rho_n_L = xn(arma::sub2ind(sz, L, cons::RHO_N));
-    const float V_big   = 5.0e4f;   // 50 km/s, far above the cap
+    const Real rho_i_L = xn(arma::sub2ind(sz, L, cons::RHO_I));
+    const Real rho_n_L = xn(arma::sub2ind(sz, L, cons::RHO_N));
+    const Real V_big   = 5.0e4f;   // 50 km/s, far above the cap
     xn(arma::sub2ind(sz, L, cons::MOM_I)) = rho_i_L * V_big;
     xn(arma::sub2ind(sz, L, cons::MOM_N)) = rho_n_L * V_big;
 
     model_c7_update_bc(grid, xn);
 
-    const float T_TR  = 2.310e4f;   // table-top TR-base temperature
-    const float c_s   = std::sqrt(2.0f * grid.gamma_mono * grid.k_b * T_TR / grid.m_i);
-    const float V_cap = 0.05f * c_s;
-    const float Vg = grid.outer_boundary0_i(cons::MOM_I) / grid.outer_boundary0_i(cons::RHO_I);
-    const float Ug = grid.outer_boundary0_i(cons::MOM_N) / grid.outer_boundary0_i(cons::RHO_N);
+    const Real T_TR  = 2.310e4f;   // table-top TR-base temperature
+    const Real c_s   = std::sqrt(2.0f * grid.gamma_mono * grid.k_b * T_TR / grid.m_i);
+    const Real V_cap = 0.05f * c_s;
+    const Real Vg = grid.outer_boundary0_i(cons::MOM_I) / grid.outer_boundary0_i(cons::RHO_I);
+    const Real Ug = grid.outer_boundary0_i(cons::MOM_N) / grid.outer_boundary0_i(cons::RHO_N);
     EXPECT_REL(Vg, V_cap, 1e-3);    // capped (positive outflow)
     EXPECT_REL(Ug, Vg, 1e-5);       // neutral locked to charge fluid
     // Outer ρ is Neumann (tracks cell ns-1).
@@ -4082,32 +4093,32 @@ static void test_model_c7_tr_jump_bc() {
     EXPECT_TRUE(grid.impose_outer_heat_flux == grid.enable_radiative_cooling);
 
     const arma::uword nl = grid.ns - 1;
-    const float ds        = grid.ds_i(nl);
-    const float phi_g_out = grid.phi_g_iph(nl);
+    const Real ds        = grid.ds_i(nl);
+    const Real phi_g_out = grid.phi_g_iph(nl);
 
     // Decode an interior cell's ion pressure / density / temperature (cons2prim).
-    auto cell_piT = [&](arma::uword i, float& p_i, float& rho_i, float& T_i) {
+    auto cell_piT = [&](arma::uword i, Real& p_i, Real& rho_i, Real& T_i) {
         rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
-        const float V     = xn(arma::sub2ind(sz, i, cons::MOM_I)) / rho_i;
-        const float E_i   = xn(arma::sub2ind(sz, i, cons::E_I));
-        const float phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
+        const Real V     = xn(arma::sub2ind(sz, i, cons::MOM_I)) / rho_i;
+        const Real E_i   = xn(arma::sub2ind(sz, i, cons::E_I));
+        const Real phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
         p_i = 2.0f/3.0f * E_i - 1.0f/3.0f * rho_i * V * V - 2.0f/3.0f * rho_i * phi_g;
         T_i = p_i / (2.0f * (rho_i / grid.m_i) * grid.k_b);
     };
-    float p_i_top, rho_i_top, T_top, p_i_2, rho_i_2, T_2;
+    Real p_i_top, rho_i_top, T_top, p_i_2, rho_i_2, T_2;
     cell_piT(nl, p_i_top, rho_i_top, T_top);
     cell_piT(nl - 1, p_i_2, rho_i_2, T_2);
 
     model_c7_update_bc(grid, xn);
 
     // Decode the ghost ion pressure / temperature (V=0 expected at relaxation IC).
-    auto ghost_pi_T = [&](const Vec& ob, float& p_i, float& T_i) {
-        const float rho_i = ob(cons::RHO_I);
-        const float V     = ob(cons::MOM_I) / rho_i;
+    auto ghost_pi_T = [&](const Vec& ob, Real& p_i, Real& T_i) {
+        const Real rho_i = ob(cons::RHO_I);
+        const Real V     = ob(cons::MOM_I) / rho_i;
         p_i = 2.0f/3.0f * (ob(cons::E_I) - 0.5f * rho_i * V * V - rho_i * phi_g_out);
         T_i = p_i / (2.0f * (rho_i / grid.m_i) * grid.k_b);   // p_i = 2 n_i k T
     };
-    float p_i_g0, T_i_g0, p_i_g1, T_i_g1;
+    Real p_i_g0, T_i_g0, p_i_g1, T_i_g1;
     ghost_pi_T(grid.outer_boundary0_i, p_i_g0, T_i_g0);
     ghost_pi_T(grid.outer_boundary1_i, p_i_g1, T_i_g1);
 
@@ -4119,7 +4130,7 @@ static void test_model_c7_tr_jump_bc() {
     EXPECT_REL(p_i_g0, p_i_2 - 2.0f * ds * rho_i_top * grid.g, 1e-3);
 
     // (3) EOS density at the imposed (p, T): n_i = p_i / (2 k T).
-    const float n_i_g0 = grid.outer_boundary0_i(cons::RHO_I) / grid.m_i;
+    const Real n_i_g0 = grid.outer_boundary0_i(cons::RHO_I) / grid.m_i;
     EXPECT_REL(n_i_g0, p_i_g0 / (2.0f * grid.k_b * T_i_g0), 1e-3);
 
     // Electron energy packs T_e = T_i (ε_e = ¾ p_i).
@@ -4147,7 +4158,7 @@ static void test_trac_broadening_conserves_kappa_lambda() {
     EXPECT_REL(eps(2), std::pow(1.0e5f / 5.0e4f, 2.5f), 1e-3);
 
     // Spitzer-like κ ∝ T^{5/2}: broadened κ' = κ·ε must equal κ(T_c), constant.
-    const float kappa_Tc = std::pow(1.0e5f, 2.5f);
+    const Real kappa_Tc = std::pow(1.0e5f, 2.5f);
     EXPECT_REL(std::pow(T(1), 2.5f) * eps(1), kappa_Tc, 1e-3);
     EXPECT_REL(std::pow(T(2), 2.5f) * eps(2), kappa_Tc, 1e-3);
 
@@ -4170,9 +4181,9 @@ static void test_trac_cutoff_detection_and_limiter() {
     grid.enable_trac  = true;
     grid.trac_T_chrom = 2.0e4f;
 
-    auto make_prim = [&](const float* Tp) {
+    auto make_prim = [&](const Real* Tp) {
         Vec prim(grid.n_state, arma::fill::zeros);
-        const float ni = 1.0e16f, nn = 1.0e10f;
+        const Real ni = 1.0e16f, nn = 1.0e10f;
         const auto sz = arma::size(10, num_of_eq);
         for (arma::uword i = 0; i < 10; ++i) {
             prim(arma::sub2ind(sz, i, prim::RHO_I)) = ni * grid.m_i;
@@ -4184,15 +4195,15 @@ static void test_trac_cutoff_detection_and_limiter() {
     };
 
     // Smooth, well-resolved profile → nothing under-resolved → T_c at floor.
-    float smooth[10];
+    Real smooth[10];
     for (int i = 0; i < 10; ++i) smooth[i] = 6.0e3f + 100.0f * i;
     grid.trac_cutoff_T = 2.0e4f;
     EXPECT_REL(compute_trac_cutoff_T(grid, make_prim(smooth)), grid.trac_T_chrom, 1e-4);
 
     // Steep TR jump (under-resolved). T_peak = 1.2e5 → cutoff bound 0.2·T_peak = 2.4e4.
-    float steep[10] = {6.0e3f,6.0e3f,6.0e3f,6.0e3f,6.0e3f,6.0e3f,2.0e4f,6.0e4f,1.0e5f,1.2e5f};
+    Real steep[10] = {6.0e3f,6.0e3f,6.0e3f,6.0e3f,6.0e3f,6.0e3f,2.0e4f,6.0e4f,1.0e5f,1.2e5f};
     grid.trac_cutoff_T = 2.0e4f;
-    const float Tc1 = compute_trac_cutoff_T(grid, make_prim(steep));
+    const Real Tc1 = compute_trac_cutoff_T(grid, make_prim(steep));
     EXPECT_TRUE(Tc1 >= 2.0e4f && Tc1 <= 2.0e4f * 1.0301f);   // limiter caps the rise
     for (int k = 0; k < 200; ++k)
         grid.trac_cutoff_T = compute_trac_cutoff_T(grid, make_prim(steep));
@@ -4259,7 +4270,7 @@ static void test_beam_heating_partitions_by_heat_capacity() {
     grid.beam_h_hi_km   = 1100.0f;          // whole little grid in window
     grid.sim_time      = 5.0f;
 
-    const float ni = 1.0e16f, nn = 5.0e16f, T0 = 6.0e3f;
+    const Real ni = 1.0e16f, nn = 5.0e16f, T0 = 6.0e3f;
     Vec prim(grid.n_state, arma::fill::zeros);
     const auto sz = arma::size(4, num_of_eq);
     for (arma::uword i = 0; i < 4; ++i) {
@@ -4269,19 +4280,19 @@ static void test_beam_heating_partitions_by_heat_capacity() {
         prim(arma::sub2ind(sz, i, prim::P_N))   =        nn * grid.k_b * T0;
     }
 
-    const float dt = 0.01f;
+    const Real dt = 0.01f;
     Vec Q = beam_heating_rate(grid, Vec(4, arma::fill::value(ni)),
                                     Vec(4, arma::fill::value(nn)));
     apply_beam_heating_stage(grid, prim, dt);
 
     for (arma::uword i = 0; i < 4; ++i) {
-        const float pi = prim(arma::sub2ind(sz, i, prim::P_I));
-        const float pn = prim(arma::sub2ind(sz, i, prim::P_N));
-        const float Ti = pi / (2.0f * ni * grid.k_b);
-        const float Tn = pn /        (nn * grid.k_b);
-        const float dTi = Ti - T0, dTn = Tn - T0;
+        const Real pi = prim(arma::sub2ind(sz, i, prim::P_I));
+        const Real pn = prim(arma::sub2ind(sz, i, prim::P_N));
+        const Real Ti = pi / (2.0f * ni * grid.k_b);
+        const Real Tn = pn /        (nn * grid.k_b);
+        const Real dTi = Ti - T0, dTn = Tn - T0;
         EXPECT_REL(dTi, dTn, 1e-3);                              // equal ΔT both fluids
-        const float C = (3.0f * ni + 1.5f * nn) * grid.k_b;     // total heat capacity
+        const Real C = (3.0f * ni + 1.5f * nn) * grid.k_b;     // total heat capacity
         EXPECT_REL(dTi, dt * Q(i) / C, 1e-3);                   // = Δt Q / (C_i+C_n)
     }
 }
@@ -4344,7 +4355,7 @@ static void test_coronal_heating_partitions_by_heat_capacity() {
     grid.coronal_heat_E0 = 1.0e-3f;
     grid.coronal_heat_sH = 1.0e9f;          // ≫ grid ⇒ ~uniform heating
 
-    const float ni = 1.0e16f, nn = 5.0e16f, T0 = 6.0e3f;
+    const Real ni = 1.0e16f, nn = 5.0e16f, T0 = 6.0e3f;
     Vec prim(grid.n_state, arma::fill::zeros);
     const auto sz = arma::size(4, num_of_eq);
     for (arma::uword i = 0; i < 4; ++i) {
@@ -4354,18 +4365,18 @@ static void test_coronal_heating_partitions_by_heat_capacity() {
         prim(arma::sub2ind(sz, i, prim::P_N))   =        nn * grid.k_b * T0;
     }
 
-    const float dt = 1.0f;
+    const Real dt = 1.0f;
     Vec Q = coronal_heating_rate(grid);
     apply_coronal_heating_stage(grid, prim, dt);
 
     for (arma::uword i = 0; i < 4; ++i) {
-        const float pi = prim(arma::sub2ind(sz, i, prim::P_I));
-        const float pn = prim(arma::sub2ind(sz, i, prim::P_N));
-        const float Ti = pi / (2.0f * ni * grid.k_b);
-        const float Tn = pn /        (nn * grid.k_b);
-        const float dTi = Ti - T0, dTn = Tn - T0;
+        const Real pi = prim(arma::sub2ind(sz, i, prim::P_I));
+        const Real pn = prim(arma::sub2ind(sz, i, prim::P_N));
+        const Real Ti = pi / (2.0f * ni * grid.k_b);
+        const Real Tn = pn /        (nn * grid.k_b);
+        const Real dTi = Ti - T0, dTn = Tn - T0;
         EXPECT_REL(dTi, dTn, 1e-3);                             // equal ΔT both fluids
-        const float C = (3.0f * ni + 1.5f * nn) * grid.k_b;     // total heat capacity
+        const Real C = (3.0f * ni + 1.5f * nn) * grid.k_b;     // total heat capacity
         EXPECT_REL(dTi, dt * Q(i) / C, 1e-3);                   // = Δt H / (C_i+C_n)
     }
 }
@@ -4549,12 +4560,12 @@ static void test_refine_params_env_aliases() {
 // Build an ns-cell state on a non-uniform cell-width array. B = 1; gravity via a
 // constant g populating φ_g from arc length. Interior ρ,T uniform; ghosts pinned
 // to the matching end cell so a constant state is a discrete fixed point.
-static Vec setup_irregular(Grid& grid, const std::vector<float>& ds,
-                           float ni_val, float nn_val, float Ti_val, float Tn_val) {
+static Vec setup_irregular(Grid& grid, const std::vector<Real>& ds,
+                           Real ni_val, Real nn_val, Real Ti_val, Real Tn_val) {
     grid.init(static_cast<arma::uword>(ds.size()), 0.25f);
     grid.B_imh.fill(1.0f); grid.B_iph.fill(1.0f); grid.B_i.fill(1.0f);
     grid.dinvB_ds_i.zeros();
-    float s = 0.0f;
+    Real s = 0.0f;
     for (arma::uword i = 0; i < grid.ns; ++i) {
         grid.ds_i(i) = ds[i];
         grid.phi_g_imh(i) = 0.0f;
@@ -4583,27 +4594,27 @@ static Vec setup_irregular(Grid& grid, const std::vector<float>& ds,
 }
 
 // A graded, strictly non-uniform width list (fine base → coarse top).
-static std::vector<float> graded_widths() {
-    std::vector<float> ds;
-    float w = 100.0f;
+static std::vector<Real> graded_widths() {
+    std::vector<Real> ds;
+    Real w = 100.0f;
     for (int i = 0; i < 20; ++i) { ds.push_back(w); w *= 1.08f; }
     return ds;
 }
 
 static void test_metric_caches_center_to_center() {
     Grid grid;
-    const std::vector<float> ds = graded_widths();
+    const std::vector<Real> ds = graded_widths();
     setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
     EXPECT_TRUE(!grid.uniform_mesh);
     // ds_iph_i / ds_imh_i = mean of adjacent widths, mirrored at the ends.
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float dsp1 = (i + 1 < grid.ns) ? ds[i + 1] : ds[i];
-        const float dsm1 = (i > 0) ? ds[i - 1] : ds[i];
+        const Real dsp1 = (i + 1 < grid.ns) ? ds[i + 1] : ds[i];
+        const Real dsm1 = (i > 0) ? ds[i - 1] : ds[i];
         EXPECT_REL(grid.ds_iph_i(i), 0.5f * (ds[i] + dsp1), 1e-5);
         EXPECT_REL(grid.ds_imh_i(i), 0.5f * (dsm1 + ds[i]), 1e-5);
     }
     // Cell centers accumulate half-widths.
-    float s = 0.0f;
+    Real s = 0.0f;
     for (arma::uword i = 0; i < grid.ns; ++i) {
         EXPECT_REL(grid.s_i(i), s + 0.5f * ds[i], 1e-5);
         s += ds[i];
@@ -4613,7 +4624,7 @@ static void test_metric_caches_center_to_center() {
 
 static void test_numerical_diffusivity_uniform_reduction() {
     Grid grid;
-    const std::vector<float> ds(6, 553.0f);
+    const std::vector<Real> ds(6, 553.0f);
     setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
     EXPECT_TRUE(grid.uniform_mesh);
     grid.numerical_diffusivity_per_length = 2.0e3f;
@@ -4633,7 +4644,7 @@ static void test_numerical_diffusivity_uniform_reduction() {
 
 static void test_numerical_diffusivity_nonuniform_face_scaling() {
     Grid grid;
-    const std::vector<float> ds = {8.0f, 8.0f, 5.0f, 2.0f, 2.0f};
+    const std::vector<Real> ds = {8.0f, 8.0f, 5.0f, 2.0f, 2.0f};
     setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
     EXPECT_TRUE(!grid.uniform_mesh);
     grid.numerical_diffusivity_per_length = 2.0e3f;
@@ -4672,14 +4683,14 @@ static void test_irregular_linear_pressure_gradient() {
     // interior equals the analytic −dp/ds = −b. (A uniform-spacing reconstruction
     // would recover the WRONG gradient on this irregular grid.)
     Grid grid;
-    const std::vector<float> ds = graded_widths();
+    const std::vector<Real> ds = graded_widths();
     setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
     const auto sz = arma::size(grid.ns, num_of_eq);
-    const float p0 = 1.0f, b = 3.0e-6f;    // Pa, Pa/m
-    const float rho_i = 2.0e17f * grid.m_i, rho_n = 1.0e19f * grid.m_n;
+    const Real p0 = 1.0f, b = 3.0e-6f;    // Pa, Pa/m
+    const Real rho_i = 2.0e17f * grid.m_i, rho_n = 1.0e19f * grid.m_n;
     Vec prim(grid.n_state, arma::fill::zeros);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float pI = p0 + b * grid.s_i(i);
+        const Real pI = p0 + b * grid.s_i(i);
         prim(arma::sub2ind(sz, i, prim::RHO_I)) = rho_i;
         prim(arma::sub2ind(sz, i, prim::RHO_N)) = rho_n;
         prim(arma::sub2ind(sz, i, prim::P_I))   = pI;
@@ -4688,9 +4699,9 @@ static void test_irregular_linear_pressure_gradient() {
     }
     Vec cons = prim2cons(grid, prim);
     // Linearly-continued ghosts so the boundary stencil is consistent too.
-    auto ghost = [&](float s_ghost) {
+    auto ghost = [&](Real s_ghost) {
         Vec pr(grid.n_state, arma::fill::zeros);
-        const float pI = p0 + b * s_ghost;
+        const Real pI = p0 + b * s_ghost;
         pr(arma::sub2ind(sz, 0, prim::RHO_I)) = rho_i; pr(arma::sub2ind(sz, 0, prim::RHO_N)) = rho_n;
         pr(arma::sub2ind(sz, 0, prim::P_I)) = pI; pr(arma::sub2ind(sz, 0, prim::P_N)) = 0.5f * pI;
         pr(arma::sub2ind(sz, 0, prim::P_E)) = 0.5f * pI;
@@ -4711,13 +4722,13 @@ static void test_irregular_linear_pressure_gradient() {
 
 static void test_irregular_cfl_selection() {
     Grid grid;
-    const std::vector<float> ds = graded_widths();
+    const std::vector<Real> ds = graded_widths();
     Vec cons = setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
     Vec dt   = cal_dt_i(grid, cons);
     Vec maxv = cal_max_v_i(grid, cons);
     Vec ratio(grid.ns);
     for (arma::uword i = 0; i < grid.ns; ++i) ratio(i) = grid.ds_i(i) / maxv(i);
-    const float expected = grid.CFL * arma::min(ratio);
+    const Real expected = grid.CFL * arma::min(ratio);
     EXPECT_REL(dt(0), expected, 1e-3);
     for (arma::uword i = 0; i < grid.ns; ++i)
         EXPECT_TRUE(dt(i) * maxv(i) / grid.ds_i(i) <= grid.CFL + 1e-6f);
@@ -4729,13 +4740,13 @@ static void test_irregular_conduction_conserves_energy() {
     // to zero: Σ (C_i + C_n)·ds_i/B_i ≈ 0. This exercises the width-weighted
     // series-resistance face conductivity and the center-to-center distances.
     Grid grid;
-    const std::vector<float> ds = graded_widths();
+    const std::vector<Real> ds = graded_widths();
     setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 1.0e4f, 1.0e4f);
     const auto sz = arma::size(grid.ns, num_of_eq);
-    const float ni = 2.0e17f, nn = 1.0e19f;
+    const Real ni = 2.0e17f, nn = 1.0e19f;
     Vec prim(grid.n_state, arma::fill::zeros);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float T = 1.0e4f + 200.0f * static_cast<float>(i);   // linear ramp
+        const Real T = 1.0e4f + 200.0f * static_cast<Real>(i);   // linear ramp
         prim(arma::sub2ind(sz, i, prim::RHO_I)) = ni * grid.m_i;
         prim(arma::sub2ind(sz, i, prim::RHO_N)) = nn * grid.m_n;
         prim(arma::sub2ind(sz, i, prim::P_I))   = ni * 2.0f * grid.k_b * T;
@@ -4753,9 +4764,9 @@ static void test_irregular_conduction_conserves_energy() {
     grid.numerical_diffusivity_per_length = 2.0e3f;
     Vec RI = rhs_implicit_state(grid, cons);
     EXPECT_TRUE(arma::max(arma::abs(RI-RI_physical)) > 0.0f);
-    float net = 0.0f, scale = 0.0f;
+    Real net = 0.0f, scale = 0.0f;
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float cE = RI(arma::sub2ind(sz, i, cons::E_I)) + RI(arma::sub2ind(sz, i, cons::E_N));
+        const Real cE = RI(arma::sub2ind(sz, i, cons::E_I)) + RI(arma::sub2ind(sz, i, cons::E_N));
         net   += cE * grid.ds_i(i) / grid.B_i(i);
         scale += std::fabs(cE) * grid.ds_i(i) / grid.B_i(i);
     }
@@ -4781,9 +4792,9 @@ static void test_irregular_boundary_hse() {
     Vec out = advance_Euler_state(grid, xn, dt);
     EXPECT_TRUE(!out.has_nan());
     const auto sz = arma::size(grid.ns, num_of_eq);
-    float vmax = 0.0f;
+    Real vmax = 0.0f;
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float v = out(arma::sub2ind(sz, i, cons::MOM_I)) /
+        const Real v = out(arma::sub2ind(sz, i, cons::MOM_I)) /
                         out(arma::sub2ind(sz, i, cons::RHO_I));
         vmax = std::max(vmax, std::fabs(v));
     }
@@ -4831,10 +4842,10 @@ static void test_refined_mesh_ic_runs() {
     Vec out = advance_Euler_state(grid, xn, dt);
     EXPECT_TRUE(!out.has_nan());
     const auto sz = arma::size(grid.ns, num_of_eq);
-    float vmax = 0.0f;
+    Real vmax = 0.0f;
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float rho_i = out(arma::sub2ind(sz, i, cons::RHO_I));
-        const float mom_i = out(arma::sub2ind(sz, i, cons::MOM_I));
+        const Real rho_i = out(arma::sub2ind(sz, i, cons::RHO_I));
+        const Real mom_i = out(arma::sub2ind(sz, i, cons::MOM_I));
         vmax = std::max(vmax, std::fabs(mom_i / rho_i));
     }
     EXPECT_TRUE(vmax < 1.0e3f);             // no boundary blowup on the first step
@@ -4857,7 +4868,7 @@ static void test_outer_refined_mesh_ic_runs() {
         Vec out = advance_Euler_state(grid, xn, dt);
         EXPECT_TRUE(!out.has_nan() && out.is_finite());
         const auto sz = arma::size(grid.ns, num_of_eq);
-        float vmax = 0.0f;
+        Real vmax = 0.0f;
         for (arma::uword i = 0; i < grid.ns; ++i)
             vmax = std::max<double>(vmax, std::fabs(out(arma::sub2ind(sz, i, cons::MOM_I)) /
                                             out(arma::sub2ind(sz, i, cons::RHO_I))));
@@ -4866,7 +4877,7 @@ static void test_outer_refined_mesh_ic_runs() {
     };
 
     Grid gu; gu.init(200, 0.25f);
-    const float dt_uniform = dt_min_of(gu);
+    const Real dt_uniform = dt_min_of(gu);
     EXPECT_TRUE(gu.uniform_mesh);
     EXPECT_TRUE(gu.ns == 200);
 
@@ -4875,7 +4886,7 @@ static void test_outer_refined_mesh_ic_runs() {
     setenv("ISO_REFINE_S_LO_KM", "500", 1);
     setenv("ISO_REFINE_TRANSITION_KM", "20", 1);
     Grid gr; gr.init(200, 0.25f);
-    const float dt_refined = dt_min_of(gr);
+    const Real dt_refined = dt_min_of(gr);
 
     EXPECT_TRUE(!gr.uniform_mesh);
     EXPECT_TRUE(gr.ns > 200);                                   // cells added
@@ -4886,7 +4897,7 @@ static void test_outer_refined_mesh_ic_runs() {
     // ...and the inner boundary keeps the coarse spacing.
     EXPECT_REL(gr.ds_i(0), gr.ds_i.max(), 1.0e-3);
     // Adjacent width ratio bounded by the builder's cap.
-    float max_ratio = 1.0f;
+    Real max_ratio = 1.0f;
     for (arma::uword i = 1; i < gr.ns; ++i)
         max_ratio = std::max<double>(max_ratio, std::max(gr.ds_i(i) / gr.ds_i(i - 1),
                                                  gr.ds_i(i - 1) / gr.ds_i(i)));
@@ -4966,7 +4977,7 @@ static void test_step_cap_no_overflow() {
     EXPECT_TRUE(big.valid());
     EXPECT_TRUE(big.cap == kUnboundedStepCap);
     const StepCapSelection inf = select_step_cap(
-        nullptr, nullptr, std::numeric_limits<float>::infinity());
+        nullptr, nullptr, std::numeric_limits<Real>::infinity());
     EXPECT_TRUE(inf.valid());
     EXPECT_TRUE(inf.cap == kUnboundedStepCap);
     // Every cap stays far below the long long ceiling, so `step + 1` and

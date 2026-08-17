@@ -80,6 +80,8 @@ Both legs use identical settings and the same launcher; only `ISO_RIEMANN` diffe
 
 The Roe column reproduces the documented release value of 1.335e-12 exactly. Both solvers sit at the same float32 round-off floor; the differences are not resolved by this measurement.
 
+> **Precision context, added at the 2026-08-17 double-precision release cutover.** Every hydrostatic-defect number in this document was measured with the pre-cutover **float32** conserved state, so "the float32 round-off floor" was a real and binding floor at the time. The release now stores the state in `double`, which lowers that floor by ~6 orders of magnitude, so a re-measured defect is no longer floor-limited in the same way and the flux comparison above should not be re-read as "the two fluxes are indistinguishable" without redoing it. See `state_precision_release_cutover.md`. The flux *choice* is unaffected: it was made on frozen-composition thermodynamics, not on a measured defect advantage.
+
 ### 4b. Production-like release smoke
 
 `CHROMO_T_END=100`, frame cadence 10 s, sidecars on, 17781 steps each.
@@ -252,7 +254,7 @@ All legs: N500/R4, 661 cells, CFL 0.50, 12 OpenMP threads, `termination=end_time
 | `time.rhs_s` | 0.953 | 1.101 (+15.4 %) |
 | fallbacks | — | 0 of 4,785,640 |
 
-Both sit at the float32 round-off floor of this scheme; the differences are not resolved by this measurement, and the marginally lower Godunov defect must not be read as an improvement.
+Both sit at the float32 round-off floor of this scheme; the differences are not resolved by this measurement, and the marginally lower Godunov defect must not be read as an improvement. *(float32 floor — see the precision note in §4a.)*
 
 **Production-like 100 s leg** (17781 steps both):
 

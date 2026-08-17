@@ -55,25 +55,40 @@ namespace chromosphere {
  *  @{
  */
 
-/// Armadillo column vector — the workhorse type for cell-wise data, including
-/// the conserved state and the static mesh metric arrays.
+/// **Precision is one knob**. `Real` is the solver's scalar storage type and `Vec`
+/// is its cell-wise vector counterpart; every stored physical scalar — conserved
+/// state, mesh metrics, physical constants, run controls, `sim_time` — is declared
+/// in terms of them. Nothing in the release path may name `float` or `double`
+/// directly, because a single narrowing cast anywhere in the update chain reimposes
+/// the coarser representation on the whole chain regardless of what `Vec` holds.
+/// (This is how the pre-cutover float32 storage survived a `Vec`-only promotion:
+/// `mixture_pack_ghost` and the RHS still cast through `float`.)
 ///
-/// **The release storage type is `float`.** `CHROMO_STATE_FLOAT64` promotes it to
-/// `double` and exists for ONE purpose: a controlled experiment isolating float32
-/// representation round-off, which is a known and documented limitation of this
-/// solver (the per-step mass-density increment falls below half a float32 ULP of
-/// rho through most of the lower chromosphere, so the density there cannot
-/// evolve). It is **not** a supported configuration, it is not exercised by the
-/// release validation, and it must not be enabled for production or for any
+/// **The release storage type is `double`.** A field-aligned chromospheric column
+/// resolves a stratified layer whose mass-loading timescale exceeds the CFL step
+/// by `~3e7`, and one relative ULP of `float` is `6e-8`: the per-step continuity
+/// increment `dt*(-dF/ds)` then falls below half a ULP of the stored `rho` through
+/// most of the lower chromosphere and the slow density adjustment cannot
+/// accumulate at all. `double` puts eight orders of magnitude between the
+/// increment and the representation limit. This also matches the target coupling
+/// framework: every shipped SWMF/BATS-R-US build sets `PRECISION = ${DOUBLEPREC}`,
+/// so `State_VGB` and its update are `float64` there too.
+/// Evidence: docs/studies/numerics/state_precision_release_cutover.md.
+///
+/// `CHROMO_STATE_FLOAT32` reverts to the pre-cutover `float` storage. It is a
+/// DIAGNOSTIC ONLY — kept so the round-off sensitivity stays reproducible — is not
+/// exercised by the release validation, and must not be used for production or any
 /// quoted release number. Build it into a separate tree:
 ///
-///     cmake -S . -B build_omp_f64 -DCMAKE_BUILD_TYPE=Release \
-///           -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT64=ON
-#ifdef CHROMO_STATE_FLOAT64
-typedef arma::Col<double> Vec;
+///     cmake -S . -B build_omp_f32 -DCMAKE_BUILD_TYPE=Release \
+///           -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT32=ON
+#ifdef CHROMO_STATE_FLOAT32
+typedef float Real;   // DIAGNOSTIC ONLY — see above
 #else
-typedef arma::Col<float> Vec;
+typedef double Real;
 #endif
+/// Cell-wise storage vector; `Vec::elem_type` is always `Real`.
+typedef arma::Col<Real> Vec;
 
 // ============================================================================
 // Release state indices — the single-fluid equilibrium-mixture solver
@@ -213,7 +228,7 @@ struct MixtureField {
     /// they stood at decode time. The ghosts are not part of the state vector, so
     /// require_matches() compares this signature to detect a boundary refresh that
     /// would invalidate the decoded ghost layers.
-    std::array<float, 4*num_of_mixture_eq> boundary_signature{};
+    std::array<Real, 4*num_of_mixture_eq> boundary_signature{};
 
     /// Decoded equilibrium thermodynamics of every physical cell, index 0..ns-1.
     std::vector<MixtureThermo> cells;
@@ -464,7 +479,7 @@ struct Grid {
     /// Courant number of the acoustic timestep limit. The conservative hard-coded
     /// default is 0.25; CHROMO_CFL=0.50 is the validated production value for the
     /// reduced model_column release configuration.
-    float       CFL             = 0.25f;
+    Real       CFL             = 0.25f;
 
     ///@}
 
@@ -473,7 +488,7 @@ struct Grid {
     /// Fixed adiabatic index of the LEGACY two-fluid solver only. The release
     /// solver derives every thermodynamic index from the Saha/Gamma1 closure and
     /// never reads gamma_mono.
-    float gamma_mono = 5.0f / 3.0f;
+    Real gamma_mono = 5.0f / 3.0f;
     /// CRASH Gamma1 table. A non-empty table selects the RELEASE single-fluid
     /// equilibrium-mixture solver (mixture.hpp); an empty one selects the legacy
     /// fixed-gamma two-fluid solver.
@@ -514,17 +529,17 @@ struct Grid {
     /// only — Spitzer κ∝T^{5/2} and the ion–neutral collisional energy-exchange
     /// coefficient (3 k_B α/(m_i+m_n)) are kinetic-theory factors, intentionally
     /// NOT tied to gamma_mono.
-    inline float gm1()      const { return gamma_mono - 1.0f; }           // γ−1
-    inline float inv_gm1()  const { return 1.0f / (gamma_mono - 1.0f); }  // 1/(γ−1)
-    inline float half_gm1() const { return 0.5f * (gamma_mono - 1.0f); }  // (γ−1)/2
-    float m_i        = static_cast<float>(eos_constants::m_h);
-    float m_n        = static_cast<float>(eos_constants::m_h);
-    float m_e        = static_cast<float>(eos_constants::m_e);
-    float g          = 0.27395e3f;
-    float mu_0       = 4.0f * static_cast<float>(arma::datum::pi) * 1.0e-7f;
-    float k_b        = static_cast<float>(eos_constants::k_b);
-    float q_e        = 1.602176634e-19f;
-    float chi_H_J    = static_cast<float>(eos_constants::chi_h);  ///< 13.6 eV
+    inline Real gm1()      const { return gamma_mono - 1.0f; }           // γ−1
+    inline Real inv_gm1()  const { return 1.0f / (gamma_mono - 1.0f); }  // 1/(γ−1)
+    inline Real half_gm1() const { return 0.5f * (gamma_mono - 1.0f); }  // (γ−1)/2
+    Real m_i        = static_cast<Real>(eos_constants::m_h);
+    Real m_n        = static_cast<Real>(eos_constants::m_h);
+    Real m_e        = static_cast<Real>(eos_constants::m_e);
+    Real g          = 0.27395e3f;
+    Real mu_0       = 4.0f * static_cast<Real>(arma::datum::pi) * 1.0e-7f;
+    Real k_b        = static_cast<Real>(eos_constants::k_b);
+    Real q_e        = 1.602176634e-19f;
+    Real chi_H_J    = static_cast<Real>(eos_constants::chi_h);  ///< 13.6 eV
 
     ///@}
 
@@ -651,7 +666,7 @@ struct Grid {
     /// model_column (β=2). Composes with log_reconstruct and well_balanced (it only
     /// changes how the same differences are limited).
     bool  mc3_limiter = false;
-    float limiter_beta = 2.0f;
+    Real limiter_beta = 2.0f;
 
     /// REFERENCE numerical flux (comparison only, not the release default): the
     /// corrector dissipation computed from the 3x3 mixture Roe characteristic
@@ -759,7 +774,7 @@ struct Grid {
     /// physical face conductivity, so it is also disabled when conduction is off.
     /// The release conduction operator is structurally PHYSICAL-only: it has no
     /// such term and never reads this field. Default 0.
-    float numerical_diffusivity_per_length = 0.0f;
+    Real numerical_diffusivity_per_length = 0.0f;
 
     /// Upper-boundary coronal conductive heat flux q(T) [W/m²], imposed as a
     /// Neumann (fixed-flux) outer BC on the charged-fluid conduction row (Stage D)
@@ -771,7 +786,7 @@ struct Grid {
     /// and over-pressurize the top cell. Positive = heating into the domain.
     /// Default off so existing tests keep the Dirichlet conduction BC.
     bool  impose_outer_heat_flux = false;
-    float outer_heat_flux        = 0.0f;
+    Real outer_heat_flux        = 0.0f;
 
     /// Conduction-only OUTER temperature override. Normally the outer thermal
     /// datum is whatever temperature the HYDRO outer ghost happens to carry, so one
@@ -791,7 +806,7 @@ struct Grid {
     /// when impose_outer_heat_flux is true (that path has no outer Dirichlet datum).
     /// Default false ⇒ byte-identical to the pre-existing behaviour.
     bool  outer_conduction_temperature_override = false;
-    float outer_conduction_temperature          = 0.0f;
+    Real outer_conduction_temperature          = 0.0f;
 
     /// Inner-boundary conduction BC. Default false ⇒ Dirichlet: the innermost
     /// conduction face couples cell 0 to the inner ghost temperature (the
@@ -810,10 +825,10 @@ struct Grid {
     /// behavior for model_c7 / model_flare). Raising it above 1 increases the
     /// downward coronal conductive flux into the TR/upper chromosphere → the
     /// gentle upflow (Antiochos & Sturrock 1978). Set by model_gentle.
-    float outer_heat_flux_base    = 0.0f;
-    float outer_heat_flux_t_on    = 0.0f;
-    float outer_heat_flux_ramp    = 1.0f;
-    float outer_heat_flux_enhance = 1.0f;
+    Real outer_heat_flux_base    = 0.0f;
+    Real outer_heat_flux_t_on    = 0.0f;
+    Real outer_heat_flux_ramp    = 1.0f;
+    Real outer_heat_flux_enhance = 1.0f;
 
     /// Corona-as-boundary domain top [km] for model_c7_ic(extended=true). The
     /// extended C7 table (Avrett & Loeser 2008 Table 26) reaches 68 Mm / 1.59 MK;
@@ -821,13 +836,13 @@ struct Grid {
     /// evaporated mass has somewhere to accumulate — the coronal EM rise that *is*
     /// gentle evaporation), with q(T) imposed at that high coronal top. 0 (default)
     /// ⇒ use the full table top. Set by model_gentle from GENTLE_TOP_KM.
-    float corona_top_km           = 0.0f;
+    Real corona_top_km           = 0.0f;
 
     /// Absolute height [km] of the domain base, used only to label the output
     /// heights chromo_main writes (cumulative ds + base). Defaults to the C7 base
     /// (1003 km) so every existing scenario's output is unchanged; model_column
     /// sets it to its actual base (0 km for the photosphere-anchored C7 IC).
-    float out_base_km             = 1003.0f;
+    Real out_base_km             = 1003.0f;
 
     /// TWO-FLUID ONLY. Transition-Region Adaptive Conduction (TRAC; Johnston et al.
     /// 2019, 2020). The single-fluid release conduction operator has no TRAC factor
@@ -842,9 +857,9 @@ struct Grid {
     /// (Johnston 2020 §2.2), which is the Eq.-27 jump-condition balance enforced
     /// analytically. Default off so existing tests are a clean baseline.
     bool  enable_trac   = false;
-    float trac_T_chrom  = 2.0e4f;  ///< TRAC-region base temperature T_b [K]
-    float trac_cutoff_T = 2.0e4f;  ///< adaptive cutoff T_c [K], recomputed each step
-    float trac_Tc_max_frac = 0.2f;  ///< upper bound on T_c as a fraction of T_peak
+    Real trac_T_chrom  = 2.0e4f;  ///< TRAC-region base temperature T_b [K]
+    Real trac_cutoff_T = 2.0e4f;  ///< adaptive cutoff T_c [K], recomputed each step
+    Real trac_Tc_max_frac = 0.2f;  ///< upper bound on T_c as a fraction of T_peak
                                     // (Johnston 2020 Eq. 9: 0.2). Raise toward 1 on a
                                     // corona-less domain (e.g. iso_t22k, T_peak≈22 kK)
                                     // so the cap does not pin T_c to the T_b floor.
@@ -867,7 +882,7 @@ struct Grid {
     /// of the Stage E quadratic) populate `photoionization_rate_i` of
     /// length `ns`; the Stage E driver picks that up automatically via
     /// `physics.hpp::photoionization_rate_P(grid)`.
-    float photoionization_rate = 1.0e-4f;
+    Real photoionization_rate = 1.0e-4f;
     Vec   photoionization_rate_i;
 
     ///@}
@@ -890,17 +905,17 @@ struct Grid {
     /// the release timestep has no beam stage and ignores this flag. Default off so
     /// existing scenarios/tests are unaffected.
     bool  enable_beam_heating     = false;
-    float beam_flux               = 0.0f;  ///< F_e [W/m²]
-    float beam_t_on               = 0.0f;  ///< beam onset time [s]
-    float beam_duration           = 0.0f;  ///< flat-top duration τ [s]
-    float beam_ramp               = 1.0f;  ///< cosine ramp half-width [s]
+    Real beam_flux               = 0.0f;  ///< F_e [W/m²]
+    Real beam_t_on               = 0.0f;  ///< beam onset time [s]
+    Real beam_duration           = 0.0f;  ///< flat-top duration τ [s]
+    Real beam_ramp               = 1.0f;  ///< cosine ramp half-width [s]
     /// Deposition height window [km] (absolute, C7 base = 1003 km). The beam
     /// stops in the upper chromosphere BELOW the TR base (~2150 km); depositing
     /// there (not in the TR cells at the open top boundary) is both physical
     /// (thick-target stopping in the dense chromosphere) and keeps the explosive
     /// overpressure interior so the evaporated upflow develops through the TR.
-    float beam_h_lo_km            = 1600.0f;
-    float beam_h_hi_km            = 2000.0f;
+    Real beam_h_lo_km            = 1600.0f;
+    Real beam_h_hi_km            = 2000.0f;
 
     /// Self-consistent thick-target beam (Emslie 1978). When true, the fixed
     /// [h_lo,h_hi] deposition window is ignored: the beam is injected at the loop
@@ -913,8 +928,8 @@ struct Grid {
     /// the loop — the density feedback a fixed window cannot capture. Default off so
     /// model_flare / the test suite keep the fixed-window deposition.
     bool  beam_thick_target       = false;
-    float beam_E_cut_keV          = 20.0f;  ///< low-energy cutoff E_c [keV]
-    float beam_delta              = 5.0f;  ///< injected power-law spectral index δ (>2)
+    Real beam_E_cut_keV          = 20.0f;  ///< low-energy cutoff E_c [keV]
+    Real beam_delta              = 5.0f;  ///< injected power-law spectral index δ (>2)
 
     ///@}
 
@@ -944,16 +959,16 @@ struct Grid {
     /// ignores this flag.
     /// Default off so existing scenarios / the test suite are byte-for-byte unchanged.
     bool  enable_coronal_heating  = false;
-    float coronal_heat_E0         = 0.0f;  ///< E_H0 [W/m³], footpoint heating amplitude
-    float coronal_heat_sH         = 1.0e7f;  ///< heating scale length s_H [m]
-    float coronal_heat_s0         = 0.0f;  ///< footpoint anchor s₀ [m] (arc length, cell-0 face = 0)
+    Real coronal_heat_E0         = 0.0f;  ///< E_H0 [W/m³], footpoint heating amplitude
+    Real coronal_heat_sH         = 1.0e7f;  ///< heating scale length s_H [m]
+    Real coronal_heat_s0         = 0.0f;  ///< footpoint anchor s₀ [m] (arc length, cell-0 face = 0)
     bool  coronal_heat_two_sided  = false;  ///< true: decay from BOTH ends (full loop)
     /// Phase-3 ramp: multiply E_H0 by a smooth flat-top window that rises from 1 to
     /// coronal_heat_enhance over [t_on, t_on+ramp]. enhance = 1 (default) ⇒ no ramp
     /// (steady relaxation); enhance > 1 raises the heating to drive the upflow.
-    float coronal_heat_t_on       = 0.0f;  ///< ramp onset time [s]
-    float coronal_heat_ramp       = 1.0f;  ///< cosine ramp half-width [s]
-    float coronal_heat_enhance    = 1.0f;  ///< peak amplitude multiplier after the ramp
+    Real coronal_heat_t_on       = 0.0f;  ///< ramp onset time [s]
+    Real coronal_heat_ramp       = 1.0f;  ///< cosine ramp half-width [s]
+    Real coronal_heat_enhance    = 1.0f;  ///< peak amplitude multiplier after the ramp
 
     /// Positivity / vacuum floor (apply_flare_floor_stage + the rhs predictor and
     /// reconstructed-face floors). Clips ρ,p positive, caps |V|, and — where the
@@ -980,7 +995,7 @@ struct Grid {
     /// value the C7 tests pin). A gentle-evaporation run raises it (e.g. 0.5) so the
     /// subsonic upflow exits without the ill-posed free-outflow inflow — the steady
     /// relaxation flow (≪ cap) is unaffected.
-    float outer_mach_cap          = 0.05f;
+    Real outer_mach_cap          = 0.05f;
 
     /// When true, the outer face is a reflecting symmetry plane rather than an
     /// outflow: the outer ghosts mirror the interior with V,U → −V,−U, so the net
@@ -995,7 +1010,7 @@ struct Grid {
     /// Current simulation time [s], refreshed by the driver (chromo_main) each
     /// step before advance_Euler_state so time-dependent terms (beam window) can
     /// read it. Not used by steady scenarios.
-    float sim_time                = 0.0f;
+    Real sim_time                = 0.0f;
 
     /// Per-Grid reusable workspaces for the release solver, reused between steps so
     /// the hot loops allocate nothing and no function-static state is needed.
@@ -1118,7 +1133,7 @@ struct Grid {
     ///@}
 
     /// Allocate arrays for ns cells, fill physical constants, zero the fields.
-    void init(arma::uword ns_in, float CFL_in);
+    void init(arma::uword ns_in, Real CFL_in);
 
     /// Re-allocate the ns-sized arrays for a new cell count WITHOUT touching the
     /// physical constants, γ, CFL, or any runtime toggle. Used by the static-mesh

@@ -8,6 +8,7 @@ This page describes the discretization. For the equations being discretized see 
 | --- | --- |
 | Model | 1D field-aligned hydrodynamics on a straight field line, gravity on, `B = 1` |
 | State | single-fluid equilibrium mixture, `U = (rho, rho u, E)`; carrier quantities derived, never stored |
+| Storage precision | `double` throughout — `chromosphere::Real` is the one knob and every stored physical scalar is declared in terms of it |
 | Update path | `U^n -> MUSCL-Hancock/Godunov hydro -> U* -> implicit physical conduction -> U^{n+1}` |
 | Splitting | first-order Lie (not Strang) |
 | Thermodynamics | Gamma/Saha equilibrium closure with ionization energy, production `Gamma1` table |
@@ -73,7 +74,15 @@ Both are retained for regression and controlled numerical comparison. Neither is
 
 **The release interior hydrodynamic operator needs no frozen global hydrostatic reference state.** `Grid::eq_wb` and `ISO_EQ_WB` — the equilibrium-reference "delta-form" device that subtracted a frozen explicit-RHS residual every step — have been **retired from `model_column`**. They still exist in `chromosphere.hpp` for the two-fluid research solver, and must never be set on a release Grid.
 
-What replaced them: the predictor source term described above, plus a second-order trapezoidal, EOS-closed lower ghost ladder. Together these cut the raw discrete hydrostatic face mass-flux defect by roughly a factor of 560, down to a level comparable to the estimated float32 round-off scale of the stored state at release resolution — no clean truncation-error trend survives between `N = 500` and `N = 1000`.
+What replaced them: the predictor source term described above, plus a second-order trapezoidal, EOS-closed lower ghost ladder. Together these cut the raw discrete hydrostatic face mass-flux defect by roughly a factor of 560.
+
+At the release double-precision storage the remaining defect is `1.78e-13 kg m^-2 s^-1` at `N = 500` (20 s, conduction off, release Godunov flux), and its maximum sits in the upper transition region at 2149 km rather than on the base face. Two things follow, and both are stronger statements than the release could make before the storage cutover:
+
+- **The residual has no representation component.** It is about `1e8` times the double round-off floor of the stored state, so it is entirely discretization and boundary closure. Under the previous `float` storage the same quantity was `1.08e-12` and sat at `1.07x` its own round-off floor — that is, it *was* the representation limit.
+- **It is second-order convergent.** Refining `N = 500 -> N = 1000` reduces it 4.55x (observed order 2.19), with order 1.95 at the base face and 1.90 in the 20 s maximum residual velocity. In `float` the same refinement made the defect *worse* (apparent order `-1.0`), the signature of per-face ULP noise. The older statement that no clean truncation-error trend survived between the two resolutions was therefore a property of `float` storage, not of the scheme.
+
+What survives is a genuine defect, not noise: in `double` the base face is still dominated by the dissipative part of the flux (`f_diff = 1.29e-13` of an `f_total = 1.25e-13`), i.e. Godunov dissipation acting on a genuinely nonzero reconstructed jump. That is the same localized first-interior-face artifact listed under Known limitations in @ref validation, and it is open. Measurements: `docs/studies/numerics/reference_free_release_recap.md`.
+
 
 Be precise about what this claims. The release is **not** a well-balanced scheme in the constructive sense. It removes the dominant discretization inconsistencies and leaves a small, resolution-dependent residual. The boundary closures still capture fixed reservoir data once from the initial condition, as any truncated-domain problem must. Evidence: `docs/studies/numerics/reference_free_release_recap.md`.
 
@@ -84,6 +93,12 @@ The conduction stage is a nonlinear backward-Euler solve on the mixture energy r
 Mass and momentum are untouched, and the accepted energy is the flux-updated internal energy plus the unchanged kinetic and gravitational parts, so the stage is conservative by construction. Because the solve is unconditionally stable it imposes no timestep constraint — the acoustic CFL condition is the only constraint the release has, since it carries no volumetric source term.
 
 Face conductivities on a refined mesh use the width-weighted series-resistance form `chromosphere::face_conductivity_series` rather than an arithmetic average, because the flux crosses two half-cells in series. On a uniform mesh callers keep the legacy arithmetic average so results are unchanged.
+
+## State storage precision
+
+The conserved state is stored, and the update `U^{n+1} = U^n + dt R` accumulated, in **`double`**. This is part of the numerical method, not a build detail: the release integrates a stratified layer whose mass-loading timescale exceeds the CFL step by `~3.5e7`, there is no compensated summation and no deviation (perturbation-variable) formulation, so the per-step continuity increment has to be representable against the stored `rho`. In `float` it is not — it falls below half a ULP of `rho` through most of the lower chromosphere, and the density there cannot evolve at all. `double` leaves about eight orders of magnitude of margin, and matches SWMF/BATS-R-US, whose shipped builds all set `PRECISION = ${DOUBLEPREC}` and whose `State_VGB` update is a float64 accumulation.
+
+The EOS and conduction solves were always in double regardless of storage. The single knob is `chromosphere::Real`; the diagnostic-only `CHROMO_STATE_FLOAT32` build reverts the storage to `float` and must not be used for production or any quoted number. See @ref architecture for the build flag and @ref validation for what the cutover fixed and what it did not. Evidence: `docs/studies/numerics/state_precision_release_cutover.md`.
 
 ## EOS inversion performance
 
@@ -102,7 +117,7 @@ Every decode inverts the caloric closure for `T`, so the inversion is the hot pa
 
 This is what keeps `CHROMO_CFL` meaning the CFL of the scheme actually running. Implemented as `max(Gamma1, 5/3)` on the release path, so the bound stays conservative if the table ever returns an index above the monatomic value.
 
-**Measured effect on the canonical release configuration: none.** The CFL-limiting cell of the `N = 500`/R4 column is the topmost cell (2153 km, ~22 kK, hydrogen fully ionized), where the tabulated `Gamma1` is already `5/3`; the 1.24x speed gap lives in the partial-ionization interior, which is nowhere near the limit. The rule therefore leaves `dt`, the step count (17781 over 100 s) and the end time unchanged on this model, and the residual solution difference is at the established float32 round-off sensitivity of this solver. **This also corrects an earlier claim** that running the Godunov flux at `CHROMO_CFL=0.50` gave an effective CFL of about 0.62: measured against the frozen wave speeds, the equilibrium-sized step gave an effective CFL of exactly 0.500. The rule matters as a guarantee for other mesh or model shapes, where a partial-ionization cell could become limiting and the step would then be up to 1.24x shorter than the equilibrium rule would give.
+**Measured effect on the canonical release configuration: none.** The CFL-limiting cell of the `N = 500`/R4 column is the topmost cell (2153 km, ~22 kK, hydrogen fully ionized), where the tabulated `Gamma1` is already `5/3`; the 1.24x speed gap lives in the partial-ionization interior, which is nowhere near the limit. The rule therefore leaves `dt`, the step count (17781 over 100 s) and the end time unchanged on this model, and the residual solution difference was at the storage round-off level of the build it was measured in — the pre-cutover float32 state. **This also corrects an earlier claim** that running the Godunov flux at `CHROMO_CFL=0.50` gave an effective CFL of about 0.62: measured against the frozen wave speeds, the equilibrium-sized step gave an effective CFL of exactly 0.500. The rule matters as a guarantee for other mesh or model shapes, where a partial-ionization cell could become limiting and the step would then be up to 1.24x shorter than the equilibrium rule would give.
 
 `CHROMO_CFL=0.50` is the validated production value for the reduced release configuration; the conservative hard-coded default remains 0.25 and stays the comparison reference. Rerun the sweep before trusting 0.50 on different hardware or a materially different model shape. The original sweep was run with the Roe flux and the equilibrium signal speed, and it carries over to the release flux only because the step is unchanged on this configuration, as measured above. Evidence: `docs/studies/conduction/coarse_model_column_physical_conduction_recap.md`, `docs/studies/numerics/swmf_godunov_flux_experiment.md`.
 

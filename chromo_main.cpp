@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
     const std::string ioniz_arg     = (argc > 3) ? argv[3]
                                                  : (release_column ? "no-ionization" : "ionization");
     const std::string data_path     = (argc > 5) ? argv[5] : "";
-    const float       time_mult     = (argc > 6) ? std::stof(argv[6]) : 1.0f;
+    const Real       time_mult     = (argc > 6) ? std::stof(argv[6]) : 1.0f;
     const std::string cool_arg      = (argc > 7) ? argv[7]
                                                  : (release_column ? "no-cooling" : "cooling");
     const bool explicit_only        = (mode == "explicit");
@@ -187,7 +187,7 @@ int main(int argc, char** argv) {
         std::cerr << " requested=" << requested;
     std::cerr << '\n';
 
-    float cfl = 0.25f;
+    Real cfl = 0.25f;
     if (const char* e = std::getenv("CHROMO_CFL")) { try { cfl = std::stof(e); } catch (...) {} }
 
     Scenario sc;
@@ -260,15 +260,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const float c_s_target = 2.0e4f; // m/s, ion sound speed scale (writeup §4)
-    float total_time = time_mult * 10.0f * arma::sum(grid.ds_i) / c_s_target;
+    const Real c_s_target = 2.0e4f; // m/s, ion sound speed scale (writeup §4)
+    Real total_time = time_mult * 10.0f * arma::sum(grid.ds_i) / c_s_target;
     // Optional absolute stop time for reproducible long diagnostics. Unset keeps
     // the historical time_mult-derived behavior byte-for-byte unchanged.
     const char* end_time_env = std::getenv("CHROMO_T_END");
     bool end_time_requested = false;
     if (end_time_env) {
         try {
-            const float requested = std::stof(end_time_env);
+            const Real requested = std::stof(end_time_env);
             if (requested > 0.0f && std::isfinite(requested)) {
                 total_time = requested;
                 end_time_requested = true;
@@ -306,7 +306,7 @@ int main(int argc, char** argv) {
     // TRUE even when nothing was ever opened. Always test is_open().
     if (fout.is_open()) {
         fout << grid.ns << " " << state_rows << '\n';
-        float cum_km = 0.0f;
+        Real cum_km = 0.0f;
         for (arma::uword i = 0; i < grid.ns; ++i) {
             cum_km += grid.ds_i(i) * 1.0e-3f;
             fout << "  " << (cum_km + grid.out_base_km);
@@ -320,7 +320,7 @@ int main(int argc, char** argv) {
         gamma_diag.open(out_path+".gamma_diag");
         if (!gamma_diag) throw std::runtime_error("cannot open gamma diagnostic sidecar");
         gamma_diag << grid.ns << " 10\n";
-        float cum_km = 0.0f;
+        Real cum_km = 0.0f;
         for (arma::uword i = 0; i < grid.ns; ++i) {
             cum_km += grid.ds_i(i)*1.0e-3f;
             gamma_diag << "  " << (cum_km+grid.out_base_km);
@@ -335,7 +335,7 @@ int main(int argc, char** argv) {
                    << "# columns=rho_total v_cm T x_eq n_e n_HI p_total Gamma1 kappa_physical kappa_solver\n";
     }
 
-    auto write_frame = [&](float t_now, long long step_now) {
+    auto write_frame = [&](Real t_now, long long step_now) {
         ProfileScope output_timer(ProfileRegion::Output);
         if (fout.is_open()) {
             fout << "# t = " << t_now << " step = " << step_now << '\n';
@@ -374,7 +374,7 @@ int main(int argc, char** argv) {
     // time roughly constant when sweeping time_mult — animation length at
     // 30 fps is ~17 s independent of physical simulation duration.
     int frame_stride = std::max(10,
-        static_cast<int>(10.0f * std::max(1.0f, time_mult / 5.0f)));
+        static_cast<int>(10.0 * std::max(Real(1), time_mult / Real(5))));
     if (const char* stride = std::getenv("CHROMO_FRAME_STRIDE")) {
         try { frame_stride = std::max(1, std::stoi(stride)); } catch (...) {}
     }
@@ -422,7 +422,7 @@ int main(int argc, char** argv) {
                 "lives in mixture_rhs_explicit)");
         face_flux.open(out_path+".faceflux");
         if (!face_flux) throw std::runtime_error("cannot open face-flux sidecar");
-        float cum_km = 0.0f;
+        Real cum_km = 0.0f;
         face_cell_km.set_size(grid.ns);
         face_face_km.set_size(grid.ns);
         for (arma::uword i = 0; i < grid.ns; ++i) {
@@ -483,7 +483,7 @@ int main(int argc, char** argv) {
         outer_cond.precision(10);
     }
 
-    auto write_outer_cond_record = [&](float t_now, long long step_now) {
+    auto write_outer_cond_record = [&](Real t_now, long long step_now) {
         const OuterConductionCapture& oc = grid.outer_conduction_capture;
         if (!outer_cond.is_open() || !oc.valid) return;
         outer_cond << t_now << ' ' << step_now << ' '
@@ -493,7 +493,7 @@ int main(int argc, char** argv) {
                    << oc.q_face << '\n';
     };
 
-    auto write_face_record = [&](float t_now, long long step_now) {
+    auto write_face_record = [&](Real t_now, long long step_now) {
         const MixtureFaceFluxCapture& c = grid.face_flux_capture;
         if (!face_flux.is_open() || !c.valid) return;
         {
@@ -515,7 +515,7 @@ int main(int argc, char** argv) {
         }
     };
 
-    float     time         = 0.0f;
+    Real     time         = 0.0f;
     long long step         = 0;
     std::uint64_t state_generation = 0;
     MixtureField decoded_storage[2];
@@ -539,7 +539,7 @@ int main(int argc, char** argv) {
         } else {
             dt = cal_dt_i(grid,xn);
         }
-        const float dt_avg = arma::mean(dt);
+        const Real dt_avg = arma::mean(dt);
         // Arm the read-only face-flux capture for THIS step's single RHS call. dt is
         // already known here, so the final step of the run is always captured.
         if (write_face_flux)

@@ -274,6 +274,33 @@ Measured against the finest run (CFL 0.0625, a dedicated 113,951-step control), 
 
 This is a pre-existing property of the model, not a consequence of raising the CFL, and diagnosing it further (e.g. float→double for the residual) is outside this task's scope. It is recorded as a production risk in §10.
 
+> ### RESOLVED, 2026-08-17: it was float32 cancellation, and the double-precision release cutover fixes it
+>
+> The hypothesis in the paragraph above was correct. Re-measured after the release conserved state moved to `double` (`docs/studies/numerics/state_precision_release_cutover.md`), with a **float32 control at the identical configuration** so the attribution is causal rather than circumstantial. Release mesh N=500/R4 (661 cells), 20 s, conduction on, release Godunov flux. Every run was interpolated in time to exactly `t = 20.000 s` from a 0.02 s snapshot cadence: runs overshoot `CHROMO_T_END` by up to one `dt`, and with `|dv/dt| ≈ 0.14` (L1) that misalignment alone injects ~7e-4 m/s — *the same size as the entire double-precision signal*, so the alignment is load-bearing, not cosmetic.
+>
+> | dt-halving pair | **double** L1 \|Δv\| | order | **double** Linf \|Δv\| | order | **float32** L1 \|Δv\| | order |
+> |---|---|---|---|---|---|---|
+> | 0.50 vs 0.25 | 5.340e-3 | — | 6.398e-2 | — | 1.476e-1 | — |
+> | 0.25 vs 0.125 | 1.409e-3 | **1.92** | 2.610e-2 | **1.29** | 3.727e-1 | **-1.34** |
+> | 0.125 vs 0.0625 | 4.537e-4 | **1.64** | 1.200e-2 | **1.12** | 8.284e-1 | **-1.15** |
+>
+> Differenced against the finest run (CFL 0.0625), L1 \|Δv\| in m/s:
+>
+> | CFL | 0.50 | 0.45 | 0.40 | 0.35 | 0.25 | 0.125 |
+> |---|---|---|---|---|---|---|
+> | **double** | 7.157e-3 | 5.800e-3 | 4.594e-3 | 3.531e-3 | 1.848e-3 | 4.537e-4 |
+> | **float32** | 1.060 | 1.030 | 1.025 | 1.135 | 1.197 | 0.828 |
+>
+> **The double column is monotone at observed order ≈ 2.0 (L1) and ≈ 1.1–1.3 (Linf). The float32 column is pinned at 1.03–1.20 m/s for every CFL** — i.e. this section's own finding, reproduced quantitatively on the current release configuration. The mechanism is visible directly in the fields at `t = 20 s`: across an 8x step-count range double is stable (mean \|v\| 2.4015 → 2.4084 m/s, max 40.641 → 40.661) while float32 **degrades as the step count grows** (mean \|v\| 2.418 → 3.271, max 40.71 → 44.39 m/s). Error that grows with the number of additions is round-off accumulation, not truncation.
+>
+> Repeated on this section's original 2638-cell mesh (`ISO_NS=2000`) the conclusion is the same and the float32 pathology is worse: double L1 `2.00e-3 → 7.33e-4 → 3.32e-4` (orders 1.45, 1.14) with the field identical to four digits across the ladder, against float32 `8.11e-1 → 1.75e0 → 2.01e0` (orders -1.11, -0.20) and mean \|v\| running away `2.698 → 6.304 m/s`, max `42.37 → 57.11 m/s`.
+>
+> **Consequences for this document.** §7.4's conclusion that "a velocity-relative comparison against the finest run cannot discriminate between CFL values" was a float32 statement. In `double` the velocity field *does* converge in time, so a velocity self-convergence ladder is once again a valid discriminator, and the ≈1 m/s floor that forced the fallback to a CFL-0.25-relative comparison is gone (it is now ≈7e-3 m/s at CFL 0.50). The **gate failures themselves are not re-adjudicated here** — that would need the whole acceptance matrix re-run in double — so CFL 0.50 remains validated on its original evidence and the §10 production risk should be read as retired *in mechanism* but not yet replaced by a double-precision acceptance sweep.
+>
+> **Caveat, stated plainly.** §7.4's exact configuration is **not reproducible on a release build**: it used `ISO_NUMERICAL_DIFFUSIVITY_MULT=1`, which `model_column` now rejects outright, and the Roe flux, which is demoted to a reference override. The numbers above are the current release configuration on two meshes with matched float32 controls, not a bit-level replay. Also note these are 20 s fields, which sit *before* the 4000 s float32 mass-freeze divergence develops — at 20 s and CFL 0.50 the two precisions still agree in mean \|v\| to 0.7 %. Nothing here is an evaporation number.
+>
+> Runs: `outputs/model_column/precision_cutover/{cfl_time,cfl_time_fine,cfl_time_n2000}/`.
+
 The discriminating comparison that *is* valid is against the **current production baseline CFL 0.25**, since that is the accepted state of practice:
 
 | t = 20 s | L1 \|Δv\| (m/s) | Linf \|Δv\| (m/s) | Linf ΔT (K) | L1 ΔT/T | L1 Δp/p | L1 Δrho/rho |
@@ -433,7 +460,7 @@ Sweep artifacts (~122 MB, gitignored) live in `outputs/model_column/cfl_sweep/`.
 
 ## 13. Production risks
 
-1. **Velocity is not time-converged in this configuration.** The residual velocity field (max ≈ 53 m/s, mean ≈ 2–4 m/s) does not converge as dt → 0; halving the timestep increases the level-to-level difference. This is pre-existing, affects CFL 0.25 equally, and is consistent with float32 cancellation in a residual carried on top of a hydrostatic balance. Any study whose science depends on m/s-scale chromospheric velocities should treat these values as noise-floor regardless of CFL. Out of scope here; worth a separate task.
+1. ~~**Velocity is not time-converged in this configuration.**~~ **RETIRED 2026-08-17 — it was float32 cancellation.** As originally recorded: the residual velocity field (max ≈ 53 m/s, mean ≈ 2–4 m/s) did not converge as dt → 0; halving the timestep increased the level-to-level difference, consistent with float32 cancellation in a residual carried on top of a hydrostatic balance. That hypothesis is now confirmed and the cause removed: with the release conserved state in `double` the velocity field converges in time at observed order ≈ 2.0 (L1), and the ≈1 m/s floor drops to ≈7e-3 m/s at CFL 0.50, while a float32 control at the identical configuration still reproduces the pathology (apparent order −0.2 to −1.4). See the RESOLVED block in §7.4. **What is retired is the mechanism, not a re-adjudication of the gates** — the acceptance matrix has not been re-run in double, so CFL 0.50 still stands on its original evidence. m/s-scale chromospheric velocities are no longer known to be a round-off artifact, but no double-precision noise floor has been established for them either, so quantitative claims at that scale still need their own measurement.
 2. **CFL 0.50 is validated for one model shape, one machine, and one signal-speed definition.** Every `acoustic`-limiter tally in this document is a `sqrt(Gamma1 p/rho)` measurement, taken under the Roe release flux. The release flux is now the SWMF exact-Riemann Godunov flux and the CFL is sized from the frozen `sqrt(5/3 p/rho)` speed; that leaves `dt` and the step count unchanged *on this exact configuration*, because the CFL-limiting cell is the fully ionized top cell where `Gamma1 = 5/3` (measured: `docs/studies/numerics/swmf_godunov_flux_experiment.md` §8.2). It would not leave them unchanged on a shape where a partial-ionization cell is limiting. It applies to the 2638-cell refined `model_column` case on the current Apple Silicon workstation. Rerun the sweep for a different mesh, scenario, or hardware. Scenarios with additional timestep limiters (cooling, beam heating, electron energy) were not exercised — every step of every run here was acoustic-limited.
-3. **The 100 s comparison uses CFL 0.25 as its reference**, not an independent exact solution, because the finer-time reference is not more trustworthy in the velocity field (§7.4).
+3. **The 100 s comparison uses CFL 0.25 as its reference**, not an independent exact solution, because the finer-time reference was not more trustworthy in the velocity field (§7.4). *That constraint is lifted in `double` — the finer-time reference now is more trustworthy — but the comparison in this document was not re-run.*
 4. **`CHROMO_FRAME_DT` is opt-in.** A long run that enables output without it silently keeps the legacy stride and can emit multi-GB files. The launcher's low-I/O defaults mitigate but do not prevent this.

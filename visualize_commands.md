@@ -2064,7 +2064,16 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
 
 ---
 
-## 14. Double-precision control experiment (DIAGNOSTIC — not a release configuration)
+## 14. Storage-precision comparison (HISTORICAL as written; superseded by section 14a)
+
+> **Superseded 2026-08-17.** Double precision is now the RELEASE storage and `float32` is the
+> diagnostic build; `CHROMO_STATE_FLOAT64` is retired and CMake hard-errors on it. Everything below
+> is kept as the record of what was run at the time, but its "float64 control" leg was an
+> incoherent hybrid — `Vec` was promoted and the pack, predictor, RHS, timestep and physical
+> constants were not — so **two of its numbers are wrong** (the 2 % spread and the ~3 % evaporation
+> shift). Use section 14a. Do not re-run the commands in this section; they will not configure.
+
+### 14 (as originally written)
 
 A matched control for the lower-chromosphere mass-flux gradient of section 13.
 Everything is identical to the `lnp_godunov_N500_4000s` release run — physics,
@@ -2145,6 +2154,83 @@ ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
 .venv/bin/python util/animate_isentropic.py \
   outputs/model_column/lnp_godunov_N500_4000s_f64.txt \
   visualization/model_column/lnp_godunov_N500_4000s_f64_evolution.mp4 25
+```
+
+---
+
+## 14a. Storage-precision cutover comparison (CURRENT — double is the release)
+
+The re-measured comparison after the release cutover, with precision as a single
+coherent knob (`chromosphere::Real`). The `double` leg is the plain release build
+with no precision flag; the `float32` leg is the default-off diagnostic build.
+Both legs ran to `termination=end_time` at 4000 s with `godunov.fallbacks=0`:
+712,029 steps / 941,302,338 exact face solves (double) and 712,314 / 941,679,108
+(float32). They are **not** step-identical, because a coherent knob promotes the
+`Grid` physical constants too, which perturbs `c_s` at the `1e-8` level and hence
+`dt`; the earlier section could claim identical tallies only because it left those
+constants in `float`.
+
+**Regression check:** the float32 leg is **byte-identical** to the archived
+pre-cutover release run `outputs/model_column/lnp_godunov_N500_4000s.*` in all
+three files, so the refactor is semantics-neutral and every difference below is a
+genuine precision effect.
+
+```bash
+# release (double) — no precision flag
+cmake -S . -B build_omp -DCMAKE_BUILD_TYPE=Release -DCHROMO_ENABLE_OPENMP=ON
+cmake --build build_omp -j 12
+# diagnostic (float32)
+cmake -S . -B build_omp_f32 -DCMAKE_BUILD_TYPE=Release \
+      -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT32=ON
+cmake --build build_omp_f32 -j 12
+
+for leg in release_double:build_omp diag_float32:build_omp_f32; do
+  CHROMO_BINARY=$PWD/${leg##*:}/chromo_main \
+  CHROMO_T_END=4000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=20 \
+  CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_STRIDE=3300 \
+  scripts/run_chromo_realtime.sh \
+    outputs/model_column/${leg%%:*}_N500_4000s.txt \
+    full no-ionization model_column - 20.0 no-cooling
+done
+```
+
+### `precision_cutover_N500_4000s.png`
+
+Same six panels as section 14 (`f_total(h)` at 2000 s and 4000 s; base zoom of
+`f_total` against cell-centred `rho*V`; final velocity profile; column mass budget;
+per-step mass increment in ULPs of each leg's storage type), re-run against the
+coherent builds. The legend now labels float32 as the diagnostic leg.
+
+| Quantity, N=500/R4, 4000 s | float32 (diagnostic) | **double (RELEASE)** |
+| --- | --- | --- |
+| `f_total` base/top, t = 2000 s | 2.682 | **1.006** |
+| `f_total` base/top, t = 4000 s | 2.811 | **1.003** |
+| 1600–1850 km spread of `f_total`, t = 4000 s | 119.5 % | **13.0 %** |
+| cells with per-step mass increment below 0.5 ULP | 619 / 660 | **0 / 660** |
+| mass budget over 1605–1850 km, predicted / observed | **-214.9** | **0.994** |
+| base velocity, t = 4000 s | 1.392 m/s | 0.356 m/s |
+| top velocity, t = 4000 s | 13.18 m/s | **9.50 m/s** |
+| `f_total` at the top face, t = 4000 s | 3.753e-10 | **2.702e-10** |
+| `f_diff` at face 0, as a fraction of `f_total[0]` | 16.30 % | 16.10 % |
+| cell 0 `rho*V` / `f_total[0]` | 1.280 | 1.275 |
+
+The gross continuity violation is gone — base/top 2.811 → 1.003, the mass budget
+closes, and no cell is frozen. **Two corrections to section 14, both against
+overclaiming:** the lower-chromosphere spread is 13.0 %, not 2 % (a broad monotone
+decline with its minimum at 1849.7 km, *not* the first-face artifact, relaxing only
+slowly — 14.3 % at 500 s to 13.0 % at 4000 s, so the column is still relaxing at
+4000 s); and the top-of-domain evaporation observables move by ~28 %, not ~3 %, and
+downward, because a lower chromosphere that cannot drain sustains a mass supply the
+column does not have. **Any evaporation number from a float32 run is high by of
+order 30 %.** The first-interior-face artifact is unchanged and remains open.
+Full record: `docs/studies/numerics/state_precision_release_cutover.md`.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
+  util/plot_precision_control.py \
+  outputs/model_column/diag_float32_N500_4000s.txt \
+  outputs/model_column/release_double_N500_4000s.txt \
+  visualization/model_column/precision_cutover_N500_4000s.png
 ```
 
 ---

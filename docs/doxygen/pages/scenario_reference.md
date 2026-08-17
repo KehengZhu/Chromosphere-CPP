@@ -37,7 +37,7 @@ The `model_isentropic` alias has been **retired** and no longer exists — `make
 
 `model_gentle` is the **historical two-fluid research preset on the same IC/BC implementation** as `model_column` — one file, `scenarios/model_column.cpp`, serves both. The two never cross solvers: `model_gentle` **never loads a `Gamma1` table**, so it always selects the seven-row two-fluid solver with a fixed adiabatic index, finite-rate ionization, a radiative sink and TRAC. Nothing a user can set moves either scenario across that line.
 
-**Geometry and domain.** Same straight field line, `B = 1`, gravity on. The preset sets `ISO_H_BASE = 1003` km — the `model_c7` validated floor — because the Stage-E `n^2` reaction channels and the radiative loss overflow float32 at photospheric density. `ISO_CORONA = 1` extends the top into a resolved ~1 MK corona (`ISO_CORONA_TOP_KM`, default 10,000 km), and `ISO_NS = 600`.
+**Geometry and domain.** Same straight field line, `B = 1`, gravity on. The preset sets `ISO_H_BASE = 1003` km — the `model_c7` validated floor — because the Stage-E `n^2` reaction channels and the radiative loss overflowed float32 at photospheric density under the storage precision this preset was validated in. `ISO_CORONA = 1` extends the top into a resolved ~1 MK corona (`ISO_CORONA_TOP_KM`, default 10,000 km), and `ISO_NS = 600`.
 
 **Initial condition.** The same C7 temperature and ionization-fraction profile with the total density re-integrated hydrostatically, but closed with the fixed adiabatic index `Grid::gamma_mono` (default 5/3, tunable through `ISO_GAMMA`) rather than the Saha/`Gamma1` closure. The Route-B photoionization rate is inverted over the active Stage-E network so the C7 profile is a fixed point of it.
 

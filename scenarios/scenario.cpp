@@ -107,9 +107,13 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
         // evaporation configuration — resolved corona + radiative sink +
         // two-fluid + finite-rate ionization, conduction on. The base is raised
         // to h = 1003 km (model_c7's validated floor): the Stage-E n² channel
-        // counts and the radiative loss overflow float32 at photospheric density
-        // (n ~ 1e23 ⇒ n² ≫ FLT_MAX). It never loads a Gamma1 table, so it always
-        // selects the seven-row two-fluid solver.
+        // counts and the radiative loss overflowed float32 at photospheric
+        // density (n ~ 1e23 ⇒ n² ≫ FLT_MAX). That overflow constraint no longer
+        // binds now that chromosphere::Real is double, but 1003 km is retained
+        // because it is also the height above which this preset's
+        // ionization/cooling physics is validated -- the numerical reason went
+        // away, the physical one did not. It never loads a Gamma1 table, so it
+        // always selects the seven-row two-fluid solver.
         if (name == "model_gentle") {
             set_env_default("ISO_CORONA",     "1");
             set_env_default("ISO_H_BASE",     "1003");
@@ -149,43 +153,43 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
 // buffers, and re-runs Grid::broadcast so the packed _state caches stay in sync.
 void apply_open_bcs(Grid& grid, const Vec& xn) {
     const arma::uword ns = grid.ns;
-    const float k_b = grid.k_b;
-    const float m_i = grid.m_i;
-    const float m_n = grid.m_n;
+    const Real k_b = grid.k_b;
+    const Real m_i = grid.m_i;
+    const Real m_n = grid.m_n;
 
     auto cell_prim = [&](arma::uword i,
-                         float& rho_i, float& rho_n,
-                         float& V,     float& U,
-                         float& T_i,   float& T_n) {
+                         Real& rho_i, Real& rho_n,
+                         Real& V,     Real& U,
+                         Real& T_i,   Real& T_n) {
         const auto sz = arma::size(ns, num_of_eq);
         rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
         rho_n = xn(arma::sub2ind(sz, i, cons::RHO_N));
-        const float momI = xn(arma::sub2ind(sz, i, cons::MOM_I));
-        const float momN = xn(arma::sub2ind(sz, i, cons::MOM_N));
-        const float E_i  = xn(arma::sub2ind(sz, i, cons::E_I));
-        const float E_n  = xn(arma::sub2ind(sz, i, cons::E_N));
+        const Real momI = xn(arma::sub2ind(sz, i, cons::MOM_I));
+        const Real momN = xn(arma::sub2ind(sz, i, cons::MOM_N));
+        const Real E_i  = xn(arma::sub2ind(sz, i, cons::E_I));
+        const Real E_n  = xn(arma::sub2ind(sz, i, cons::E_N));
         V = momI / rho_i;
         U = momN / rho_n;
-        const float phi_g_cell = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
+        const Real phi_g_cell = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
         // cons2prim convention (state.cpp): p_i = 2 n_i k_b T_i with electron
         // quasi-neutrality folded in, p_n = n_n k_b T_n.
-        const float p_i = grid.gm1() * E_i - grid.half_gm1() * rho_i * V * V
+        const Real p_i = grid.gm1() * E_i - grid.half_gm1() * rho_i * V * V
                          - grid.gm1() * rho_i * phi_g_cell;
-        const float p_n = grid.gm1() * E_n - grid.half_gm1() * rho_n * U * U
+        const Real p_n = grid.gm1() * E_n - grid.half_gm1() * rho_n * U * U
                          - grid.gm1() * rho_n * phi_g_cell;
-        const float n_i = rho_i / m_i;
-        const float n_n = rho_n / m_n;
+        const Real n_i = rho_i / m_i;
+        const Real n_n = rho_n / m_n;
         T_i = p_i / (2.0f * n_i * k_b);
         T_n = p_n /        (n_n * k_b);
     };
 
     auto pack_ghost = [&](Vec& ob,
-                          float rho_i, float rho_n,
-                          float V_g,   float U_g,
-                          float T_i,   float T_n,
-                          float phi_g_g) {
-        const float n_i = rho_i / m_i;
-        const float n_n = rho_n / m_n;
+                          Real rho_i, Real rho_n,
+                          Real V_g,   Real U_g,
+                          Real T_i,   Real T_n,
+                          Real phi_g_g) {
+        const Real n_i = rho_i / m_i;
+        const Real n_n = rho_n / m_n;
         ob(cons::RHO_I) = rho_i;
         ob(cons::RHO_N) = rho_n;
         ob(cons::MOM_I) = rho_i * V_g;
@@ -199,8 +203,8 @@ void apply_open_bcs(Grid& grid, const Vec& xn) {
 
     // --- Inner reflecting wall (mirror cells 0 and 1) ----------------------
     {
-        float rho_i, rho_n, V, U, T_i, T_n;
-        const float phi_g_in = grid.phi_g_imh(0);
+        Real rho_i, rho_n, V, U, T_i, T_n;
+        const Real phi_g_in = grid.phi_g_imh(0);
         cell_prim(0, rho_i, rho_n, V, U, T_i, T_n);
         pack_ghost(grid.inner_boundary0_i, rho_i, rho_n, -V, -U, T_i, T_n, phi_g_in);
         if (ns >= 2) {
@@ -224,8 +228,8 @@ void apply_open_bcs(Grid& grid, const Vec& xn) {
     // potential is flat there and reusing phi_g_iph(ns-1) for both ghosts is exact
     // to leading order.
     {
-        float rho_i, rho_n, V, U, T_i, T_n;
-        const float phi_g_out = grid.phi_g_iph(ns - 1);
+        Real rho_i, rho_n, V, U, T_i, T_n;
+        const Real phi_g_out = grid.phi_g_iph(ns - 1);
         cell_prim(ns - 1, rho_i, rho_n, V, U, T_i, T_n);
         if (grid.outer_reflecting) {
             pack_ghost(grid.outer_boundary0_i, rho_i, rho_n, -V, -U, T_i, T_n, phi_g_out);

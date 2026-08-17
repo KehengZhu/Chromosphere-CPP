@@ -49,13 +49,13 @@ struct ScenarioDataFile {
     /// Gravitational acceleration the generator assumed when it integrated the
     /// φ_g columns [m/s^2] (solar surface value 274). Recorded for provenance;
     /// the per-face φ_g columns are what the solver actually uses.
-    float       g_si        = 274.0f;
+    Real       g_si        = 274.0f;
     /// Field strength at the outer face of the last cell [T], i.e. B_iph(ns-1).
     /// Recorded for provenance; B_imh_T / B_iph_T are authoritative.
-    float       B_outer_T   = 0.0f;
+    Real       B_outer_T   = 0.0f;
     /// Additive gauge offset already applied to the φ_g columns [J/kg]. The
     /// generators write 0, i.e. φ_g = 0 at the inner face of the trace.
-    float       phi_g_offset_Jpkg = 0.0f;
+    Real       phi_g_offset_Jpkg = 0.0f;
     /// Field-line topology. "closed" ⇒ the outer face is the loop apex (reflecting
     /// symmetry BC); anything else (default "open") ⇒ coronal outflow at the top.
     std::string topology    = "open";
@@ -63,7 +63,7 @@ struct ScenarioDataFile {
     /// Used to calibrate the ambient coronal heating E_H0(L, s_H, T_max). 0 if the
     /// file omits it (older traces) — the heating overlay then falls back to the
     /// arc-length sum.
-    float       loop_half_length_m = 0.0f;
+    Real       loop_half_length_m = 0.0f;
 
     /// CELLS, all length ns.
     /// Cell width along the field line [m].

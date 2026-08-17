@@ -40,7 +40,7 @@ so it is the **upper face** height of cell `i`, not the cell centre — `ds_i` i
 
 **The optional `# EOS_MODE=` line** is written next, and only when the run is in release mode *and* the `.gamma_diag` sidecar is enabled. Its exact form is `# EOS_MODE=gamma_table diagnostics=<out>.gamma_diag`. A reader that assumes the first `#` line after the heights is a frame marker must skip it.
 
-**Then, repeated per frame:** a marker line `# t = <t> step = <step>` followed by exactly `ns` rows. Each row is one cell, in increasing cell index, holding `state_rows` values each preceded by two spaces, written in row-index order `k = 0 .. state_rows-1`. Values are `float` printed at the default stream precision (six significant digits). The final state is always written even when it does not land on the output cadence, so the last frame may not be a multiple of the stride.
+**Then, repeated per frame:** a marker line `# t = <t> step = <step>` followed by exactly `ns` rows. Each row is one cell, in increasing cell index, holding `state_rows` values each preceded by two spaces, written in row-index order `k = 0 .. state_rows-1`. Values are the stored conserved-state numbers (`chromosphere::Real`, `double` in the release) printed at the default stream precision, i.e. **six significant digits** — so the on-disk format is a fixed ASCII text format and is unaffected by the storage precision the solver was built with. There is no binary state I/O anywhere in this code. The final state is always written even when it does not land on the output cadence, so the last frame may not be a multiple of the stride.
 
 `state_rows` takes exactly two values.
 

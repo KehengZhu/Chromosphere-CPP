@@ -1,6 +1,8 @@
 # Double-precision control experiment: the lower-chromosphere mass-flux gradient is float32 storage round-off
 
-**Status: current.** Diagnostic experiment, 2026-08-16/17. **It changes no release default.** The release conserved state is and remains `float`. The double-precision build exists only to isolate one question and is not a supported configuration.
+**Status: superseded as policy, current as evidence.** Diagnostic experiment, 2026-08-16/17. Its *measurements* stand and are the origin of the mechanism; its *policy statements* do not. When it was written it changed no release default and the release state was `float`. **It has since been acted on: the release conserved state is now `double`.** See `state_precision_release_cutover.md` for the cutover, the SWMF precision audit that justified making double the release rather than rescuing float32, and the post-cutover validation.
+
+Read this document for: the ULP mechanism, the controlled two-leg comparison, and the demonstration that the broad 1600–1850 km `f_total` gradient is storage round-off. Do **not** read it for the current build options — `CHROMO_STATE_FLOAT64` is retired and `CHROMO_STATE_FLOAT32` is now the diagnostic — nor for §5's claim that the double build fails 29 tests, which was a consequence of that option promoting `Vec` alone while six sites in the release path still cast through `float`. With the precision knob made coherent, both builds pass 11647 / 11647 with no tolerance loosened.
 
 ## 1. The question
 
@@ -30,15 +32,15 @@ That the two legs are the same *scheme* is confirmed by the run tallies, which a
 | --- | --- | --- |
 | `f_total` base / top at 2000 s | 2.682 | **1.008** |
 | `f_total` base / top at 4000 s | 2.811 | **0.996** |
-| `f_total` spread over 1600–1850 km, 4000 s | 119.5 % | **2.0 %** |
+| `f_total` spread over 1600–1850 km, 4000 s | 119.5 % | ~~2.0 %~~ (hybrid artifact; **13.0 %** coherent) |
 | Cells with per-step mass increment below 0.5 ULP(`rho`) | 619 / 660 | **0 / 660** |
 | Base cell velocity, 4000 s | 1.392 m/s | 0.506 m/s |
-| Top cell velocity, 4000 s | 13.18 m/s | 13.58 m/s |
-| `f_total` at the top face, 4000 s | 3.753e-10 | 3.869e-10 |
+| Top cell velocity, 4000 s | 13.18 m/s | ~~13.58 m/s~~ (hybrid; **9.50 m/s** coherent) |
+| `f_total` at the top face, 4000 s | 3.753e-10 | ~~3.869e-10~~ (hybrid; **2.702e-10** coherent) |
 | `\|f_diff\|` / `f_total` at the first interior face | 16.3 % | 15.9 % |
 | Cell-0 `rho V` / `f_total[0]` | 1.280 | 1.275 |
 
-**The gradient is float32 round-off.** In double precision the column reaches a genuinely constant mass flux from base to top — flat to 1.1 % already at 2000 s and 2.0 % at 4000 s — which is what continuity demands and what the float32 run never achieves at any time in the run.
+**The gradient is float32 round-off.** In double precision the column reaches a genuinely constant mass flux from base to top — flat to 1.1 % already at 2000 s and 2.0 % at 4000 s — which is what continuity demands and what the float32 run never achieves at any time in the run. *(The base-to-top conclusion holds and is confirmed: base/top is 1.006 at 2000 s and 1.003 at 4000 s in the coherent double release. The "flat to 2.0 %" intra-column figure does not — see the withdrawal note below.)*
 
 **The column mass budget closes in double precision and is off by two orders of magnitude in float32.** Integrating the *recorded* `f_total` divergence in time over all 217 sidecar frames and comparing with the *recorded* density change over the same run:
 
@@ -53,6 +55,8 @@ In float32 the recorded fluxes imply the lower chromosphere should be *filling* 
 
 **Top-of-domain observables move by about 3 %.** Top velocity 13.18 → 13.58 m/s and top `f_total` 3.753e-10 → 3.869e-10. The release evaporation numbers are therefore not badly wrong: the error is concentrated where `rho` is large and its ULP coarse, which is exactly where the release already declines to quote velocities (see the m/s noise-floor limitation in @ref validation).
 
+> **WITHDRAWN.** This paragraph is wrong, and it is the most consequential error in this document. The "float64 control" was an incoherent hybrid — `Vec` was double, but `mixture_pack_ghost`, the Hancock predictor row, the RHS row, the timestep row and every `Grid` physical constant still cast through `float`. Re-measured against a coherent double build, top velocity is **13.18 → 9.50 m/s** and top `f_total` **3.753e-10 → 2.702e-10**: the shift is about **28 %, not 3 %**, and it is downward. The physical reading is coherent — with the lower chromosphere unable to drain, float32 sustained a mass supply the column does not actually have, and so over-predicted the evaporation flux. **Any release evaporation number taken from a float32 run is high by of order 30 % and must be re-measured.** Likewise the "1600–1850 km spread 2.0 %" figure in §3 is a hybrid-build artifact; the coherent double value is 13.0 %. See `state_precision_release_cutover.md` §3d.
+
 **Incidental finding.** `inversion.initial_guess_accepts` is 754,709,637 of 1,420,486,978 EOS energy inversions in float32 but only 48,151 in float64, and the mean iteration count rises from 0.50 to 1.03. Over half of all float32 inversions "converge" on the initial guess only because float32 cannot represent a better answer. The pressure inversion is unaffected (mean 3.14 evaluations in both). This costs nothing in accuracy that matters here — the inversion tolerance is far below the discretization error — but it means float32 inversion-iteration statistics are not a measure of the inverter's quality.
 
 ## 4. Conclusion
@@ -60,21 +64,27 @@ In float32 the recorded fluxes imply the lower chromosphere should be *filling* 
 The broad 1600–1850 km `f_total` gradient in the release run is **entirely an artifact of float32 conserved-state storage**, produced by the per-step mass-density increment falling below half a ULP of `rho` through most of the lower chromosphere. It is not a transient, not the inner boundary condition, and not the Godunov flux. Consequences for practice:
 
 - **Do not interpret a lower-chromosphere `f_total` height gradient as a steady-state statement**, and do not chase it as a boundary-condition bug.
-- **Any quantitative chromospheric mass-budget or long-time mass-loading claim requires a double-precision conserved state or a perturbation-variable formulation first.** This is the concrete, measured cost of the float32 packing already flagged as a limitation.
-- The localized first-face artifact remains open and is a separate, real defect.
+- **Any quantitative chromospheric mass-budget or long-time mass-loading claim requires a double-precision conserved state or a perturbation-variable formulation first.** This is the concrete, measured cost of the float32 packing already flagged as a limitation. *(Acted on: double is now the release. `state_precision_release_cutover.md`.)*
+- The localized first-face artifact remains open and is a separate, real defect. *(Still open; unchanged by the cutover.)*
 - Release evaporation observables at the top of the domain are affected at the ~3 % level.
 
 ## 5. Caveats
 
-**The typedef promotes the mesh metric arrays too**, because they share `chromosphere::Vec`. Those are geometry computed once, with a float32 relative error of order `1e-7`; they cannot produce a factor-2.8 flux gradient, and the ULP census points directly at the state update. But this single experiment does not formally separate the two contributions. A follow-up that promotes only the state rows would.
+*Both caveats below were resolved by the release cutover; they are kept because they record what a `Vec`-only promotion does and does not establish.*
+
+**The typedef promotes the mesh metric arrays too**, because they share `chromosphere::Vec`. Those are geometry computed once, with a float32 relative error of order `1e-7`; they cannot produce a factor-2.8 flux gradient, and the ULP census points directly at the state update. But this single experiment does not formally separate the two contributions. A follow-up that promotes only the state rows would. *(Not pursued, and deliberately so: the cutover promotes state, metrics and constants together, because a partial promotion is exactly what fails — see below.)*
 
 **`CHROMO_STATE_FLOAT64` is not a supported configuration.** It is not exercised by `scripts/release_validation.sh`, and no release number may be quoted from it. Under the option the test binary reports 11602 passed / 29 failed out of 11631 checks. Those failures were inspected and none were loosened: 28 are `expected exactly 0` assertions on residuals that are zero in float32 *only because float32 quantizes them away* (they are `1e-18`–`1e-13` in double), and one is a `Grid::dinvB_ds_i` geometry tolerance reflecting the metric promotion. One case, `test_release_production_table_domain_corners`, is skipped under the option: it walks the packed energy by single ULPs of the storage type to build a state that rounds outside the EOS table, so both its premise and its walk are float32 specific. **The float32 build passes 11643 / 11643 and is unchanged by this work.**
 
+> **Correction, from the cutover.** That failure diagnosis was wrong, and instructively so. The 29 failures were not double precision revealing loosened assumptions — they were an artifact of this option promoting `arma::Col` alone while `mixture_pack_ghost`, the Hancock predictor row, the RHS row, the timestep row, the packed-energy round and every `Grid` physical constant still cast through `float`. That build was an accidental mixed-precision hybrid, not a double build. With the precision knob made coherent (`chromosphere::Real`), **both the double and the float32 builds pass 11647 / 11647 with no tolerance loosened**, the exact-zero assertions turn out to be structurally exact rather than quantization artifacts, and `test_release_production_table_domain_corners` runs in both precisions. Do not cite the 29-failure figure as a property of double precision.
+
 ## 6. Reproduce
+
+**Historical, as run in 2026-08-16/17.** `CHROMO_STATE_FLOAT64` no longer exists and CMake hard-errors on it; the two legs of the equivalent comparison are now `build_omp` (double, the release) and `build_omp_f32` (`-DCHROMO_STATE_FLOAT32=ON`, the diagnostic). The current commands, and the re-measured 4000 s comparison, are in `state_precision_release_cutover.md` §3c and §5.
 
 ```bash
 cmake -S . -B build_omp_f64 -DCMAKE_BUILD_TYPE=Release \
-      -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT64=ON
+      -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT64=ON     # RETIRED OPTION
 cmake --build build_omp_f64 -j 12
 
 CHROMO_BINARY=$PWD/build_omp_f64/chromo_main \

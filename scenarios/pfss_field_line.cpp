@@ -45,10 +45,10 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
     // cons2prim (state.cpp:108) recovers the right pressure.
     Vec xn = arma::zeros<Vec>(grid.n_state);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float n_e   = f.ne_im3(i);
-        const float n_n   = f.nn_im3(i);
-        const float T     = f.T_K  (i);
-        const float phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
+        const Real n_e   = f.ne_im3(i);
+        const Real n_n   = f.nn_im3(i);
+        const Real T     = f.T_K  (i);
+        const Real phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_I)) = n_e * grid.m_i;
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_N)) = n_n * grid.m_n;
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::MOM_I)) = 0.0f;
@@ -65,10 +65,10 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
     // outer ghost uses phi_g_iph[ns-1], inner ghost uses phi_g_imh[0]. The
     // T_e_factor column scales the ghost's effective temperature (model_c7
     // uses 2.0 at the outer ghost to mimic coronal T_e).
-    auto fill_ghost = [&](Vec& ob, arma::uword idx, float phi_g_eff) {
-        const float n_e    = f.ghost_ne_im3    (idx);
-        const float n_n    = f.ghost_nn_im3    (idx);
-        const float T_eff  = f.ghost_T_K       (idx) * f.ghost_T_e_factor(idx);
+    auto fill_ghost = [&](Vec& ob, arma::uword idx, Real phi_g_eff) {
+        const Real n_e    = f.ghost_ne_im3    (idx);
+        const Real n_n    = f.ghost_nn_im3    (idx);
+        const Real T_eff  = f.ghost_T_K       (idx) * f.ghost_T_e_factor(idx);
         ob(cons::RHO_I) = n_e * grid.m_i;
         ob(cons::RHO_N) = n_n * grid.m_n;
         ob(cons::MOM_I) = 0.0f;
@@ -78,8 +78,8 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
         ob(cons::E_E)   = grid.inv_gm1() * grid.k_b * n_e * T_eff;       // T_e = T_eff at the ghost
     };
 
-    const float phi_g_outer = grid.phi_g_iph(grid.ns - 1);
-    const float phi_g_inner = grid.phi_g_imh(0);
+    const Real phi_g_outer = grid.phi_g_iph(grid.ns - 1);
+    const Real phi_g_inner = grid.phi_g_imh(0);
     fill_ghost(grid.outer_boundary0_i, /*idx=*/0, phi_g_outer);
     fill_ghost(grid.outer_boundary1_i, /*idx=*/1, phi_g_outer);
     fill_ghost(grid.inner_boundary0_i, /*idx=*/2, phi_g_inner);
@@ -103,7 +103,7 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
     // beam-driven run the resulting quiet-background ionization drift is ~0.1% and
     // negligible against the beam, but the per-line ensemble (Phase 2) will need
     // the full height-dependent calibration to keep non-flaring lines steady.
-    auto env_f = [](const char* key, float fallback) -> float {
+    auto env_f = [](const char* key, Real fallback) -> Real {
         if (const char* e = std::getenv(key)) {
             try { return std::stof(std::string(e)); } catch (...) {}
         }
@@ -119,7 +119,7 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
         grid.trac_T_chrom = 2.0e4f;
         {   // RTV F_c = (2/7) κ₀ T_cor^{7/2} / L (quiet-Sun defaults, as model_c7_ic).
             // Per-line L from the PFSS trace is a Phase-2 refinement.
-            const float kappa0 = 1.0e-11f, T_cor = 8.0e5f, L_cor = 4.5e7f;
+            const Real kappa0 = 1.0e-11f, T_cor = 8.0e5f, L_cor = 4.5e7f;
             grid.outer_heat_flux        = (2.0f / 7.0f) * kappa0 * std::pow(T_cor, 3.5f) / L_cor;
             grid.impose_outer_heat_flux = true;
         }
@@ -180,9 +180,9 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
 
         // Loop half-length L [m]: from the .dat [META] if present, else the
         // arc-length sum (a full loop spans 2L, so halve it).
-        float L = f.loop_half_length_m;
+        Real L = f.loop_half_length_m;
         if (L <= 0.0f) {
-            const float arc = arma::sum(grid.ds_i);
+            const Real arc = arma::sum(grid.ds_i);
             L = (f.topology == "full") ? 0.5f * arc : arc;
         }
 
@@ -197,13 +197,13 @@ Vec pfss_ic(Grid& grid, const std::string& data_path) {
         // above the Serio/Martens static-existence limit (no apex-max loop below
         // ~L/3). T_max is the relaxed OUTCOME — verify it post-relaxation and nudge
         // GENTLE_E0 if the corona settles off target.
-        const float T_max   = env_f("GENTLE_TMAX_MK", 2.0f) * 1.0e6f;
-        const float sH_frac = env_f("GENTLE_SH_FRAC", 0.4f);
-        const float s_H     = sH_frac * L;
-        const float L_cm    = L * 100.0f;
-        const float p0      = std::pow(T_max / 1400.0f, 3.0f) / L_cm;
-        const float E_unif  = 9.8e4f * std::pow(p0, 7.0f / 6.0f) * std::pow(L_cm, -5.0f / 6.0f);
-        const float E_H0_SI = 0.1f * E_unif * std::exp(0.5f * L / s_H);
+        const Real T_max   = env_f("GENTLE_TMAX_MK", 2.0f) * 1.0e6f;
+        const Real sH_frac = env_f("GENTLE_SH_FRAC", 0.4f);
+        const Real s_H     = sH_frac * L;
+        const Real L_cm    = L * 100.0f;
+        const Real p0      = std::pow(T_max / 1400.0f, 3.0f) / L_cm;
+        const Real E_unif  = 9.8e4f * std::pow(p0, 7.0f / 6.0f) * std::pow(L_cm, -5.0f / 6.0f);
+        const Real E_H0_SI = 0.1f * E_unif * std::exp(0.5f * L / s_H);
 
         grid.enable_coronal_heating = true;
         grid.coronal_heat_E0        = env_f("GENTLE_E0", E_H0_SI);   // W/m³ (override allowed)

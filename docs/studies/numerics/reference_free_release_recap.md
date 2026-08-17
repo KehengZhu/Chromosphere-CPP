@@ -27,7 +27,44 @@ Runs under `outputs/model_column/lowbc/`; the pre-change baselines are `outputs/
 | + trapezoidal lower ghosts | **1.33e-12** | **0.0302** | 2090 km (upper TR) |
 | float32 floor ε₃₂·ρ·(\|v\|+c_s) | 1.01e-12 | — | — |
 
-Net 560× reduction. The endpoint is comparable to the estimated float32 round-off scale of the stored state (1.32× at N=500), and doubling the resolution does not reduce it (N=1000 gives 2.66e-12, i.e. 2.63× the same estimate), so **no clean truncation-error trend survives over the resolutions tested**. That is deliberately weaker than claiming the residual *is* the representation limit: reconstruction, the EOS inversion, the nonuniform mesh and the boundary closures all contribute at this level, and two resolutions cannot separate them. The residual velocity moved off the lower boundary and onto the upper transition region.
+Net 560× reduction. **All four rows are Roe-flux, float32-storage measurements** — see the re-measurement below, which supersedes the floor interpretation.
+
+At the time this table was made the endpoint was comparable to the estimated float32 round-off scale of the stored state (1.32× at N=500), and doubling the resolution did not reduce it (N=1000 gave 2.66e-12, i.e. 2.63× the same estimate), so **no clean truncation-error trend survived over the resolutions tested**. That was deliberately weaker than claiming the residual *was* the representation limit: reconstruction, the EOS inversion, the nonuniform mesh and the boundary closures all contribute, and two resolutions could not separate them. The residual velocity moved off the lower boundary and onto the upper transition region.
+
+### Re-measured after the double-precision release cutover (2026-08-17)
+
+The float32-floor reading above was correct and is now obsolete. Re-measured in both precisions with the release Godunov flux, same configuration (N=500/R4, 661 cells, 20 s, `ISO_HEAT_FLUX=0`, CFL 0.50, `godunov.fallbacks=0`, `termination=end_time`). Runs under `outputs/model_column/precision_cutover/`. The extraction was first validated by reproducing the `1.33e-12 / 0.0302 / 2090 km / 1.01e-12` row above digit-for-digit from its own archived run `outputs/model_column/lowbc/H1_fix_wall.txt`; that also pins two things the original table did not state — the series is the conduction-off `H*` runs, and its "ε₃₂" is `FLT_EPSILON = 1.1921e-7` (machine epsilon, 2⁻²³), not the 5.96e-8 unit roundoff. The convention below is the original one, for continuity.
+
+| Quantity, N=500/R4, Godunov, 20 s | float32 | **double (release)** | ratio |
+|---|---|---|---|
+| t=0 max\|F^ρ\| [kg m⁻² s⁻¹] | 1.0758e-12 | **1.7782e-13** | 6.05× smaller |
+| — location of that max | 1601.1 km (base face) | **2149.1 km (upper TR)** | — |
+| — t=0 base-face \|F^ρ\| | 1.0758e-12 | 1.2457e-13 | 8.6× smaller |
+| — t=0 rms / median \|F^ρ\| | 3.163e-13 / 2.033e-13 | 1.991e-14 / 3.271e-16 | 16× / 620× |
+| max\|V\| at 20 s [m/s] | 3.1943e-02 | **5.7274e-03** | 5.6× smaller |
+| — location | 2093.9 km (upper TR) | 2153.0 km (**top cell**) | — |
+| — max\|V\| excluding the top cell | 3.1943e-02 @ 2093.9 km | 4.9651e-03 @ 2149.1 km | 6.4× |
+| floor ε·ρ·(\|v\|+c_s) | 1.0093e-12 | 1.8798e-21 | — |
+| **defect / floor** | **1.07** | **9.5e+7** | — |
+
+**Two results, and they matter differently.**
+
+**(i) The float32 residual was the representation limit; the double residual is not.** float32 sat at 1.07× its own round-off floor (2.13× on the unit-roundoff convention). Double sits ~10⁸× above its floor, so the surviving residual has **no representation component at all** — it is entirely discretization and boundary closure.
+
+**(ii) A clean second-order truncation trend now exists, and did not before.** Same refinement, N=500 → N=1000:
+
+| Quantity | float32 | **double** |
+|---|---|---|
+| t=0 max\|F^ρ\| | 1.0758e-12 → 2.1518e-12 (apparent order **−1.0**) | 1.7782e-13 → **3.9112e-14** (order **2.19**) |
+| t=0 base-face \|F^ρ\| | ratio 0.73 | ratio 3.86 (order **1.95**) |
+| t=0 rms \|F^ρ\| | ratio 0.49 | ratio 6.64 (order **2.73**) |
+| max\|V\| at 20 s | 2.4885e-02 (order 0.36) | **1.5291e-03** (order **1.90**) |
+
+In float32 refining the mesh made the defect *worse*, which is the signature of per-face ULP noise, not truncation. In double the reference-free discretization converges at second order in all four measures. **This upgrades the reference-free claim**: the sentence "no clean truncation-error trend survives over the resolutions tested" was a statement about float32 storage, not about the scheme, and it no longer holds. The scheme is second-order convergent on the hydrostatic fixed point.
+
+**What survives, and is real.** In double the base face is still dominated by the dissipative part of the flux — `f_central = -4.78e-15`, `f_diff = +1.2935e-13`, `f_total = 1.2457e-13` — so the remaining base defect is a Godunov dissipation response to a genuinely nonzero reconstructed left/right jump. That is a real discretization / inner-ghost-closure defect, not bit noise, and it is the same feature as the open first-interior-face artifact (`state_precision_release_cutover.md` §4). **Do not read "6× better" as "solved."** Likewise the double max\|V\| now sits on the *topmost* cell, and the top-cell velocity is nearly identical in both precisions (5.27e-3 vs 5.73e-3 m/s): that one is an outer-boundary-closure residual that precision does not touch, while the interior 2090 km peak collapsed.
+
+**Not measured:** Roe-flux counterparts in double (the release flux only was re-run), and the 20 s relative density drift, which is not quotable from the main snapshot — that file carries six significant digits, giving a ~1e-6 relative measurement floor, and the double drift (9.5e-6) is only one decade above it.
 
 ### Reference-free vs frozen reference, conduction-driven
 
@@ -49,17 +86,22 @@ Off-canonical domain (`ISO_H_BASE=1700 ISO_DH=453`, a different stratification a
 
 ### Resolution
 
-5-step reference-free max\|V\| after `model_column_ic`, CFL 0.25:
+5-step reference-free max\|V\| after `model_column_ic`, CFL 0.25, `ISO_HEAT_FLUX=0`. **The original ladder was float32 storage under the Roe flux**; re-measured after the double-precision cutover with a float32 control at the identical configuration, and extended one rung to `ISO_NS=2000` to test for flattening. `godunov.fallbacks=0` on every run.
 
-| `ISO_NS` | cells | max\|V\| [m/s] |
-|---|---|---|
-| 48 | 70 | 7.58e-1 |
-| 125 | 169 | 7.53e-2 |
-| 250 | 331 | 1.77e-2 |
-| 500 | 661 | **5.82e-3** |
-| 1000 | 1320 | 3.38e-3 |
+| `ISO_NS` | cells | Δs [km] | **double** max\|V\| [m/s] | order | float32 max\|V\| [m/s] | order |
+|---|---|---|---|---|---|---|
+| 48 | 70 | 11.410 | 8.109e-1 | — | 8.098e-1 | — |
+| 125 | 169 | 4.394 | 7.617e-2 | 2.48 | 7.702e-2 | 2.47 |
+| 250 | 331 | 2.209 | 1.878e-2 | 2.04 | 1.790e-2 | 2.12 |
+| 500 | 661 | 1.105 | **4.986e-3** | 1.91 | 5.845e-3 | 1.62 |
+| 1000 | 1320 | 0.553 | 1.317e-3 | 1.92 | 3.381e-3 | **0.79** |
+| 2000 | 2638 | 0.276 | 3.321e-4 | 1.99 | 4.590e-3 | **-0.44** |
 
-The bound is resolution dependent — that is the real cost of retiring `eq_wb`, which made any chosen state exact at any resolution. It is acceptable because the release ships one mesh, and because `eq_wb` only ever made the *initial* state exact; it never removed the same truncation error from the evolving solution.
+The archived Roe/float32 ladder above reproduces digit-for-digit in the float32 build with `ISO_RIEMANN=roe-local` (`7.5762e-1, 7.5271e-2, 1.7748e-2, 5.8225e-3, 3.3808e-3`, and t=0 `max|F^ρ| = 1.3341e-12`), which is what makes the comparison trustworthy. The t=0 `max|F^ρ|` in double falls `3.32e-11 -> 1.31e-14` over the same ladder at orders 1.96–2.41, and the rms falls `8.62e-12 -> 5.46e-16` at orders 2.45–2.73. A double-precision **Roe** ladder gives the same orders (1.91–2.41), so second order is a property of the discretization, not of the Godunov flux.
+
+**In double the bound is a clean, unbroken order ≈ 2 across the whole ladder, 48 -> 2000, with no flattening**, and max\|V\| falls monotonically `8.11e-1 -> 3.32e-4 m/s` over a 41x refinement. float32 tracks it only to `ISO_NS = 250`, degrades to order 0.79 by 1000, and **reverses** at 2000, bottoming out near `3.4e-3 m/s`. So the earlier reading — "the bound is resolution dependent, and that is the real cost of retiring `eq_wb`" — was measuring a **round-off floor, not the scheme**. The corrected statement: retiring `eq_wb` leaves an ordinary second-order truncation error, which is the expected and acceptable cost, and the release mesh's `4.99e-3 m/s` sits on that convergent trend rather than on a floor. `eq_wb` only ever made the *initial* state exact; it never removed the same truncation error from the evolving solution.
+
+*(Do not cross-substitute: `4.986e-3 m/s` is the 5-step value at `ISO_NS=500`; the `5.727e-3 m/s` in the table above is the 20 s value. Different measurements.)*
 
 ### Lower-boundary acoustic reflection (investigated, not promoted)
 

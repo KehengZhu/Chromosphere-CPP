@@ -14,13 +14,30 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 option(CHROMO_ENABLE_OPENMP "Enable OpenMP parallel execution" OFF)
 
-# DIAGNOSTIC ONLY. Promotes the conserved state and the mesh metric arrays
-# (chromosphere::Vec) from float to double, to isolate float32 representation
-# round-off. Not a supported configuration; never use it for a release number.
-option(CHROMO_STATE_FLOAT64 "Store the conserved state in double (experiment)" OFF)
-if(CHROMO_STATE_FLOAT64)
-    add_compile_definitions(CHROMO_STATE_FLOAT64=1)
-    message(STATUS "CHROMO_STATE_FLOAT64=ON — DIAGNOSTIC build, not the release")
+# The release stores the conserved state (and the mesh metrics that share
+# chromosphere::Vec) in DOUBLE. That is the default and the only supported
+# production configuration; it matches SWMF/BATS-R-US, whose shipped builds all
+# set PRECISION = ${DOUBLEPREC}. See docs/studies/numerics/state_precision_release_cutover.md.
+#
+# CHROMO_STATE_FLOAT32 reverts to the pre-cutover float storage. It exists ONLY
+# to reproduce the float32 round-off sensitivity as a controlled diagnostic; it
+# is not exercised by scripts/release_validation.sh and no release number may be
+# quoted from it.
+option(CHROMO_STATE_FLOAT32 "DIAGNOSTIC: store the conserved state in float (non-production)" OFF)
+if(CHROMO_STATE_FLOAT32)
+    add_compile_definitions(CHROMO_STATE_FLOAT32=1)
+    message(WARNING
+        "CHROMO_STATE_FLOAT32=ON — DIAGNOSTIC build. The release stores the "
+        "conserved state in double; do not quote release numbers from this tree.")
+endif()
+
+# Retired option name. Double is now the default, so silently accepting the old
+# flag would produce a build that looks configured and is not.
+if(DEFINED CHROMO_STATE_FLOAT64)
+    message(FATAL_ERROR
+        "CHROMO_STATE_FLOAT64 was retired: double is the release default. "
+        "Delete this build tree and reconfigure with no precision flag, or use "
+        "-DCHROMO_STATE_FLOAT32=ON for the diagnostic float build.")
 endif()
 
 # Vendored Armadillo (header-only path in include/).

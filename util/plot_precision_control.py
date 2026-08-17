@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Compare a float32 model_column run against a matched double-precision control.
+"""Compare a float32 diagnostic model_column run against the double-precision release.
 
-DIAGNOSTIC ONLY. The double-precision leg is built with -DCHROMO_STATE_FLOAT64=ON,
-which promotes chromosphere::Vec (the conserved state and the static mesh metric
-arrays) from float to double. Everything else -- physics, grid, boundary
-conditions, reconstruction, Godunov flux, CFL, diagnostics -- is identical.
+The RELEASE stores the conserved state in double; float32 is the default-off
+diagnostic build (-DCHROMO_STATE_FLOAT32=ON), which reverts chromosphere::Real --
+and with it the state, the mesh metrics, the Grid physical constants and sim_time --
+from double to float. Everything else -- physics, grid, boundary conditions,
+reconstruction, Godunov flux, CFL, diagnostics -- is identical. (Before the
+cutover the option was the other way round and was named CHROMO_STATE_FLOAT64;
+that option is retired, and it promoted only Vec, so several float casts survived
+in the update chain.)
 
 The question it answers: is the broad lower-chromosphere gradient in the
 conservative face mass flux f_total a physical transient, or is it float32
@@ -13,6 +17,8 @@ tube, continuity forces f_total to be independent of height.
 
 Usage:
     python util/plot_precision_control.py f32_run.txt f64_run.txt [output.png]
+
+The first argument is the float32 diagnostic leg, the second the double release.
 
 Each argument names the base .txt; the .faceflux and .gamma_diag sidecars are
 appended. Output defaults to
@@ -117,8 +123,8 @@ def main():
         "visualization/model_column/precision_control_N500_4000s.png"
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 
-    legs = [("float32 (release storage)", f32_base, "C3", np.float32),
-            ("float64 (control)", f64_base, "C0", np.float64)]
+    legs = [("float32 (diagnostic storage)", f32_base, "C3", np.float32),
+            ("float64 (release storage)", f64_base, "C0", np.float64)]
     data = {}
     for label, base, color, dtype in legs:
         times, frame = load_faceflux(base + ".faceflux")
@@ -219,7 +225,7 @@ def main():
     a.grid(alpha=0.3)
 
     fig.suptitle("model_column N500, 4000 s, release Godunov numerics — "
-                 "float32 storage vs a matched double-precision control",
+                 "float32 diagnostic storage vs the double-precision release",
                  fontsize=13)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(out, dpi=130)

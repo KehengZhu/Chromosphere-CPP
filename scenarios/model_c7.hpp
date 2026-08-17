@@ -70,7 +70,7 @@ Vec model_c7_ic(Grid& grid, bool extended = false, bool tr_jump_bc = false);
 /// model_c7 chromosphere/corona table) with MODEL_C7; clamps to the table ends.
 /// Used by model_column's corona testbed to set a realistic frozen ionization
 /// profile (so the corona is ionized and conducts via Spitzer κ_e).
-void c7_full_profile(float h_km, float& T, float& n_e, float& n_HI);
+void c7_full_profile(Real h_km, Real& T, Real& n_e, Real& n_HI);
 
 /// Shape-preserving C1 interpolation of the complete Model C7 temperature
 /// table. Unlike c7_full_profile's historical piecewise-linear temperature,

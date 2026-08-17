@@ -27,15 +27,15 @@ namespace chromosphere {
 //   * n_i, T_i, V, U → Neumann (zero gradient from cell 0)
 namespace {
 // --- inner (photospheric) reservoir, captured from the C7 base in model_c7_ic
-float kInnerRhoIPinned = 0.0f;
-float kInnerRhoNPinned = 0.0f;
-float kInnerTnPinned   = 0.0f;
+Real kInnerRhoIPinned = 0.0f;
+Real kInnerRhoNPinned = 0.0f;
+Real kInnerTnPinned   = 0.0f;
 // Discrete-HSE inner-ghost pressures: built so that V=U=0 is an exact fixed
 // point of the discretized momentum balance (Pandey et al. 2024 §3.1). Captured
 // in model_c7_ic from cell 0's pressure plus the hydrostatic increment ρg·Δs
 // across the inner half-face (the ghost sits below cell 0, so p_ghost > p_0).
-float kInnerPiGhost = 0.0f;
-float kInnerPnGhost = 0.0f;
+Real kInnerPiGhost = 0.0f;
+Real kInnerPnGhost = 0.0f;
 
 // --- outer (lower-TR) reservoir, captured from the top of the extended C7
 // table (Avrett & Loeser 2008 Table 26 at h ≈ 2153 km). This is the fixed
@@ -45,9 +45,9 @@ float kInnerPnGhost = 0.0f;
 // FIXED (not slaved to the cooling interior) — that is the essential change
 // from the old (T, 2T) cascade, which tracked the collapsing top and so
 // supplied no net heat.
-float kOuterTtr   = 0.0f;   // TR-base temperature  [K]
-float kOuterNeTr  = 0.0f;   // TR-base electron / proton density [m^-3]
-float kOuterNnTr  = 0.0f;   // TR-base neutral density (slaved, tiny) [m^-3]
+Real kOuterTtr   = 0.0f;   // TR-base temperature  [K]
+Real kOuterNeTr  = 0.0f;   // TR-base electron / proton density [m^-3]
+Real kOuterNnTr  = 0.0f;   // TR-base neutral density (slaved, tiny) [m^-3]
 
 // "New explanation" upper BC (docs/studies/evaporation/gentle_evaporation_downflow.md), HYBRID form:
 // the hydrostatic-pressure + EOS-density ghost is applied, but the coronal heat
@@ -61,8 +61,8 @@ float kOuterNnTr  = 0.0f;   // TR-base neutral density (slaved, tiny) [m^-3]
 // hydrostatic/EOS extrapolation); a, b are kept env-tunable (C7_TJUMP_A,
 // C7_TJUMP_B) only as an experimentation lever and scale the ghost density via
 // the EOS — they do NOT drive conduction. Only used when grid.c7_tr_jump_bc is set.
-float kC7Ajump = 1.0f;
-float kC7Bjump = 1.0f;
+Real kC7Ajump = 1.0f;
+Real kC7Bjump = 1.0f;
 }
 
 // Natural cubic spline interpolation, port of interp1 in ModChromosphereTest.f90
@@ -98,7 +98,7 @@ static Vec interp1_spline(const Vec& xData, const Vec& yData, const Vec& xVal) {
         arma::uword j = 0;
         while (j < n - 1 && xVal(i) > xData(j + 1)) ++j;
         if (j >= n - 1) j = n - 2;
-        const float dx = xVal(i) - xData(j);
+        const Real dx = xVal(i) - xData(j);
         yVal(i) = a(j) + b(j) * dx + c(j) * dx * dx + d(j) * dx * dx * dx;
     }
     return yVal;
@@ -126,7 +126,7 @@ static Vec interp1_spline(const Vec& xData, const Vec& yData, const Vec& xVal) {
 // cubic spline stays well-behaved.
 static const int N_C7_BASE = 32;
 static const int N_C7      = 70;
-static const float MODEL_C7[N_C7][4] = {
+static const Real MODEL_C7[N_C7][4] = {
     {1.003e+03f, 1.903e+17f, 2.693e+19f, 6.225e+03f},
     {1.032e+03f, 2.021e+17f, 2.179e+19f, 6.315e+03f},
     {1.065e+03f, 2.091e+17f, 1.722e+19f, 6.400e+03f},
@@ -215,7 +215,7 @@ static const float MODEL_C7[N_C7][4] = {
 // and ionized in the corona (κ_e Spitzer). n_e has a minimum (~4.8×10^16 m^-3) near
 // the temperature-minimum region (~750 km).
 static const int N_C7_PHOTO = 29;
-static const float MODEL_C7_PHOTO[N_C7_PHOTO][4] = {
+static const Real MODEL_C7_PHOTO[N_C7_PHOTO][4] = {
     {-1.000e+01f, 1.206e+20f, 1.222e+23f, 6.780e+03f},
     { 0.000e+00f, 8.397e+19f, 1.187e+23f, 6.583e+03f},
     { 1.000e+01f, 5.893e+19f, 1.148e+23f, 6.397e+03f},
@@ -252,19 +252,19 @@ static const float MODEL_C7_PHOTO[N_C7_PHOTO][4] = {
 // Concatenates MODEL_C7_PHOTO (h < 1003 km) with MODEL_C7 (h ≥ 1003 km); clamps to
 // the table ends. (model_c7 itself only ever uses MODEL_C7 from h = 1003 km up, so
 // this helper does not change any existing scenario.)
-void c7_full_profile(float h_km, float& T, float& n_e, float& n_HI) {
-    auto row = [](int k) -> const float* {
+void c7_full_profile(Real h_km, Real& T, Real& n_e, Real& n_HI) {
+    auto row = [](int k) -> const Real* {
         return (k < N_C7_PHOTO) ? MODEL_C7_PHOTO[k] : MODEL_C7[k - N_C7_PHOTO];
     };
     const int N = N_C7_PHOTO + N_C7;
-    auto unpack = [&](int k) { const float* r = row(k); T = r[3]; n_e = r[1]; n_HI = r[2]; };
+    auto unpack = [&](int k) { const Real* r = row(k); T = r[3]; n_e = r[1]; n_HI = r[2]; };
     if (h_km <= row(0)[0])     { unpack(0);     return; }
     if (h_km >= row(N - 1)[0]) { unpack(N - 1); return; }
     int i = 0;
     while (i < N - 1 && row(i + 1)[0] < h_km) ++i;
-    const float* a = row(i);
-    const float* b = row(i + 1);
-    const float t = (h_km - a[0]) / (b[0] - a[0]);
+    const Real* a = row(i);
+    const Real* b = row(i + 1);
+    const Real t = (h_km - a[0]) / (b[0] - a[0]);
     T    = a[3] + t * (b[3] - a[3]);
     n_e  = std::exp(std::log(a[1]) + t * (std::log(b[1]) - std::log(a[1])));
     n_HI = std::exp(std::log(a[2]) + t * (std::log(b[2]) - std::log(a[2])));
@@ -281,7 +281,7 @@ double c7_full_temperature_pchip(double h_km) {
         std::vector<double> slope;
 
         TemperaturePchip() {
-            auto row = [](int k) -> const float* {
+            auto row = [](int k) -> const Real* {
                 return (k < N_C7_PHOTO) ? MODEL_C7_PHOTO[k]
                                         : MODEL_C7[k-N_C7_PHOTO];
             };
@@ -353,8 +353,8 @@ Vec c7_route_b_photoionization(const Grid& grid, const Vec& T_c,
     Vec P_inv = (ni_c / nn_safe) % (a_tot % ni_c) - S_tot % ni_c;
     P_inv = arma::clamp(P_inv, 0.0f, arma::datum::inf);
     const Vec  P_falc    = photoionization_rate_chae(h_cell);
-    const float H_EQ_NEQ = 1500.0f;   // km, equilibrium ↔ NEQ crossover (Chae marker)
-    const float BLEND_W  = 120.0f;    // km, blend width
+    const Real H_EQ_NEQ = 1500.0f;   // km, equilibrium ↔ NEQ crossover (Chae marker)
+    const Real BLEND_W  = 120.0f;    // km, blend width
     const Vec w_eq = 0.5f * (1.0f - arma::tanh((h_cell - H_EQ_NEQ) / BLEND_W));
     return w_eq % P_inv + (1.0f - w_eq) % P_falc;
 }
@@ -406,9 +406,9 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
     // Faces: indices -1..ns+3 (size ns+5), uniformly over [h_tab(0), h_tab(top)].
     const arma::uword nF = grid.ns + 5;
     Vec h_F(nF);
-    const float h0 = h_tab(0), h1 = h_tab(n_rows - 1);
+    const Real h0 = h_tab(0), h1 = h_tab(n_rows - 1);
     for (arma::uword k = 0; k < nF; ++k) {
-        const float frac = (float)k / (float)(nF - 1);
+        const Real frac = (Real)k / (Real)(nF - 1);
         h_F(k) = h0 + (h1 - h0) * frac;
     }
 
@@ -451,10 +451,10 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
     // ρ·φ_g term so that cons2prim (state.cpp:108) recovers the right pressure.
     Vec xn = arma::zeros<Vec>(grid.n_state);
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float n_e   = ne_E(i);
-        const float n_n   = nn_E(i);
-        const float T     = T_E(i);
-        const float phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
+        const Real n_e   = ne_E(i);
+        const Real n_n   = nn_E(i);
+        const Real T     = T_E(i);
+        const Real phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_I)) = n_e * grid.m_i;
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_N)) = n_n * grid.m_n;
         xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::MOM_I)) = 0.0f;
@@ -473,7 +473,7 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
     // downward conductive flux q(T) that holds the chromosphere top against
     // ionization cooling. φ_g is the upper face of the last interior cell.
     {
-        const float phi_g_outer = grid.phi_g_iph(grid.ns - 1);
+        const Real phi_g_outer = grid.phi_g_iph(grid.ns - 1);
         kOuterTtr  = T_tab(n_rows - 1);  // standard 2.310×10⁴ K; extended 2.925×10⁵ K
         kOuterNeTr = ne_tab(n_rows - 1); // electron/proton density at the top
         kOuterNnTr = nn_tab(n_rows - 1); // neutral density at the top (slaved, ~fully ionized)
@@ -496,11 +496,11 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
     // The (n_n, T) snapshot here is what model_c7_update_bc later uses as
     // the Dirichlet-pinned photospheric reservoir state for the inner ghost.
     {
-        const float n_e = ne_E(0);
-        const float n_n = nn_E(0);
-        const float T   = T_E(0);
-        const float ds0 = len_E(0);
-        const float phi_g_inner = grid.phi_g_imh(0);
+        const Real n_e = ne_E(0);
+        const Real n_n = nn_E(0);
+        const Real T   = T_E(0);
+        const Real ds0 = len_E(0);
+        const Real phi_g_inner = grid.phi_g_imh(0);
         grid.inner_boundary0_i(cons::RHO_I) = n_e * grid.m_i;
         grid.inner_boundary0_i(cons::RHO_N) = n_n * grid.m_n;
         grid.inner_boundary0_i(cons::MOM_I) = 0.0f;
@@ -520,8 +520,8 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
         // than a zero-gradient copy of p_0) makes the pressure gradient across
         // the inner face balance gravity discretely, so V=U=0 is an exact fixed
         // point of the momentum update and the base does not launch a wave.
-        const float p_i_0 = 2.0f * n_e * grid.k_b * T;
-        const float p_n_0 =        n_n * grid.k_b * T;
+        const Real p_i_0 = 2.0f * n_e * grid.k_b * T;
+        const Real p_n_0 =        n_n * grid.k_b * T;
         kInnerPiGhost = p_i_0 + (n_e * grid.m_i) * grid.g * ds0;
         kInnerPnGhost = p_n_0 + (n_n * grid.m_n) * grid.g * ds0;
     }
@@ -575,7 +575,7 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
     // the complete physical model_c7 is run WITH cooling; the no-cooling mode is
     // a diagnostic baseline (no coronal heating imposed).
     {
-        const float kappa0 = 1.0e-11f;   // W m^-1 K^-7/2
+        const Real kappa0 = 1.0e-11f;   // W m^-1 K^-7/2
         if (extended) {
             // Corona-as-boundary (top at h ≈ 2.628 Mm, T ≈ 0.29 MK): impose the
             // conductive flux C7 ITSELF carries across the new top, computed from
@@ -583,13 +583,13 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
             // (≈130 W m⁻² downward) — self-consistent with the model, no assumed
             // T_cor / L. This is the steady quiet value; the gentle-evaporation
             // driver (model_gentle) ramps it up via outer_heat_flux_enhance.
-            const float T_top = T_tab(n_rows - 1);
-            const float dTds  = (T_tab(n_rows - 1) - T_tab(n_rows - 2))
+            const Real T_top = T_tab(n_rows - 1);
+            const Real dTds  = (T_tab(n_rows - 1) - T_tab(n_rows - 2))
                               / ((h_tab(n_rows - 1) - h_tab(n_rows - 2)) * 1.0e3f);  // km→m
             grid.outer_heat_flux = kappa0 * std::pow(T_top, 2.5f) * dTds;
         } else {
-            const float T_cor  = 8.0e5f;     // K, quiet-Sun coronal apex
-            const float L_cor  = 4.5e7f;     // m, coronal loop half-length (quiet-Sun)
+            const Real T_cor  = 8.0e5f;     // K, quiet-Sun coronal apex
+            const Real L_cor  = 4.5e7f;     // m, coronal loop half-length (quiet-Sun)
             // ≈ 29 W m⁻². With the optically-thin TR radiative sink present, this
             // sits in the stable window q ∈ [~30, 90] W m⁻²: the TR/corona radiates
             // the imposed flux and the chromosphere proper stays cool. Below ~10 W m⁻²
@@ -643,7 +643,7 @@ Vec model_c7_ic(Grid& grid, bool extended, bool tr_jump_bc) {
     // jump, which over-conducts on the coarse C7 grid. So we do NOT touch
     // impose_outer_heat_flux here.
     if (tr_jump_bc) {
-        auto env_f = [](const char* key, float fallback) -> float {
+        auto env_f = [](const char* key, Real fallback) -> Real {
             if (const char* e = std::getenv(key)) {
                 try { return std::stof(std::string(e)); } catch (...) {}
             }
@@ -667,15 +667,15 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
     // model_c7 / model_flare are byte-for-byte unchanged. The stronger downward
     // flux heats the upper TR → conduction-driven upflow (Antiochos & Sturrock 1978).
     if (grid.outer_heat_flux_base > 0.0f) {
-        float amp = 1.0f;
+        Real amp = 1.0f;
         if (grid.outer_heat_flux_enhance != 1.0f) {
-            const float t   = grid.sim_time;
-            const float ton = grid.outer_heat_flux_t_on;
-            const float r   = (grid.outer_heat_flux_ramp > 1.0e-6f) ? grid.outer_heat_flux_ramp : 1.0e-6f;
-            float w;
+            const Real t   = grid.sim_time;
+            const Real ton = grid.outer_heat_flux_t_on;
+            const Real r   = (grid.outer_heat_flux_ramp > 1.0e-6f) ? grid.outer_heat_flux_ramp : 1.0e-6f;
+            Real w;
             if (t <= ton)          w = 0.0f;
             else if (t >= ton + r) w = 1.0f;
-            else w = 0.5f * (1.0f - std::cos(static_cast<float>(arma::datum::pi) * (t - ton) / r));
+            else w = 0.5f * (1.0f - std::cos(static_cast<Real>(arma::datum::pi) * (t - ton) / r));
             amp = 1.0f + (grid.outer_heat_flux_enhance - 1.0f) * w;
         }
         grid.outer_heat_flux = grid.outer_heat_flux_base * amp;
@@ -689,9 +689,9 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
     apply_open_bcs(grid, xn);
 
     const auto  sz        = arma::size(grid.ns, num_of_eq);
-    const float m_i       = grid.m_i;
-    const float m_n       = grid.m_n;
-    const float k_b       = grid.k_b;
+    const Real m_i       = grid.m_i;
+    const Real m_n       = grid.m_n;
+    const Real k_b       = grid.k_b;
 
     // ====================================================================
     // Outer face — lower transition region (h ≈ 2153 km, T ≈ 2.3×10⁴ K).
@@ -714,39 +714,39 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
         //       (protons+electrons), p_n = n_n k T.
         // Velocity: Mach-capped OUTFLOW (lets a conduction-driven upflow leave; the
         // cap |V| ≤ outer_mach_cap·c_s prevents the ill-posed-inflow runaway).
-        const float phi_g_out = grid.phi_g_iph(grid.ns - 1);
-        const float g         = grid.g;
+        const Real phi_g_out = grid.phi_g_iph(grid.ns - 1);
+        const Real g         = grid.g;
 
         // Decode an interior cell's per-fluid pressures / densities (cons2prim).
-        auto decode = [&](arma::uword i, float& p_i, float& p_n,
-                          float& rho_i, float& rho_n) {
+        auto decode = [&](arma::uword i, Real& p_i, Real& p_n,
+                          Real& rho_i, Real& rho_n) {
             rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
             rho_n = xn(arma::sub2ind(sz, i, cons::RHO_N));
-            const float Vi    = xn(arma::sub2ind(sz, i, cons::MOM_I)) / rho_i;
-            const float Un    = xn(arma::sub2ind(sz, i, cons::MOM_N)) / rho_n;
-            const float E_i   = xn(arma::sub2ind(sz, i, cons::E_I));
-            const float E_n   = xn(arma::sub2ind(sz, i, cons::E_N));
-            const float phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
+            const Real Vi    = xn(arma::sub2ind(sz, i, cons::MOM_I)) / rho_i;
+            const Real Un    = xn(arma::sub2ind(sz, i, cons::MOM_N)) / rho_n;
+            const Real E_i   = xn(arma::sub2ind(sz, i, cons::E_I));
+            const Real E_n   = xn(arma::sub2ind(sz, i, cons::E_N));
+            const Real phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
             p_i = grid.gm1() * E_i - grid.half_gm1() * rho_i * Vi * Vi - grid.gm1() * rho_i * phi_g;
             p_n = grid.gm1() * E_n - grid.half_gm1() * rho_n * Un * Un - grid.gm1() * rho_n * phi_g;
         };
 
         const arma::uword nl = grid.ns - 1;
-        const float ds = grid.ds_i(nl);
-        float p_i_top, p_n_top, rho_i_top, rho_n_top;
+        const Real ds = grid.ds_i(nl);
+        Real p_i_top, p_n_top, rho_i_top, rho_n_top;
         decode(nl, p_i_top, p_n_top, rho_i_top, rho_n_top);
-        float p_i_2, p_n_2, rho_i_2, rho_n_2;
+        Real p_i_2, p_n_2, rho_i_2, rho_n_2;
         decode(grid.ns >= 2 ? nl - 1 : nl, p_i_2, p_n_2, rho_i_2, rho_n_2);
 
         // (2) ghost temperature, continuous from the top cell (a=b=1 default).
-        const float T_top = p_i_top / (2.0f * (rho_i_top / m_i) * k_b);  // charged-fluid T
-        const float T_g0  = kC7Ajump * T_top;
-        const float T_g1  = kC7Bjump * T_g0;
+        const Real T_top = p_i_top / (2.0f * (rho_i_top / m_i) * k_b);  // charged-fluid T
+        const Real T_g0  = kC7Ajump * T_top;
+        const Real T_g1  = kC7Bjump * T_g0;
 
         // (1)+(3) per-fluid hydrostatic ghost pressure → EOS density at (p, T).
-        auto build = [&](float p_i_lo, float p_n_lo, float rho_i_w, float rho_n_w,
-                         float T_g, float& rho_i_g, float& rho_n_g,
-                         float& p_i_g, float& p_n_g) {
+        auto build = [&](Real p_i_lo, Real p_n_lo, Real rho_i_w, Real rho_n_w,
+                         Real T_g, Real& rho_i_g, Real& rho_n_g,
+                         Real& p_i_g, Real& p_n_g) {
             p_i_g = p_i_lo - 2.0f * ds * rho_i_w * g;
             p_n_g = p_n_lo - 2.0f * ds * rho_n_w * g;
             if (p_i_g < 1.0e-6f)  p_i_g = 1.0e-6f;     // keep positive at the tenuous top
@@ -754,21 +754,21 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
             rho_i_g = (p_i_g / (2.0f * k_b * T_g)) * m_i;   // p_i = 2 n_i k T
             rho_n_g = (p_n_g / (k_b * T_g)) * m_n;          // p_n = n_n k T
         };
-        float rho_i_g0, rho_n_g0, p_i_g0, p_n_g0;
+        Real rho_i_g0, rho_n_g0, p_i_g0, p_n_g0;
         build(p_i_2,  p_n_2,  rho_i_top, rho_n_top, T_g0, rho_i_g0, rho_n_g0, p_i_g0, p_n_g0);
-        float rho_i_g1, rho_n_g1, p_i_g1, p_n_g1;
+        Real rho_i_g1, rho_n_g1, p_i_g1, p_n_g1;
         build(p_i_top, p_n_top, rho_i_g0, rho_n_g0, T_g1, rho_i_g1, rho_n_g1, p_i_g1, p_n_g1);
 
         // velocity: Mach-capped outflow (lifted for flare's free outflow).
-        const float c_s   = std::sqrt(2.0f * grid.gamma_mono * k_b * kOuterTtr / m_i);
-        const float V_cap = grid.outer_mach_cap * c_s;
-        float V_g = xn(arma::sub2ind(sz, nl, cons::MOM_I)) / rho_i_top;
+        const Real c_s   = std::sqrt(2.0f * grid.gamma_mono * k_b * kOuterTtr / m_i);
+        const Real V_cap = grid.outer_mach_cap * c_s;
+        Real V_g = xn(arma::sub2ind(sz, nl, cons::MOM_I)) / rho_i_top;
         if (!grid.outer_free_outflow) {
             if (V_g >  V_cap) V_g =  V_cap;
             if (V_g < -V_cap) V_g = -V_cap;
         }
 
-        auto pack = [&](Vec& ob, float rho_i, float rho_n, float p_i, float p_n) {
+        auto pack = [&](Vec& ob, Real rho_i, Real rho_n, Real p_i, Real p_n) {
             ob(cons::RHO_I) = rho_i;
             ob(cons::RHO_N) = rho_n;
             ob(cons::MOM_I) = rho_i * V_g;
@@ -797,33 +797,33 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
         // imposed downward conductive flux q(T) (grid.outer_heat_flux, set in
         // model_c7_ic and applied as the Stage-D Neumann BC) — the load-bearing
         // closure that balances Route-B ionization cooling.
-        const float phi_g_out = grid.phi_g_iph(grid.ns - 1);
-        const float c_s   = std::sqrt(2.0f * grid.gamma_mono * k_b * kOuterTtr / m_i);
-        const float V_cap = grid.outer_mach_cap * c_s;
+        const Real phi_g_out = grid.phi_g_iph(grid.ns - 1);
+        const Real c_s   = std::sqrt(2.0f * grid.gamma_mono * k_b * kOuterTtr / m_i);
+        const Real V_cap = grid.outer_mach_cap * c_s;
 
         auto cap_ghost = [&](Vec& ob) {
-            const float rho_i = ob(cons::RHO_I);
-            const float rho_n = ob(cons::RHO_N);
-            const float n_i   = rho_i / m_i;
-            const float n_n   = rho_n / m_n;
-            const float V_old = ob(cons::MOM_I) / rho_i;
-            const float U_old = ob(cons::MOM_N) / rho_n;
+            const Real rho_i = ob(cons::RHO_I);
+            const Real rho_n = ob(cons::RHO_N);
+            const Real n_i   = rho_i / m_i;
+            const Real n_n   = rho_n / m_n;
+            const Real V_old = ob(cons::MOM_I) / rho_i;
+            const Real U_old = ob(cons::MOM_N) / rho_n;
             // Decode Neumann T_i, T_n from the energy apply_open_bcs packed.
-            const float T_i_in = (ob(cons::E_I) - 0.5f * rho_i * V_old * V_old
+            const Real T_i_in = (ob(cons::E_I) - 0.5f * rho_i * V_old * V_old
                                   - rho_i * phi_g_out) / (2.0f * grid.inv_gm1() * k_b * n_i);
-            const float T_n_in = (ob(cons::E_N) - 0.5f * rho_n * U_old * U_old
+            const Real T_n_in = (ob(cons::E_N) - 0.5f * rho_n * U_old * U_old
                                   - rho_n * phi_g_out) / (grid.inv_gm1() * k_b * n_n);
             // Mach-0.05 cap for the quiet-Sun TR (Bradshaw & Emslie 2020). For
             // flare scenarios (grid.outer_free_outflow) the cap is lifted so a
             // supersonic evaporation upflow can leave the domain through a
             // transparent (Neumann) outer face — clamping it would choke the
             // ~100s km/s evaporated outflow.
-            float V_g = V_old;
+            Real V_g = V_old;
             if (!grid.outer_free_outflow) {
                 if (V_g >  V_cap) V_g =  V_cap;
                 if (V_g < -V_cap) V_g = -V_cap;
             }
-            const float U_g = V_g;                // neutral locked to charge fluid
+            const Real U_g = V_g;                // neutral locked to charge fluid
             ob(cons::MOM_I) = rho_i * V_g;
             ob(cons::MOM_N) = rho_n * U_g;
             ob(cons::E_I)   = grid.inv_gm1() * k_b * n_i * 2.0f * T_i_in
@@ -846,9 +846,9 @@ void model_c7_update_bc(Grid& grid, const Vec& xn) {
     // ghost launched. Numerical diffusion (Stage D isotropic floor) damps any
     // residual ringing rather than reflecting it.
     {
-        const float phi_g_inner = grid.phi_g_imh(0);
-        const float rho_i_g = kInnerRhoIPinned;
-        const float rho_n_g = kInnerRhoNPinned;
+        const Real phi_g_inner = grid.phi_g_imh(0);
+        const Real rho_i_g = kInnerRhoIPinned;
+        const Real rho_n_g = kInnerRhoNPinned;
 
         Vec& ob0 = grid.inner_boundary0_i;
         ob0(cons::RHO_I) = rho_i_g;

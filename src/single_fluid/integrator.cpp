@@ -155,11 +155,11 @@ Vec mixture_set_internal_energy(
         // rounding E can otherwise place e_int = E - KE - rho phi a few ulp
         // outside the table edge and make the next decode throw.
         const double carried = 0.5*momentum*momentum/rho + rho*phi;
-        float energy = static_cast<float>(target + carried);
+        Real energy = static_cast<Real>(target + carried);
         while (static_cast<double>(energy) - carried < e_min)
-            energy = std::nextafter(energy, std::numeric_limits<float>::infinity());
+            energy = std::nextafter(energy, std::numeric_limits<Real>::infinity());
         while (static_cast<double>(energy) - carried > e_max)
-            energy = std::nextafter(energy, -std::numeric_limits<float>::infinity());
+            energy = std::nextafter(energy, -std::numeric_limits<Real>::infinity());
         if (!std::isfinite(energy))
             throw std::runtime_error(
                 "failed to pack the mixture energy inside the EOS domain");

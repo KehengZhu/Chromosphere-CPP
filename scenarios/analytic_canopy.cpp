@@ -12,9 +12,9 @@ namespace chromosphere {
 
 namespace {
 // Consensus chromospheric canopy parameters. See header for citations.
-constexpr float kB0_T   = 1.0e-2f;   // 100 G footpoint
-constexpr float kBinf_T = 1.5e-3f;   // 15 G canopy-merged
-constexpr float kHB_m   = 3.0e5f;    // 300 km scale height
+constexpr Real kB0_T   = 1.0e-2f;   // 100 G footpoint
+constexpr Real kBinf_T = 1.5e-3f;   // 15 G canopy-merged
+constexpr Real kHB_m   = 3.0e5f;    // 300 km scale height
 } // namespace
 
 arma::uword analytic_canopy_peek_ns() { return 100; }
@@ -26,11 +26,11 @@ Vec analytic_canopy_ic(Grid& grid) {
 
     // Walk up the field line using grid.ds_i to get the height at each face.
     // Field is vertical here, so arc length s == height above the C7 base.
-    float s_imh = 0.0f;
+    Real s_imh = 0.0f;
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float s_iph = s_imh + grid.ds_i(i);
-        const float Bimh  = kBinf_T + (kB0_T - kBinf_T) * std::exp(-s_imh / kHB_m);
-        const float Biph  = kBinf_T + (kB0_T - kBinf_T) * std::exp(-s_iph / kHB_m);
+        const Real s_iph = s_imh + grid.ds_i(i);
+        const Real Bimh  = kBinf_T + (kB0_T - kBinf_T) * std::exp(-s_imh / kHB_m);
+        const Real Biph  = kBinf_T + (kB0_T - kBinf_T) * std::exp(-s_iph / kHB_m);
         grid.B_imh(i)      = Bimh;
         grid.B_iph(i)      = Biph;
         grid.B_i (i)       = 0.5f * (Bimh + Biph);

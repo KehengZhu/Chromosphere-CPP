@@ -193,7 +193,7 @@ Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
     // (right-face, Lxn = u+½φΔ₊) and '−' (left-face, Rxn = u−½φΔ₊) reconstruction
     // terms take different limited slopes, so they get different limiter functions.
     // With mc3 off both lambdas are flux_lim ⇒ byte-identical to the minmod baseline.
-    const float beta = grid.limiter_beta;
+    const Real beta = grid.limiter_beta;
     auto lim_plus  = [&](const Vec& r) { return grid.mc3_limiter ? flux_lim_mc3_plus (r, beta) : flux_lim(r); };
     auto lim_minus = [&](const Vec& r) { return grid.mc3_limiter ? flux_lim_mc3_minus(r, beta) : flux_lim(r); };
 
@@ -248,8 +248,8 @@ Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
     // (a floor that only clips negatives never fires on those runs anyway).
     if (grid.floors_active()) {
         const auto  sz = arma::size(grid.ns, num_of_eq);
-        const float RHO_FLOOR = grid.m_i * 1.0e10f;
-        const float P_FLOOR   = 1.0e-8f;
+        const Real RHO_FLOOR = grid.m_i * 1.0e10f;
+        const Real P_FLOOR   = 1.0e-8f;
         for (arma::uword i = 0; i < grid.ns; ++i) {
             auto& ri = prim_xt_state(arma::sub2ind(sz, i, prim::RHO_I));
             auto& rn = prim_xt_state(arma::sub2ind(sz, i, prim::RHO_N));
@@ -313,8 +313,8 @@ Vec rhs_explicit_state(const Grid& grid, const Vec& xn_state) {
     // floors_active() → untouched scenarios / test suite unchanged.
     if (grid.floors_active()) {
         const auto  sz = arma::size(grid.ns, num_of_eq);
-        const float RHO_FLOOR = grid.m_i * 1.0e10f;
-        const float P_FLOOR   = 1.0e-8f;
+        const Real RHO_FLOOR = grid.m_i * 1.0e10f;
+        const Real P_FLOOR   = 1.0e-8f;
         Vec* faces[4] = {&Rxn_state_iph, &Lxn_state_iph, &Rxn_state_imh, &Lxn_state_imh};
         for (Vec* fp : faces) {
             Vec& F = *fp;

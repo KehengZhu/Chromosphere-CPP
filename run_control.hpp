@@ -67,7 +67,7 @@ struct StepCapSelection {
 /// is rejected rather than silently replaced by a dangerous cap.
 inline StepCapSelection select_step_cap(const char* step_cap_env,
                                         const char* end_time_env,
-                                        float time_mult) {
+                                        double time_mult) {
     StepCapSelection out;
     if (step_cap_env && *step_cap_env) {
         errno = 0;
@@ -96,9 +96,16 @@ inline StepCapSelection select_step_cap(const char* step_cap_env,
         out.source = StepCapSource::EndTime;
         return out;
     }
-    // Legacy path, bit-for-bit the historical expression, guarded against a
-    // float overflow / out-of-range cast for absurd time_mult values.
-    const float legacy = std::max(10000.0f, 10000.0f * time_mult);
+    // Legacy path, the historical expression, guarded against overflow / an
+    // out-of-range cast for absurd time_mult values. Deliberately `double` and
+    // NOT chromosphere::Real: this header is intentionally free of Armadillo and
+    // of the solver's storage-precision knob (see the file comment), and nothing
+    // here is stored state -- it turns one CLI scalar into an integer step cap.
+    // The historical expression was float; the result is cast to long long, so
+    // the cap is unchanged for every sane time_mult and only a pathological
+    // many-digit value could shift the integer by one.
+    // CHROMO_T_END / CHROMO_STEP_CAP bypass this path entirely.
+    const double legacy = std::max(10000.0, 10000.0 * time_mult);
     out.cap = (!std::isfinite(legacy) || legacy >= 1.0e12f)
         ? kUnboundedStepCap : static_cast<long long>(legacy);
     out.source = StepCapSource::LegacyTimeMult;

@@ -36,13 +36,13 @@ bool is_section_header(const std::string& line, std::string* name_out) {
     return true;
 }
 
-float parse_float(const std::string& s, const std::string& ctx) {
+Real parse_float(const std::string& s, const std::string& ctx) {
     try {
         std::size_t pos = 0;
-        const float v = std::stof(s, &pos);
+        const Real v = std::stof(s, &pos);
         return v;
     } catch (const std::exception&) {
-        throw std::runtime_error("scenario data file: bad float '" + s + "' (" + ctx + ")");
+        throw std::runtime_error("scenario data file: bad Real '" + s + "' (" + ctx + ")");
     }
 }
 

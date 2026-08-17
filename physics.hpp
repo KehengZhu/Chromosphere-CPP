@@ -34,11 +34,11 @@ namespace chromosphere {
 inline Vec trac_broadening_factor(const Grid& grid, const Vec& T) {
     Vec eps(T.n_elem, arma::fill::ones);
     if (!grid.enable_trac) return eps;
-    const float Tc = grid.trac_cutoff_T;
-    const float Tb = grid.trac_T_chrom;
+    const Real Tc = grid.trac_cutoff_T;
+    const Real Tb = grid.trac_T_chrom;
     if (!(Tc > Tb)) return eps;                 // degenerate cutoff → no broadening
     for (arma::uword i = 0; i < T.n_elem; ++i) {
-        const float t = T(i);
+        const Real t = T(i);
         if (t >= Tb && t < Tc) eps(i) = std::pow(Tc / t, 2.5f);
     }
     return eps;
@@ -122,9 +122,9 @@ inline double physical_conductivity(double n_e, double n_n, double temperature) 
 /// Ion-neutral collision frequency, target-density form (writeup eq 57):
 ///   ν_in = (2 a₀)² n_n √(8 π k_b (T_i + T_n) / m_i)
 inline Vec nu_in(const Grid& grid, const Vec& n_n, const Vec& T_i, const Vec& T_n) {
-    const float bohr_r = 53e-12f;
+    const Real bohr_r = 53e-12f;
     return (2.0f * bohr_r) * (2.0f * bohr_r) * n_n
-         % arma::sqrt(arma::abs(8.0f * static_cast<float>(arma::datum::pi)
+         % arma::sqrt(arma::abs(8.0f * static_cast<Real>(arma::datum::pi)
                                 * grid.k_b * (T_i + T_n) / grid.m_i));
 }
 
@@ -135,13 +135,13 @@ inline Vec nu_in(const Grid& grid, const Vec& n_n, const Vec& T_i, const Vec& T_
 /// (n_e in cm⁻³, T_e in eV, Z = 1). Clamped to [5,30] so the rate below stays
 /// well-behaved over the full chromosphere→flare range.
 inline Vec coulomb_log_ei(const Vec& n_e, const Vec& T_e) {
-    constexpr float k_b_eV = 8.617333262e-5f;          // eV/K
+    constexpr Real k_b_eV = 8.617333262e-5f;          // eV/K
     const Vec ne_cm3 = arma::clamp(n_e, 1.0f, arma::datum::inf) * 1.0e-6f;
     const Vec T_eV   = k_b_eV * arma::clamp(T_e, 1.0f, arma::datum::inf);
     const Vec sqrt_ne = arma::sqrt(ne_cm3);
     Vec lnL(n_e.n_elem);
     for (arma::uword i = 0; i < n_e.n_elem; ++i) {
-        const float t = T_eV(i);
+        const Real t = T_eV(i);
         lnL(i) = (t < 10.0f)
                ? 23.0f - std::log(sqrt_ne(i) * std::pow(t, -1.5f))
                : 24.0f - std::log(sqrt_ne(i) / t);
@@ -160,7 +160,7 @@ inline Vec coulomb_log_ei(const Vec& n_e, const Vec& T_e) {
 /// tenuous loop-top / flare onset (~4×10⁻² s⁻¹ at n_e=10¹⁵, T_e=10⁶ K), matching
 /// Bradshaw (2006) and Manchester (2012).
 inline Vec nu_ei(const Grid& grid, const Vec& n_e, const Vec& T_e) {
-    constexpr float C_ei = 2.030e-43f;
+    constexpr Real C_ei = 2.030e-43f;
     const Vec kT = grid.k_b * arma::clamp(T_e, 1.0f, arma::datum::inf);
     return C_ei * n_e % coulomb_log_ei(n_e, T_e) / arma::pow(kT, 1.5f);
 }
@@ -210,7 +210,7 @@ inline Vec recombination_rate_alpha(const Grid& /*grid*/, const Vec& T_e) {
 /// intermediates m_e k_B (~8×10^-53) and h² (~4.4×10^-67) both underflow to
 /// zero in float32 — forming them separately would divide by zero.
 inline Vec saha_phi(const Grid& grid, const Vec& T_e) {
-    constexpr float SAHA_PREF_C = 1.79985e14f;   // 2π m_e k_B / h² [m^-2 K^-1]
+    constexpr Real SAHA_PREF_C = 1.79985e14f;   // 2π m_e k_B / h² [m^-2 K^-1]
     const Vec Tc = arma::clamp(T_e, 1.0f, arma::datum::inf);
     const Vec pref = arma::pow(SAHA_PREF_C * Tc, 1.5f);
     return pref % arma::exp(-grid.chi_H_J / (grid.k_b * Tc));
@@ -224,7 +224,7 @@ inline Vec saha_phi(const Grid& grid, const Vec& T_e) {
 /// 5.6×10^{-39} SI prefactor below. Keeping κ_c (the n_e-independent part)
 /// separate lets Stage E carry the three-body channel as the cubic f^3 term.
 inline Vec recombination_rate_kappa_c(const Grid& /*grid*/, const Vec& T_e) {
-    constexpr float k_b_eV = 8.617333262e-5f;   // Boltzmann constant [eV/K]
+    constexpr Real k_b_eV = 8.617333262e-5f;   // Boltzmann constant [eV/K]
     const Vec kT_eV = k_b_eV * arma::clamp(T_e, 1.0f, arma::datum::inf);
     // κ_c = 5.6e-27 (k_B[eV] T)^{-4.5} cm^3/s · 1e-12 (cm^3·cm^-3 → m^6) [m^6/s].
     // Apply the 1e-12 conversion last so the 5.6e-39 product never forms as a
@@ -285,56 +285,56 @@ namespace cl2012 {
 // Below the first T entry, L_X is held at the first value (a large negative
 // log -> effectively zero), then linear-interpolated. CL2012 Figs 3-5.
 constexpr int N_L = 13;   ///< Sample count of the L_X(T) tables (length of L_T_kK and each L_logL_*).
-static constexpr float L_T_kK[N_L]   = { 4.f,  5.f, 6.f,  7.f,  8.f, 10.f, 12.f, 15.f, 20.f, 25.f, 30.f, 40.f, 50.f};
-static constexpr float L_logL_H[N_L] = {-30.f, -25.0f,-24.5f,-24.0f,-23.6f,-22.8f,-22.2f,-21.85f,-21.75f,-21.85f,-22.0f,-22.4f,-22.8f};
-static constexpr float L_logL_Ca[N_L]= {-22.5f,-21.3f,-20.5f,-19.9f,-19.5f,-18.9f,-18.6f,-18.35f,-18.15f,-18.05f,-18.0f,-18.0f,-18.0f};
-static constexpr float L_logL_Mg[N_L]= {-23.0f,-21.7f,-20.5f,-19.7f,-19.2f,-18.7f,-18.4f,-18.2f, -18.05f,-18.0f, -18.0f,-18.0f,-18.0f};
+static constexpr Real L_T_kK[N_L]   = { 4.f,  5.f, 6.f,  7.f,  8.f, 10.f, 12.f, 15.f, 20.f, 25.f, 30.f, 40.f, 50.f};
+static constexpr Real L_logL_H[N_L] = {-30.f, -25.0f,-24.5f,-24.0f,-23.6f,-22.8f,-22.2f,-21.85f,-21.75f,-21.85f,-22.0f,-22.4f,-22.8f};
+static constexpr Real L_logL_Ca[N_L]= {-22.5f,-21.3f,-20.5f,-19.9f,-19.5f,-18.9f,-18.6f,-18.35f,-18.15f,-18.05f,-18.0f,-18.0f,-18.0f};
+static constexpr Real L_logL_Mg[N_L]= {-23.0f,-21.7f,-20.5f,-19.7f,-19.2f,-18.7f,-18.4f,-18.2f, -18.05f,-18.0f, -18.0f,-18.0f,-18.0f};
 
 // Table 2a: E_H(log10 tau_Lya), Fig 6.
 constexpr int N_EH = 11;  ///< Sample count of the H I escape-probability table E_H(log10 tau_Lya).
-static constexpr float EH_logTau[N_EH] = {-2.f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f, 4.5f, 5.0f, 6.0f};
-static constexpr float EH_E[N_EH]      = { 1.0f,1.00f,0.99f,0.95f,0.85f,0.70f,0.55f,0.40f,0.25f,0.15f,0.03f};
+static constexpr Real EH_logTau[N_EH] = {-2.f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f, 4.5f, 5.0f, 6.0f};
+static constexpr Real EH_E[N_EH]      = { 1.0f,1.00f,0.99f,0.95f,0.85f,0.70f,0.55f,0.40f,0.25f,0.15f,0.03f};
 
 // Table 2b: E_Ca(log10 m_c [g/cm^2]), Fig 7.
 constexpr int N_ECa = 11; ///< Sample count of the Ca II escape-probability table E_Ca(log10 m_c).
-static constexpr float ECa_logMc[N_ECa] = {-8.f, -7.0f, -6.5f, -6.0f, -5.5f, -5.0f, -4.5f, -4.0f, -3.5f, -3.0f, -2.0f};
-static constexpr float ECa_E[N_ECa]     = { 1.0f, 0.99f, 0.97f, 0.90f, 0.75f, 0.58f, 0.43f, 0.30f, 0.20f, 0.12f, 0.02f};
+static constexpr Real ECa_logMc[N_ECa] = {-8.f, -7.0f, -6.5f, -6.0f, -5.5f, -5.0f, -4.5f, -4.0f, -3.5f, -3.0f, -2.0f};
+static constexpr Real ECa_E[N_ECa]     = { 1.0f, 0.99f, 0.97f, 0.90f, 0.75f, 0.58f, 0.43f, 0.30f, 0.20f, 0.12f, 0.02f};
 
 // Table 2c: E_Mg(log10 m_c [g/cm^2]), Fig 8.
 constexpr int N_EMg = 10; ///< Sample count of the Mg II escape-probability table E_Mg(log10 m_c).
-static constexpr float EMg_logMc[N_EMg] = {-8.f, -6.0f, -5.5f, -5.0f, -4.5f, -4.0f, -3.5f, -3.0f, -2.5f, -2.0f};
-static constexpr float EMg_E[N_EMg]     = { 1.0f, 1.00f, 0.97f, 0.85f, 0.65f, 0.45f, 0.30f, 0.18f, 0.10f, 0.04f};
+static constexpr Real EMg_logMc[N_EMg] = {-8.f, -6.0f, -5.5f, -5.0f, -4.5f, -4.0f, -3.5f, -3.0f, -2.5f, -2.0f};
+static constexpr Real EMg_E[N_EMg]     = { 1.0f, 1.00f, 0.97f, 0.85f, 0.65f, 0.45f, 0.30f, 0.18f, 0.10f, 0.04f};
 
 // Table 3: N(X*)/N(X) (T in kK), Figs 9-11 red curves.
 constexpr int N_F = 11;   ///< Sample count of the N(X*)/N(X) population-fraction tables.
-static constexpr float F_T_kK[N_F] = { 5.f, 8.f, 10.f, 12.f, 14.f, 15.f, 16.f, 18.f, 20.f, 25.f, 30.f};
-static constexpr float F_HI[N_F]   = { 1.0f, 0.99f, 0.85f, 0.42f, 0.17f, 0.10f, 0.07f, 0.04f, 0.025f,0.010f,0.005f};
-static constexpr float F_Ca[N_F]   = { 1.0f, 0.97f, 0.90f, 0.75f, 0.55f, 0.42f, 0.30f, 0.15f, 0.08f, 0.025f,0.010f};
-static constexpr float F_Mg[N_F]   = { 0.95f,0.95f, 0.90f, 0.75f, 0.55f, 0.42f, 0.28f, 0.10f, 0.05f, 0.010f,0.005f};
+static constexpr Real F_T_kK[N_F] = { 5.f, 8.f, 10.f, 12.f, 14.f, 15.f, 16.f, 18.f, 20.f, 25.f, 30.f};
+static constexpr Real F_HI[N_F]   = { 1.0f, 0.99f, 0.85f, 0.42f, 0.17f, 0.10f, 0.07f, 0.04f, 0.025f,0.010f,0.005f};
+static constexpr Real F_Ca[N_F]   = { 1.0f, 0.97f, 0.90f, 0.75f, 0.55f, 0.42f, 0.30f, 0.15f, 0.08f, 0.025f,0.010f};
+static constexpr Real F_Mg[N_F]   = { 0.95f,0.95f, 0.90f, 0.75f, 0.55f, 0.42f, 0.28f, 0.10f, 0.05f, 0.010f,0.005f};
 
 // Asplund et al. 2009 abundances and N_H/rho [g^-1].
 /// Hydrogen abundance A_H relative to hydrogen by number [-] — unity by
 /// definition; kept explicit so the three species enter Q_X the same way.
-constexpr float A_H        = 1.0f;
-constexpr float A_Ca       = 2.19e-6f;   ///< Ca/H abundance by number [-] = 10^(6.34-12)
-constexpr float A_Mg       = 3.98e-5f;   ///< Mg/H abundance by number [-] = 10^(7.60-12)
+constexpr Real A_H        = 1.0f;
+constexpr Real A_Ca       = 2.19e-6f;   ///< Ca/H abundance by number [-] = 10^(6.34-12)
+constexpr Real A_Mg       = 3.98e-5f;   ///< Mg/H abundance by number [-] = 10^(7.60-12)
 /// Hydrogen nuclei per gram of gas, N_H/rho [g^-1] in cgs, for the Asplund et
 /// al. (2009) mixture. Multiplying it by rho_cgs turns a mass density into the
 /// hydrogen-nuclei density N_H that CL2012 Eq. 1 needs.
-constexpr float NH_over_rho_cgs = 4.407e23f; // per gram
+constexpr Real NH_over_rho_cgs = 4.407e23f; // per gram
 
 /// 1-D linear interpolation: piecewise linear, constant extrapolation.
-inline float lin_interp(float x, const float* xs, const float* ys, int n) {
+inline Real lin_interp(Real x, const Real* xs, const Real* ys, int n) {
     if (x <= xs[0])   return ys[0];
     if (x >= xs[n-1]) return ys[n-1];
     int k = 0;
     while (k < n-1 && xs[k+1] < x) ++k;
-    const float t = (x - xs[k]) / (xs[k+1] - xs[k]);
+    const Real t = (x - xs[k]) / (xs[k+1] - xs[k]);
     return ys[k] + t * (ys[k+1] - ys[k]);
 }
 
 /// Vectorized look-up wrapper. Returns one Vec same size as q.
-inline Vec lookup_vec(const Vec& q, const float* xs, const float* ys, int n) {
+inline Vec lookup_vec(const Vec& q, const Real* xs, const Real* ys, int n) {
     Vec out(q.n_elem);
     for (arma::uword i = 0; i < q.n_elem; ++i) out[i] = lin_interp(q[i], xs, ys, n);
     return out;
@@ -358,14 +358,14 @@ inline Vec lookup_vec(const Vec& q, const float* xs, const float* ys, int n) {
 namespace chae2021 {
 constexpr int N_R = 43;   ///< Height-sample count of the Chae (2021) R_ik(z) table (length of Z_km and logR).
 // z [km] on the tau_500=1 scale (h=0 = photospheric reference level).
-static constexpr float Z_km[N_R] = {
+static constexpr Real Z_km[N_R] = {
     -100.f, -80.f, -60.f, -40.f, -20.f,    0.f,   50.f,  100.f,  150.f,  200.f,
      250.f, 300.f, 350.f, 400.f, 450.f,  490.f,  525.f,  560.f,  600.f,  650.f,
      705.f, 755.f, 805.f, 855.f, 905.f,  980.f, 1065.f, 1180.f, 1278.f, 1378.f,
     1475.f,1580.f,1670.f,1775.f,1860.f, 1915.f, 1980.f, 2017.f, 2043.f, 2062.f,
     2075.f,2087.f,2110.f};
 // log10 R_ik [s^-1].
-static constexpr float logR[N_R] = {
+static constexpr Real logR[N_R] = {
      1.25f, 0.78f, 0.15f,-0.58f,-1.40f,-2.12f,-3.50f,-4.38f,-5.07f,-5.56f,
     -5.91f,-6.22f,-6.51f,-6.76f,-7.01f,-7.13f,-7.15f,-7.07f,-6.79f,-6.33f,
     -5.74f,-5.26f,-4.88f,-4.55f,-4.38f,-4.17f,-3.97f,-3.73f,-3.56f,-3.40f,
@@ -379,7 +379,7 @@ static constexpr float logR[N_R] = {
 /// the table ends — Chae's geometric-dilution correction Eq. 26 is negligible
 /// over the chromospheric range used here), then base-10 exponentiated.
 inline Vec photoionization_rate_chae(const Vec& h_km) {
-    constexpr float LN10 = 2.302585092994046f;
+    constexpr Real LN10 = 2.302585092994046f;
     const Vec logr = cl2012::lookup_vec(h_km, chae2021::Z_km, chae2021::logR,
                                         chae2021::N_R);
     return arma::exp(LN10 * logr);
@@ -408,9 +408,9 @@ inline Vec radiative_loss_thick(const Grid& grid,
     N_HI[ns-1] = 0.5f * n_n[ns-1]    * grid.ds_i[ns-1] * 1.0e-4f;
     for (int i = static_cast<int>(ns) - 2; i >= 0; --i) {
         // Trapezoid: mean density times cell-center separation.
-        const float ds_face   = 0.5f * (grid.ds_i[i] + grid.ds_i[i+1]);
-        const float rho_dl    = 0.5f * (rho[i] + rho[i+1]) * ds_face;
-        const float nn_dl     = 0.5f * (n_n[i] + n_n[i+1]) * ds_face;
+        const Real ds_face   = 0.5f * (grid.ds_i[i] + grid.ds_i[i+1]);
+        const Real rho_dl    = 0.5f * (rho[i] + rho[i+1]) * ds_face;
+        const Real nn_dl     = 0.5f * (n_n[i] + n_n[i+1]) * ds_face;
         m_c[i]  = m_c[i+1]  + rho_dl * 0.1f;
         N_HI[i] = N_HI[i+1] + nn_dl  * 1.0e-4f;
     }
@@ -422,7 +422,7 @@ inline Vec radiative_loss_thick(const Grid& grid,
     const Vec log_tau = arma::log10(arma::clamp(tau_Lya, 1.0e-6f, 1.0e10f));
 
     // ---- per-species factors ----
-    constexpr float LN10 = 2.302585092994046f;
+    constexpr Real LN10 = 2.302585092994046f;
     const Vec L_H   = arma::exp(LN10 * lookup_vec(T_kK, L_T_kK, L_logL_H,  N_L));
     const Vec L_Ca  = arma::exp(LN10 * lookup_vec(T_kK, L_T_kK, L_logL_Ca, N_L));
     const Vec L_Mg  = arma::exp(LN10 * lookup_vec(T_kK, L_T_kK, L_logL_Mg, N_L));
@@ -475,11 +475,11 @@ inline Vec radiative_loss_thick(const Grid& grid,
 namespace optthin {
 constexpr int N_L = 17;   ///< Temperature-sample count of the optically-thin Lambda(T) table.
 // log10 T [K]
-static constexpr float logT_K[N_L] = {
+static constexpr Real logT_K[N_L] = {
     4.0f, 4.1f, 4.2f, 4.3f, 4.5f, 4.7f, 4.9f, 5.1f, 5.3f,
     5.5f, 5.7f, 5.9f, 6.1f, 6.3f, 6.5f, 6.7f, 7.0f};
 // log10 Λ [erg cm^3 s^-1]
-static constexpr float logLambda[N_L] = {
+static constexpr Real logLambda[N_L] = {
     -25.0f, -23.8f, -22.9f, -22.35f, -21.85f, -21.55f, -21.4f, -21.35f, -21.45f,
     -21.6f, -21.75f, -21.9f, -22.05f, -22.2f, -22.35f, -22.45f, -22.5f};
 } // namespace optthin
@@ -490,7 +490,7 @@ static constexpr float logLambda[N_L] = {
 /// cgs→SI conversion for Λ (erg cm^3 s^-1 → W m^3).
 inline Vec radiative_loss_thin(const Grid& /*grid*/, const Vec& n_i,
                                const Vec& n_n, const Vec& T_e) {
-    constexpr float LN10 = 2.302585092994046f;
+    constexpr Real LN10 = 2.302585092994046f;
     const Vec Tc    = arma::clamp(T_e, 1.0f, arma::datum::inf);
     const Vec logTc = arma::log10(Tc);
     const Vec logLam = cl2012::lookup_vec(logTc, optthin::logT_K,
@@ -529,19 +529,19 @@ inline Vec beam_heating_rate(const Grid& grid, const Vec& n_i, const Vec& n_n) {
 
     // Temporal window g(t): cosine ramp up over [t_on, t_on+ramp], flat top,
     // cosine ramp down over [t_off-ramp, t_off]. Zero outside.
-    const float t    = grid.sim_time;
-    const float t_on = grid.beam_t_on;
-    const float toff = grid.beam_t_on + grid.beam_duration;
-    const float r    = (grid.beam_ramp > 1.0e-6f) ? grid.beam_ramp : 1.0e-6f;
-    float g;
+    const Real t    = grid.sim_time;
+    const Real t_on = grid.beam_t_on;
+    const Real toff = grid.beam_t_on + grid.beam_duration;
+    const Real r    = (grid.beam_ramp > 1.0e-6f) ? grid.beam_ramp : 1.0e-6f;
+    Real g;
     if (t <= t_on || t >= toff) {
         return Q;                                  // beam off
     } else if (t < t_on + r) {
-        const float x = (t - t_on) / r;            // 0→1
-        g = 0.5f * (1.0f - std::cos(static_cast<float>(arma::datum::pi) * x));
+        const Real x = (t - t_on) / r;            // 0→1
+        g = 0.5f * (1.0f - std::cos(static_cast<Real>(arma::datum::pi) * x));
     } else if (t > toff - r) {
-        const float x = (toff - t) / r;            // 1→0
-        g = 0.5f * (1.0f - std::cos(static_cast<float>(arma::datum::pi) * x));
+        const Real x = (toff - t) / r;            // 1→0
+        g = 0.5f * (1.0f - std::cos(static_cast<Real>(arma::datum::pi) * x));
     } else {
         g = 1.0f;                                  // flat top
     }
@@ -570,10 +570,10 @@ inline Vec beam_heating_rate(const Grid& grid, const Vec& n_i, const Vec& n_n) {
             N(i) = N(i - 1) + 0.5f * (ntot(i) * ds(i) + ntot(i - 1) * ds(i - 1));
         // N_c[m^-2] ≈ 2.0e21 · (E_c/keV)²  (stopping column of cutoff electrons,
         // ≈ 2e17 cm^-2 keV^-2 for Coulomb log ~20).
-        const float N_c = 2.0e21f * grid.beam_E_cut_keV * grid.beam_E_cut_keV;
-        const float p   = 0.5f * grid.beam_delta;       // δ/2
+        const Real N_c = 2.0e21f * grid.beam_E_cut_keV * grid.beam_E_cut_keV;
+        const Real p   = 0.5f * grid.beam_delta;       // δ/2
         Vec w = ntot % arma::pow(1.0f + N / N_c, -p);
-        const float norm = arma::dot(w, ds);
+        const Real norm = arma::dot(w, ds);
         if (norm <= 0.0f) return Q;
         Q = (grid.beam_flux * g / norm) * w;            // W m^-3, ∫Q ds = beam_flux·g
         return Q;
@@ -583,17 +583,17 @@ inline Vec beam_heating_rate(const Grid& grid, const Vec& n_i, const Vec& n_n) {
     // 1003 km) lies in [beam_h_lo_km, beam_h_hi_km] — the upper chromosphere
     // below the TR. Weight ∝ n_tot (thick-target: densest reachable layer
     // absorbs the most).
-    const float H_BASE_KM = 1.003e3f;               // C7 base offset (chromo_main)
+    const Real H_BASE_KM = 1.003e3f;               // C7 base offset (chromo_main)
     Vec  w = arma::zeros<Vec>(grid.ns);
-    float h_lo = 0.0f;
+    Real h_lo = 0.0f;
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float h_ctr_km = H_BASE_KM + (h_lo + 0.5f * ds(i)) * 1.0e-3f;
+        const Real h_ctr_km = H_BASE_KM + (h_lo + 0.5f * ds(i)) * 1.0e-3f;
         if (h_ctr_km >= grid.beam_h_lo_km && h_ctr_km <= grid.beam_h_hi_km)
             w(i) = ntot(i);
         h_lo += ds(i);
     }
     // Normalize so ∫ φ ds = 1  ⇒  Σ w_i ds_i = 1 (φ = w / Σ w ds).
-    const float norm = arma::dot(w, ds);
+    const Real norm = arma::dot(w, ds);
     if (norm <= 0.0f) return Q;                     // layer empty (shouldn't happen)
 
     Q = (grid.beam_flux * g / norm) * w;            // W m^-3
@@ -625,28 +625,28 @@ inline Vec coronal_heating_rate(const Grid& grid) {
 
     // Time ramp enhance(t): hold at 1 until t_on, cosine-rise to enhance over
     // [t_on, t_on+ramp], hold. enhance ≡ 1 (relaxation default) ⇒ purely steady.
-    float amp = 1.0f;
+    Real amp = 1.0f;
     if (grid.coronal_heat_enhance != 1.0f) {
-        const float t   = grid.sim_time;
-        const float ton = grid.coronal_heat_t_on;
-        const float r   = (grid.coronal_heat_ramp > 1.0e-6f) ? grid.coronal_heat_ramp : 1.0e-6f;
-        float w;
+        const Real t   = grid.sim_time;
+        const Real ton = grid.coronal_heat_t_on;
+        const Real r   = (grid.coronal_heat_ramp > 1.0e-6f) ? grid.coronal_heat_ramp : 1.0e-6f;
+        Real w;
         if (t <= ton)          w = 0.0f;
         else if (t >= ton + r) w = 1.0f;
-        else w = 0.5f * (1.0f - std::cos(static_cast<float>(arma::datum::pi) * (t - ton) / r));
+        else w = 0.5f * (1.0f - std::cos(static_cast<Real>(arma::datum::pi) * (t - ton) / r));
         amp = 1.0f + (grid.coronal_heat_enhance - 1.0f) * w;
     }
 
     // Field-aligned distance to the nearest footpoint. Arc length is accumulated
     // from grid.ds_i with the cell-0 inner face at s = 0.
     const Vec& ds    = grid.ds_i;
-    const float s_end = arma::sum(ds);
-    const float sH    = (grid.coronal_heat_sH > 1.0e-3f) ? grid.coronal_heat_sH : 1.0e-3f;
-    const float E0amp = grid.coronal_heat_E0 * amp;
-    float s_lo = 0.0f;
+    const Real s_end = arma::sum(ds);
+    const Real sH    = (grid.coronal_heat_sH > 1.0e-3f) ? grid.coronal_heat_sH : 1.0e-3f;
+    const Real E0amp = grid.coronal_heat_E0 * amp;
+    Real s_lo = 0.0f;
     for (arma::uword i = 0; i < grid.ns; ++i) {
-        const float s_c = s_lo + 0.5f * ds(i);
-        float d = grid.coronal_heat_two_sided
+        const Real s_c = s_lo + 0.5f * ds(i);
+        Real d = grid.coronal_heat_two_sided
                     ? std::min(s_c, s_end - s_c) - grid.coronal_heat_s0
                     : s_c - grid.coronal_heat_s0;
         if (d < 0.0f) d = 0.0f;

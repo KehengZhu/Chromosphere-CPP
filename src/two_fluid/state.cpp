@@ -177,7 +177,7 @@ Vec flux_lim(const Vec& r) {
 // sign, i.e. r<0, and at flats where r is non-finite). β = limiter_beta.
 // ============================================================================
 
-Vec flux_lim_mc3_plus(const Vec& r, float beta) {
+Vec flux_lim_mc3_plus(const Vec& r, Real beta) {
     Vec zero(arma::size(r), arma::fill::zeros);
     Vec bcap(arma::size(r)); bcap.fill(beta);
     Vec res = arma::min(beta * r, bcap);
@@ -187,7 +187,7 @@ Vec flux_lim_mc3_plus(const Vec& r, float beta) {
     return res;
 }
 
-Vec flux_lim_mc3_minus(const Vec& r, float beta) {
+Vec flux_lim_mc3_minus(const Vec& r, Real beta) {
     Vec zero(arma::size(r), arma::fill::zeros);
     Vec bcap(arma::size(r)); bcap.fill(beta);
     Vec res = arma::min(beta * r, bcap);

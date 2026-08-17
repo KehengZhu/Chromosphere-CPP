@@ -73,7 +73,7 @@
  * timestep is
  *
  * @verbatim
- *     U^n -> MUSCL/Hancock/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}
+ *     U^n -> MUSCL-Hancock/Godunov hydro -> U* -> implicit physical conduction -> U^{n+1}
  * @endverbatim
  *
  * and contains no other stage: no equilibrium projection, no carrier-row storage,

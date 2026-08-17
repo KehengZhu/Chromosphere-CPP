@@ -438,6 +438,7 @@ int main(int argc, char** argv) {
                   << " uniform_mesh=" << grid.uniform_mesh
                   << " mc3=" << grid.mc3_limiter << " beta=" << grid.limiter_beta
                   << " roe=" << grid.roe_characteristic_flux
+                  << " swmf_godunov=" << grid.swmf_godunov_flux
                   << " pressure_reconstruct=" << grid.pressure_reconstruct
                   << " ds_km=" << (grid.ds_i(0)*1.0e-3f)
                   << "\n# mass flux = the mix::RHO continuity row (total mass "
@@ -602,6 +603,28 @@ int main(int argc, char** argv) {
         std::cerr << "WARNING: run stopped at the step cap (" << step_cap
                   << ") after " << time << " of the requested " << total_time
                   << " physical seconds. Raise or unset CHROMO_STEP_CAP." << std::endl;
+    }
+    // Release swmf_godunov flux: report what the exact Riemann solver did, so a
+    // silent fallback to Rusanov can never be mistaken for a Godunov result.
+    if (grid.swmf_godunov_flux) {
+        const GodunovFluxStats& g = grid.godunov_stats;
+        std::cout << "godunov.faces=" << g.faces << '\n'
+                  << "godunov.exact=" << g.exact << '\n'
+                  << "godunov.fallbacks=" << g.fallbacks()
+                  << " (bad_input=" << g.fallback_bad_input
+                  << " vacuum=" << g.fallback_vacuum
+                  << " negative_p=" << g.fallback_negative_p
+                  << " no_converge=" << g.fallback_no_converge
+                  << " bad_sample=" << g.fallback_bad_sample << ")\n"
+                  << "godunov.iterations_max=" << g.max_iterations
+                  << " mean="
+                  << (g.exact ? static_cast<double>(g.total_iterations)
+                                / static_cast<double>(g.exact) : 0.0)
+                  << std::endl;
+        if (g.fallbacks() != 0)
+            std::cerr << "WARNING: the swmf-godunov flux fell back to Rusanov on "
+                      << g.fallbacks() << " of " << g.faces << " face solves."
+                      << std::endl;
     }
     print_runtime_profile(std::cout);
     if (eos_counting_on) {

@@ -11,7 +11,7 @@
  *     the production Gamma1 table, so it always runs the single-fluid
  *     equilibrium-mixture solver (src/single_fluid/) with the state
  *     U = (rho, rho u, E) and the timestep
- *         U^n -> MUSCL/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}.
+ *         U^n -> MUSCL-Hancock/Godunov hydro -> U* -> implicit physical conduction -> U^{n+1}.
  *     Every historical two-fluid knob listed below is REJECTED outright in this
  *     mode, so `model_column` names exactly one production model.
  *
@@ -33,7 +33,8 @@
  *   - equilibrium-reference ("δ-form") well-balancing (V = 0 exact for any strat.),
  *   - inner (photospheric) discrete-HSE reservoir well-balanced through BOTH ghosts,
  *     density included (ρ ∝ p at T₀) so V = 0 is an exact fixed point for mass too.
- * The release additionally uses the mixture Roe characteristic flux and the
+ * The release additionally uses the SWMF exact-Riemann Godunov flux (frozen
+ * composition, gamma = 5/3) and the
  * (ln rho, u, ln p) primitive set. Together these hold a hydrostatic column at
  * V ≈ 0 to round-off, so any residual flow is physical (conduction-driven
  * evaporation), not truncation drainage.
@@ -69,7 +70,9 @@
  *   ISO_NUMERICAL_DIFFUSIVITY_MULT   mesh-scaled artificial conduction
  *
  * Reference-only numerical overrides (regression/comparison, never production):
- *   ISO_RIEMANN=rusanov, ISO_RECONSTRUCTION=lnrho-v-lnt, ISO_LIMITER
+ *   ISO_RIEMANN=roe-local (equilibrium-Gamma1 Roe linearization, the previous
+ *   release flux), ISO_RIEMANN=rusanov, ISO_RECONSTRUCTION=lnrho-v-lnt,
+ *   ISO_LIMITER
  */
 
 #pragma once

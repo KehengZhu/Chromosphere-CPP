@@ -128,14 +128,14 @@ What it captures is one explicit RHS evaluation: the decoded cell-centred inputs
 
 @verbatim
 # face-flux diagnostic (read-only capture of mixture_rhs_explicit)
-# ns=661 first_cell=0 uniform_mesh=0 mc3=1 beta=2 roe=1 pressure_reconstruct=1 ds_km=1.10477
+# ns=661 first_cell=0 uniform_mesh=0 mc3=1 beta=2 roe=0 swmf_godunov=1 pressure_reconstruct=1 ds_km=1.10477
 # mass flux = the mix::RHO continuity row (total mass density; the release state has no carrier rows)
 # columns=cell_km face_km rho_cell v_cell T_cell rho_L rho_R v_L v_R T_L T_R cs_L cs_R a_face f_central f_diff f_total r_rho phi_plus_rho r_ip1_rho phi_minus_rho r_v phi_plus_v r_T phi_plus_T p_cell p_L p_R
 # t = 0 step = 0
 1600.552368 1601.104736 9.705339865e-10 0 6631.354019 ...
 @endverbatim
 
-Header keys on line 2: `ns` (cell count), `first_cell` (index of the first row in each record), `uniform_mesh`, `mc3` (MC3/Koren limiter on), `beta` (limiter beta), `roe` (Roe characteristic flux on), `pressure_reconstruct` (`(ln rho, u, ln p)` reconstruction on), `ds_km` (width of cell 0, km).
+Header keys on line 2: `ns` (cell count), `first_cell` (index of the first row in each record), `uniform_mesh`, `mc3` (MC3/Koren limiter on), `beta` (limiter beta), `roe` (Roe characteristic reference flux on), `swmf_godunov` (release SWMF exact-Riemann Godunov flux on — `1` on a default release run), `pressure_reconstruct` (`(ln rho, u, ln p)` reconstruction on), `ds_km` (width of cell 0, km).
 
 The 28 columns, in order:
 
@@ -152,11 +152,11 @@ The 28 columns, in order:
 | 8 | `v_R` | reconstructed velocity, right state |
 | 9 | `T_L` | reconstructed temperature, left state |
 | 10 | `T_R` | reconstructed temperature, right state |
-| 11 | `cs_L` | sound speed of the left face state [m s<sup>-1</sup>] |
-| 12 | `cs_R` | sound speed of the right face state |
-| 13 | `a_face` | acoustic spectral radius `max(|v_L|+cs_L, |v_R|+cs_R)`; a diagnostic/fallback value in Roe-local mode |
+| 11 | `cs_L` | **equilibrium** sound speed `sqrt(Gamma1 p/rho)` of the left face state [m s<sup>-1</sup>]. This is the closure derivative, not the frozen `sqrt(5/3 p/rho)` the release Riemann solve and the CFL use. |
+| 12 | `cs_R` | same, right face state |
+| 13 | `a_face` | equilibrium acoustic spectral radius `max(|v_L|+cs_L, |v_R|+cs_R)`. It is the Rusanov coefficient when Rusanov is selected, and the per-face fallback coefficient of both other solvers; under the release Godunov flux and under Roe it is otherwise diagnostic only. |
 | 14 | `f_central` | central (averaged-physical-flux) part of the mass flux |
-| 15 | `f_diff` | dissipative part of the mass flux |
+| 15 | `f_diff` | dissipative part of the mass flux. The release `swmf-godunov` flux and the Roe reference flux are only defined as a whole, so this is whatever they add to `f_central`; in Rusanov mode it is instead the closed form `-1/2 a (U_R - U_L)`. |
 | 16 | `f_total` | the production numerical mass flux at this face, `f_central + f_diff` [kg m<sup>-2</sup> s<sup>-1</sup>] |
 | 17 | `r_rho` | limiter slope ratio for the density slot, building `L` from cell `i` |
 | 18 | `phi_plus_rho` | limiter value applied for that `L` state |
@@ -226,6 +226,19 @@ Opened in **append** mode at the hard-coded relative path `outputs/output.log`, 
 @endverbatim
 
 That is the output path as given on the command line, the `mode` argument, and the resolved `total_time` in physical seconds (either `time_mult * 10 * sum(ds_i) / 2e4` or the `CHROMO_T_END` override). Nothing else is written to this file — the per-step progress lines, the profile report and the `termination=` block go to stdout, and the OpenMP banner and warnings to stderr.
+
+## Godunov fallback tally on stdout
+
+Every run using the release Godunov flux — i.e. every default `model_column` run — prints four extra stdout lines just before the profile report, so a fallback to Rusanov can never pass unnoticed:
+
+@verbatim
+godunov.faces=23506482
+godunov.exact=23506482
+godunov.fallbacks=0 (bad_input=0 vacuum=0 negative_p=0 no_converge=0 bad_sample=0)
+godunov.iterations_max=1 mean=1
+@endverbatim
+
+`faces` counts every face solve attempted over the whole run (two per cell per RHS evaluation), `exact` those the exact Riemann solve supplied, and the parenthesised breakdown attributes each fallback to its cause. `iterations_max` / `mean` are the Newton-iteration counts of the star-pressure solve. A nonzero `fallbacks` additionally emits a stderr `WARNING`, and `scripts/release_validation.sh` fails the release smoke on it. These lines are absent only from a run that overrode the flux with `ISO_RIEMANN=roe-local` or `ISO_RIEMANN=rusanov`.
 
 ## Reading these in Python
 

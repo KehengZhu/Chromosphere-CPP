@@ -3,7 +3,7 @@
  * @brief Release solver: implicit physical conduction and the release timestep.
  * @ingroup release_solver
  *
- *     U^n  --MUSCL/Roe hydro-->  U*  --implicit physical conduction-->  U^{n+1}
+ *     U^n  --MUSCL-Hancock/Godunov hydro-->  U*  --implicit physical conduction-->  U^{n+1}
  *
  * Those are the only two stages, composed by first-order Lie splitting. There is
  * no equilibrium projection between them (U = (rho, rho u, E) is already the

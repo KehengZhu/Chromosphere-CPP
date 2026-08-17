@@ -48,7 +48,8 @@ There are two solvers over one shared mesh. `chromosphere.hpp` (the Grid, the tw
 | Path | What it holds |
 | --- | --- |
 | `src/single_fluid/mixture.hpp` | Release API and governing equations: `mixture_decode` / `mixture_decode_into`, `mixture_rhs_explicit`, `mixture_timestep`, `mixture_advance`, `mixture_cell_phi`. |
-| `src/single_fluid/mixture.cpp` | State decode, MUSCL reconstruction of `(ln rho, u, ln p)` with the MC3/Koren limiter, the mixture Roe characteristic flux with face-local Rusanov fallback, the flux-tube pressure + gravity source, and the CFL timestep. |
+| `src/single_fluid/mixture.cpp` | State decode, MUSCL reconstruction of `(ln rho, u, ln p)` with the MC3/Koren limiter, the release SWMF exact-Riemann Godunov flux with face-local Rusanov fallback, the Roe and Rusanov reference fluxes, the flux-tube pressure + gravity source, and the flux-consistent CFL timestep. |
+| `src/single_fluid/exact_rs.hpp` / `.cpp` | Line-for-line port of the SWMF exact ideal-gas Riemann solver (`share/Library/src/ModExactRS.f90`): the star-state pressure/velocity iteration and the self-similar sampler the release flux calls at every face. |
 | `src/single_fluid/integrator.cpp` | Implicit backward-Euler physical conduction, `mixture_conduction_residual_max`, and `mixture_advance` — the whole two-stage release timestep. |
 
 ### Historical two-fluid solver, `src/two_fluid/`

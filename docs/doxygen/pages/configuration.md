@@ -96,7 +96,7 @@ Knobs read only by the **two-fluid** path (`model_gentle`); each is a hard error
 
 | Variable | Type | Default | Effect |
 | --- | --- | --- | --- |
-| `ISO_GAMMA` | float | `Grid::gamma_mono` (5/3) | Fixed adiabatic index of the two-fluid solver. Rejected three separate times in release mode: by `make_scenario` for `model_column`, by the `GAMMA_TABLE` branch of the driver, and by `model_column_ic`. |
+| `ISO_GAMMA` | float | `Grid::gamma_mono` (5/3) | Fixed adiabatic index of the two-fluid solver. Rejected three separate times in release mode: by `make_scenario` for `model_column`, by the `GAMMA_TABLE` branch of the driver, and by `model_column_ic`. Not to be confused with the fixed `gamma = 5/3` of the release Godunov flux: that is the frozen-composition index of the *face Riemann problem only*, is not user-settable, and does not replace the Saha closure anywhere else in the solver. |
 | `ISO_TWO_FLUID` | float, non-zero = on | `0` | Evolve ion and neutral as separate fluids. Rejected in release mode by the driver. |
 | `ISO_IONIZATION` | float, non-zero = on | `0` | Stage-E finite-rate ionization/recombination network. Rejected in release mode by the driver. |
 | `ISO_COOLING` | float, non-zero = on | `0` | Radiative sink; only takes effect when `ISO_HEAT_FLUX` is also on. Rejected in release mode. |
@@ -189,11 +189,11 @@ The program reads no OpenMP variable itself except to echo it: it prints `[openm
 
 ## Reference-only overrides — never use in production
 
-These exist so a numerical result can be attributed to (or cleared of) a specific scheme choice without hand-editing the scenario. They are not needed for any production run, they print a loud override line to stderr when set, and `scripts/release_validation.sh` checks that the default path reproduces the explicit `roe-local` / `lnrho-v-lnp` run bitwise.
+These exist so a numerical result can be attributed to (or cleared of) a specific scheme choice without hand-editing the scenario. They are not needed for any production run, they print a loud override line to stderr when set, and `scripts/release_validation.sh` checks that the default path reproduces the explicit `swmf-godunov` / `lnrho-v-lnp` run bitwise.
 
 | Variable | Values | Release default | Effect |
 | --- | --- | --- | --- |
-| `ISO_RIEMANN` | `rusanov`, `roe-local` | `roe-local` | `rusanov` restores the local Lax-Friedrichs flux (excessively dissipative at the low Mach numbers of this problem). `roe-local` requires Gamma/Saha mode. Any other value throws `std::invalid_argument`. |
+| `ISO_RIEMANN` | `swmf-godunov`, `roe-local`, `rusanov` | `swmf-godunov` | The release value is the SWMF-style exact-Riemann Godunov flux at frozen composition described under [Numerics](@ref numerics). `roe-local` selects the mixture Roe characteristic flux — the equilibrium-`Gamma1` linearization that was the previous release flux, kept as the controlled comparison solver. `rusanov` restores the local Lax-Friedrichs flux (excessively dissipative at the low Mach numbers of this problem), which is also the automatic per-face fallback of the other two. The three are mutually exclusive, so the face Riemann solver is the only thing this variable changes — **including the timestep**, which `mixture_timestep` sizes from the signal speed of whichever flux is in force (frozen `sqrt(5/3 p/rho)` for `swmf-godunov`, equilibrium `sqrt(Gamma1 p/rho)` otherwise). `swmf-godunov` and `roe-local` require Gamma/Saha mode. Any other value throws `std::invalid_argument`. |
 | `ISO_RECONSTRUCTION` | `lnrho-v-lnt`, `lnrho-v-lnp` | `lnrho-v-lnp` | `lnrho-v-lnt` restores the temperature-based primitive set, which closes pressure through the nonlinear EOS and manufactures face-pressure mismatch across the partial-ionization transition. `lnrho-v-lnp` requires Gamma/Saha mode. Any other value throws. |
 | `ISO_LIMITER` | `mc3`, `minmod`, `first` | `mc3` with beta = 2 | `minmod` selects the symmetric minmod limiter; `first` sets beta = 0 with MC3, giving phi identically 0, i.e. piecewise-constant first order. Any other value throws. |
 | `ISO_MC3_BETA` | float | `2.0` | Read **only** when `ISO_LIMITER=mc3` is explicitly set. Setting `ISO_MC3_BETA` alone has no effect. |

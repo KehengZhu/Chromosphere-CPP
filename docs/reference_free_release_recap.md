@@ -88,7 +88,7 @@ RHS stage 4.75 → 4.91 s per 100 physical seconds (+3.4 %); decode and conducti
 
 ## Not changed in this work
 
-Saha EOS, Roe solver, reconstruction variables, MC3 limiter (β=2), mesh strategy, conduction physics, CFL, floors, and the hydro/conduction operator splitting. The splitting remains **first-order Lie** (explicit hydro → implicit backward-Euler conduction).
+Saha EOS, the face Riemann solver, reconstruction variables, MC3 limiter (β=2), mesh strategy, conduction physics, CFL, floors, and the hydro/conduction operator splitting. (The Riemann solver was the mixture Roe flux throughout this work; the release flux has since become the SWMF exact-Riemann Godunov flux — `docs/swmf_godunov_flux_experiment.md`. Every hydrostatic-defect number below is a Roe measurement; the Godunov counterpart of the `1.33e-12` figure is `1.08e-12`, at the same float32 floor.) The splitting remains **first-order Lie** (explicit hydro → implicit backward-Euler conduction).
 
 **No second-order temporal accuracy is claimed, for the hydrodynamic stage or for the composition.** MUSCL-Hancock gives second-order space/time centering for the *homogeneous* flux evolution, and the predictor now carries the source so hydrostatic balance is consistent across stages — but the corrector still evaluates the momentum source at `U^n`, so in the source-only limit `dU/dt = S(U)` the update degenerates to forward Euler. Two separate future numerical questions, neither addressed here: raising the order of the source quadrature (e.g. evaluating `S` at the half-time state), and symmetrizing the hydro/conduction composition (Strang).
 

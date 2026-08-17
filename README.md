@@ -2,7 +2,7 @@
 
 A 1.5D field-aligned solver for the solar chromosphere and the chromosphere-to-corona transition. C++14, with header-only Armadillo vendored in `include/` — no LAPACK, no BLAS, no other dependency.
 
-The production configuration (`model_column`) is a **single-fluid field-aligned equilibrium-mixture** solver: Gamma/Saha equilibrium thermodynamics with the ionization energy included, MUSCL-Hancock/Roe hydrodynamics, and implicit physical heat conduction. A separate historical two-fluid research solver is also in the tree and drives the other scenarios.
+The production configuration (`model_column`) is a **single-fluid field-aligned equilibrium-mixture** solver: Gamma/Saha equilibrium thermodynamics with the ionization energy included, MUSCL-Hancock hydrodynamics with the SWMF-style exact-Riemann Godunov flux, and implicit physical heat conduction. A separate historical two-fluid research solver is also in the tree and drives the other scenarios.
 
 **This README is a quick start.** Everything technical — equations, numerical method, scenarios, the full command-line and environment reference, output formats, validation — lives in the Doxygen reference and the write-up:
 

@@ -1,5 +1,7 @@
 # Diagnosis: the broad low-chromosphere oscillation in the Roe + `(ln ρ, V, ln p)` N1000 run
 
+> **Provenance.** Measured with the mixture Roe flux, which was the release numerical flux at the time and is now the reference/comparison solver (`ISO_RIEMANN=roe-local`). The release flux is the SWMF exact-Riemann Godunov flux; see `docs/swmf_godunov_flux_experiment.md`. The mode diagnosed here was never shown to be solver-specific, and these runs have not been repeated under the release flux.
+
 > **Partly superseded (see `docs/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
 
 

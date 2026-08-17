@@ -22,10 +22,29 @@
  *   e_int = 3/2 p + x n_H chi_H,   p = (1 + x) n_H k_B T,   n_H = rho / m_H
  *   x     = x_Saha(n_H, T)   (pure-hydrogen Saha equilibrium)
  *   q     = -kappa(n_e, n_HI, T) d_s T
- *   c_s   = sqrt(Gamma1(T, n_H) p / rho)   (CRASH Gamma1 table)
  *
  * The gravitational potential is carried inside E, so `phi_g` appears in the
  * decode of every cell, ghost and reconstructed face.
+ *
+ * ## Acoustic response: two limits, and which one the release takes
+ *
+ * The closure above admits two different acoustic indices, and the difference is
+ * physical, not a modelling error:
+ *
+ *   * EQUILIBRIUM (Saha re-established instantaneously inside the wave):
+ *         c_eq = sqrt(Gamma1(T, n_H) p / rho),  CRASH Gamma1 table,
+ *     with Gamma1 dipping to ~1.09 across the partial-ionization zone;
+ *   * FROZEN composition (ionization state fixed across the wave):
+ *         c_fr = sqrt((5/3) p / rho),
+ *     because e_int = p/(5/3 - 1) + e_ion splits the internal energy into a
+ *     monatomic translational part and an inert ionization reservoir.
+ *
+ * The RELEASE takes the frozen limit — hydrogen ionization/recombination in the
+ * chromosphere relaxes far too slowly to follow an individual compressive
+ * disturbance — so the numerical flux and the CFL both use c_fr. Gamma1 remains
+ * the closure's equilibrium derivative and is what the Roe reference flux
+ * linearizes. See mixture.cpp and the writeup for the full statement, including
+ * the unresolved question of per-step Saha re-equilibration.
  *
  * ## Software contract
  *
@@ -37,7 +56,7 @@
  *
  * The release timestep is exactly
  *
- *     U^n -> MUSCL/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}
+ *     U^n -> MUSCL-Hancock/Godunov hydro -> U* -> implicit physical conduction -> U^{n+1}
  *
  * and nothing else. TRAC, nonthermal beam heating, volumetric coronal heating,
  * radiative cooling and artificial/numerical conduction are NOT release physics;
@@ -100,17 +119,20 @@ inline double mixture_cell_phi(const Grid& grid, arma::uword i) {
 // ============================================================================
 
 /// Explicit field-aligned RHS: MUSCL reconstruction of (log rho, u, log p) with
-/// the MC3/Koren limiter, a predictor--corrector half step, the mixture Roe
-/// characteristic flux (face-local Rusanov fallback), the geometric
-/// pressure/gravity source, and the frozen equilibrium-reference correction.
-/// `dt_predictor` is the timestep the internal half step uses; it never leaves
-/// this call.
+/// the MC3/Koren limiter, a predictor--corrector half step, the release SWMF
+/// exact-Riemann Godunov flux at frozen composition (face-local Rusanov
+/// fallback), the geometric pressure/gravity source, and the frozen
+/// equilibrium-reference correction. `dt_predictor` is the timestep the internal
+/// half step uses; it never leaves this call.
 Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
                          const MixtureField& decoded, double dt_predictor);
 
-/// CFL-limited timestep from the acoustic signal speed |u| + c_s. That is the
-/// only constraint: the release has no volumetric source term, and the implicit
-/// conduction stage is unconditionally stable.
+/// CFL-limited timestep from the acoustic signal speed |u| + c_s of the
+/// numerical flux in force: the FROZEN-composition speed sqrt(5/3 p/rho) on the
+/// release Godunov path, the equilibrium Saha speed sqrt(Gamma1 p/rho) under the
+/// Roe and Rusanov reference fluxes. Acoustics are the only constraint: the
+/// release has no volumetric source term, and the implicit conduction stage is
+/// unconditionally stable.
 Vec mixture_timestep(const Grid& grid, const Vec& state,
                      const MixtureField& decoded);
 
@@ -138,7 +160,7 @@ double mixture_conduction_residual_max(const Grid& grid, const Vec& before,
 // ============================================================================
 
 /// The complete release timestep:
-///     U^n -> MUSCL/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}
+///     U^n -> MUSCL-Hancock/Godunov hydro -> U* -> implicit physical conduction -> U^{n+1}
 /// These two stages are the whole update; there is no third stage and no
 /// equilibrium projection. `decoded` must describe `state`.
 Vec mixture_advance(Grid& grid, const Vec& state, const Vec& dt_i,

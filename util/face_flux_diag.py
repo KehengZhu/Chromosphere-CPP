@@ -4,7 +4,7 @@
 Reads the `<run>.faceflux` sidecar written by `chromo_main` with
 `CHROMO_FACE_FLUX_DIAG=1`. That sidecar is a read-only copy-out of the PRODUCTION
 `mixture_rhs_explicit` arrays, so nothing here re-derives the reconstruction: the
-Rusanov total-mass face flux, its central/diffusive split, the one-sided
+production total-mass face flux, its central/diffusive split, the one-sided
 reconstructed face states, the spectral radius and the limiter ratios/values are
 all the numbers the solver actually used.
 
@@ -12,7 +12,9 @@ Definitions used below (index i = the UPPER face i+1/2 of cell i):
 
     rhoV_cell[i] = rho_cell[i] * v_cell[i]                  cell-centred mass flux
     f_central[i] = 0.5 ( (rho v)_L + (rho v)_R )            advective part
-    f_diff[i]    = -0.5 a[i] ( rho_R - rho_L )              Rusanov dissipation
+    f_diff[i]    = f_total[i] - f_central[i]                dissipative part
+                   (= -0.5 a[i] (rho_R - rho_L) only in Rusanov mode; the release
+                    Godunov flux and the Roe reference flux are defined as a whole)
     f_total[i]   = f_central[i] + f_diff[i]                 what continuity differences
     R_rho[i]     = -( f_total[i] - f_total[i-1] ) / ds      continuity residual
 
@@ -350,7 +352,7 @@ def make_plot(series, path, win, top_cells):
         ax.axvspan(win[0], win[1], color="0.85", zorder=0)
         ax.grid(alpha=0.3)
         ax.legend(fontsize=7, ncol=2)
-    axes[0].set_title("Production Rusanov total-mass face flux vs cell-centred "
+    axes[0].set_title("Production total-mass face flux vs cell-centred "
                       r"$\rho V$ (top %d cells)" % top_cells)
     fig.tight_layout()
     fig.savefig(path, dpi=150)

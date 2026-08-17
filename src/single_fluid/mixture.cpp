@@ -24,6 +24,7 @@
  */
 
 #include "single_fluid/mixture.hpp"
+#include "single_fluid/exact_rs.hpp"
 #include "profiling.hpp"
 #include "parallel.hpp"
 
@@ -399,6 +400,139 @@ void build_roe_flux(const Grid& grid, const MixtureFaceArrays& left,
     }
 }
 
+// ---------------------------------------------------------------------------
+// RELEASE numerical flux: the SWMF-style exact-Riemann Godunov flux
+// ---------------------------------------------------------------------------
+//
+// A transcription of SWMF `util/CRASH/src/test_godunov.f90::get_godunov_flux`
+// onto this solver's face states, with the exact ideal-gas Riemann solver of
+// `single_fluid/exact_rs.hpp` (SWMF `share/Library/src/ModExactRS.f90`).
+//
+// The method's whole trick is that the exact Riemann solve is IDEAL-GAS. SWMF
+// runs it at a fixed gamma (test_godunov uses GammaMax = 5/3, the monatomic
+// value) and pushes every non-ideal part of the internal energy into a passive
+// SPECIFIC energy offset
+//
+//     E0 = (e_int - p/(gamma - 1)) / rho     [J/kg]
+//
+// which is advected with the contact and re-added when the star state's total
+// energy is assembled. Here e_int already contains the Saha ionization energy,
+// and the release total energy additionally carries the gravitational potential,
+// so this code takes the offset straight from the conserved rows,
+//
+//     E0 = (E - 1/2 rho u^2 - p/(gamma - 1)) / rho = (e_int - p/(gamma-1))/rho + phi,
+//
+// which reproduces E exactly when the sampled state equals the side state. Both
+// sides of a face share phi, so the gravitational part cancels out of the
+// left/right offset difference and only the EOS content is actually upwinded.
+//
+// Why this is the release flux, thermodynamically. The equilibrium Saha internal
+// energy of this mixture splits exactly as
+//
+//     e_int = p/(5/3 - 1) + e_ion,
+//
+// a monatomic TRANSLATIONAL part plus an ionization reservoir. Solving the local
+// Riemann problem at gamma = 5/3 while e_ion rides in E0 is therefore the
+// FROZEN-COMPOSITION limit of the local wave interaction: the ionization state is
+// held fixed while the waves cross the face. That is the appropriate limit when
+// the ionization/recombination relaxation time is long compared with the
+// dynamical time of the disturbance, which is the chromospheric case for
+// hydrogen. The alternative closure — Saha equilibrium re-established
+// instantaneously *within* the wave — instead gives the equilibrium acoustic
+// index Gamma1 (median ~1.09 in this column), and that is what the reference Roe
+// flux linearizes. The two are different physical limits, not a correct and an
+// incorrect one; the release takes the frozen limit. See the writeup and
+// docs/swmf_godunov_flux_experiment.md.
+//
+// Numerical consequence: the frozen index is the LARGER of the two here, so this
+// flux propagates FASTER waves than the equilibrium system does, and the release
+// timestep is sized from the frozen speed accordingly — see mixture_timestep.
+constexpr double kGodunovGamma = 5.0/3.0;
+
+void build_swmf_godunov_flux(const Grid& grid, const MixtureFaceArrays& left,
+                             const MixtureFaceArrays& right, const Work& a_face,
+                             Work& output) {
+    const auto sz = state_size(grid);
+    constexpr double gm1_inv = 1.0/(kGodunovGamma - 1.0);
+    GodunovFluxStats& stats = grid.godunov_stats;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const arma::uword k_rho = arma::sub2ind(sz, i, mix::RHO);
+        const arma::uword k_mom = arma::sub2ind(sz, i, mix::MOM);
+        const arma::uword k_e   = arma::sub2ind(sz, i, mix::ENERGY);
+        ++stats.faces;
+
+        const swmf_rs::ExactRsState state_l{left.conserved(k_rho),
+                                            left.velocity(i), left.pressure(i)};
+        const swmf_rs::ExactRsState state_r{right.conserved(k_rho),
+                                            right.velocity(i), right.pressure(i)};
+        const double energy_l = left.conserved(k_e);
+        const double energy_r = right.conserved(k_e);
+        if (!std::isfinite(energy_l) || !std::isfinite(energy_r)) {
+            ++stats.fallback_bad_input;
+            rusanov_face(grid, left, right, i, a_face(i), output);
+            continue;
+        }
+
+        const swmf_rs::ExactRsSolution solution = swmf_rs::exact_rs_pu_star(
+            state_l, state_r, kGodunovGamma, kGodunovGamma);
+        if (solution.status != swmf_rs::ExactRsStatus::Ok) {
+            switch (solution.status) {
+                case swmf_rs::ExactRsStatus::BadInput:
+                    ++stats.fallback_bad_input; break;
+                case swmf_rs::ExactRsStatus::Vacuum:
+                    ++stats.fallback_vacuum; break;
+                case swmf_rs::ExactRsStatus::NegativePressure:
+                    ++stats.fallback_negative_p; break;
+                case swmf_rs::ExactRsStatus::NotConverged:
+                    ++stats.fallback_no_converge; break;
+                case swmf_rs::ExactRsStatus::Ok: break;
+            }
+            rusanov_face(grid, left, right, i, a_face(i), output);
+            continue;
+        }
+
+        // The side whose gas passes through the face supplies the energy offset.
+        // SWMF's tie-break at UnStar == 0 exactly is the right state.
+        const bool from_left = solution.u_star > 0.0;
+        const double side_rho = from_left ? state_l.rho : state_r.rho;
+        const double side_u   = from_left ? state_l.u   : state_r.u;
+        const double side_p   = from_left ? state_l.p   : state_r.p;
+        const double side_energy = from_left ? energy_l : energy_r;
+        const double e0 =
+            (side_energy - 0.5*side_rho*side_u*side_u - side_p*gm1_inv)/side_rho;
+
+        const swmf_rs::ExactRsState face = swmf_rs::exact_rs_sample(
+            0.0, solution, state_l, state_r, kGodunovGamma, kGodunovGamma);
+        if (!(face.rho > 0.0) || !(face.p > 0.0) || !std::isfinite(face.u)
+            || !std::isfinite(e0)) {
+            ++stats.fallback_bad_sample;
+            rusanov_face(grid, left, right, i, a_face(i), output);
+            continue;
+        }
+
+        const double energy_star =
+            face.p*gm1_inv + 0.5*face.rho*face.u*face.u + face.rho*e0;
+        const double flux[num_of_mixture_eq] = {
+            face.rho*face.u,
+            face.rho*face.u*face.u + face.p,
+            (energy_star + face.p)*face.u};
+        if (!std::isfinite(flux[0]) || !std::isfinite(flux[1])
+            || !std::isfinite(flux[2])) {
+            ++stats.fallback_bad_sample;
+            rusanov_face(grid, left, right, i, a_face(i), output);
+            continue;
+        }
+
+        ++stats.exact;
+        stats.total_iterations += static_cast<std::uint64_t>(solution.iterations);
+        stats.max_iterations = std::max(
+            stats.max_iterations, static_cast<std::uint64_t>(solution.iterations));
+        output(k_rho) = flux[0];
+        output(k_mom) = flux[1];
+        output(k_e)   = flux[2];
+    }
+}
+
 // Momentum source of the field-aligned PDE: the flux-tube pressure term
 // p d_s(ln A) written in the code's B form (A B = const => d_s(ln A) =
 // -d_s(ln B) = B d_s(1/B)) plus the gravitational body force -rho d_s(phi_g).
@@ -468,7 +602,10 @@ void capture_face_flux(const Grid& grid, const Work& w, const Work& wl,
         const arma::uword k_rho = arma::sub2ind(sz, i, mix::RHO);
         c.f_central[i] = 0.5*(fl.flux(k_rho) + fr.flux(k_rho));
         c.f_total[i]   = flux(k_rho);
-        c.f_diff[i]    = grid.roe_characteristic_flux
+        // Rusanov's dissipation is known in closed form; the Roe and Godunov
+        // fluxes are only defined as a whole, so their dissipative part is
+        // whatever they add to the central average.
+        c.f_diff[i]    = (grid.roe_characteristic_flux || grid.swmf_godunov_flux)
             ? c.f_total[i] - c.f_central[i]
             : -0.5*c.a_face[i]*(fr.conserved(k_rho) - fl.conserved(k_rho));
         c.r_rho[i]         = W(r,       MIX_LOG_RHO);
@@ -708,7 +845,11 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
     Work& flux_iph = scratch.flux_iph;
     flux_imh.set_size(grid.n_mixture_state);
     flux_iph.set_size(grid.n_mixture_state);
-    if (grid.roe_characteristic_flux) {
+    if (grid.swmf_godunov_flux) {
+        // RELEASE path. The Roe and Rusanov branches below are reference solvers.
+        build_swmf_godunov_flux(grid, fl_imh, fr_imh, a_imh, flux_imh);
+        build_swmf_godunov_flux(grid, fl_iph, fr_iph, a_iph, flux_iph);
+    } else if (grid.roe_characteristic_flux) {
         build_roe_flux(grid, fl_imh, fr_imh, a_imh, flux_imh);
         build_roe_flux(grid, fl_iph, fr_iph, a_iph, flux_iph);
     } else {
@@ -745,6 +886,23 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
 // The release has no volumetric energy source, so the acoustic CFL condition is
 // the only timestep constraint: the implicit conduction stage is unconditionally
 // stable and imposes none.
+//
+// The acoustic index used here is the one the NUMERICAL FLUX IN FORCE actually
+// propagates, not unconditionally the equilibrium one:
+//
+//   * the release SWMF Godunov flux solves the local Riemann problem at the
+//     frozen-composition index gamma = 5/3 (the ionization energy rides in the
+//     passive offset E0), so its acoustic waves travel at sqrt(5/3 p/rho);
+//   * the Roe and Rusanov reference fluxes are built from the equilibrium
+//     linearization and propagate the Saha speed sqrt(Gamma1 p/rho).
+//
+// In this column Gamma1 has median ~1.09, so the two differ by ~1.24x. Sizing
+// the release step from Gamma1 would run the Godunov flux at an effective CFL
+// about 1.24x the requested one — a hidden margin, not a validated setting — so
+// the frozen speed is used whenever that flux is in force and the requested
+// CHROMO_CFL is then the CFL of the flux actually running. std::max, rather than
+// a bare branch, keeps the bound conservative if the Gamma1 table ever returns a
+// value above the monatomic one.
 Vec mixture_timestep(const Grid& grid, const Vec& state,
                      const MixtureField& decoded) {
     ProfileScope timer(ProfileRegion::Cfl);
@@ -755,8 +913,10 @@ Vec mixture_timestep(const Grid& grid, const Vec& state,
         const MixtureThermo& th = decoded.cells[i];
         const double momentum =
             static_cast<double>(state(arma::sub2ind(sz, i, mix::MOM)));
+        const double gamma_signal = grid.swmf_godunov_flux
+            ? std::max(th.gamma1, kGodunovGamma) : th.gamma1;
         const double speed = std::abs(momentum/th.rho)
-                           + std::sqrt(th.gamma1*th.p/th.rho);
+                           + std::sqrt(gamma_signal*th.p/th.rho);
         dt_i(i) = static_cast<float>(grid.CFL*grid.ds_i(i)/speed);
     }
     profile_note_timestep_limiter(TimestepLimiter::Acoustic);

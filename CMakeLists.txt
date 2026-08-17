@@ -29,6 +29,7 @@ add_library(chromosphere STATIC
     src/eos.cpp
     src/grid.cpp
     src/single_fluid/mixture.cpp
+src/single_fluid/exact_rs.cpp
     src/single_fluid/integrator.cpp
     src/two_fluid/state.cpp
     src/two_fluid/flux.cpp

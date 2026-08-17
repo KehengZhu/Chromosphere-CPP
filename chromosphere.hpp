@@ -233,6 +233,32 @@ struct MixtureFaceArrays {
     void resize(arma::uword ns);
 };
 
+/// Running tally of what the release `swmf_godunov` flux did, so a fallback
+/// is diagnosable instead of silent. Accumulated over the whole run and reported
+/// once at the end by the driver; also readable from a test. Counting is plain
+/// (non-atomic) because the numerical-flux loop of mixture_rhs_explicit is serial.
+struct GodunovFluxStats {
+    std::uint64_t faces = 0;              ///< Faces the Godunov flux was asked for.
+    std::uint64_t exact = 0;              ///< Faces the exact solve supplied.
+    std::uint64_t fallback_bad_input = 0; ///< Fell back: a side state was not admissible.
+    std::uint64_t fallback_vacuum = 0;    ///< Fell back: the vacuum guard tripped.
+    std::uint64_t fallback_negative_p = 0;///< Fell back: a Newton step gave p* <= 0.
+    std::uint64_t fallback_no_converge = 0;///< Fell back: the 10-iteration budget ran out.
+    std::uint64_t fallback_bad_sample = 0;///< Fell back: the x/t=0 sample was not admissible.
+    /// Largest number of Newton iterations any single face needed [-].
+    std::uint64_t max_iterations = 0;
+    /// Sum of Newton iterations over all exact solves, for a mean-cost estimate [-].
+    std::uint64_t total_iterations = 0;
+
+    /// Total number of faces that fell back to Rusanov.
+    std::uint64_t fallbacks() const {
+        return fallback_bad_input + fallback_vacuum + fallback_negative_p
+             + fallback_no_converge + fallback_bad_sample;
+    }
+    /// Reset every counter to zero.
+    void clear() { *this = GodunovFluxStats(); }
+};
+
 /// Reusable storage for the release MUSCL predictor/reconstruction. The numeric
 /// arrays are deliberately untyped scratch; thermodynamic validity remains in
 /// the state-bound MixtureField objects.
@@ -311,8 +337,12 @@ struct MixtureFaceFluxCapture {
     ///@}
 
     /** @name Numerical mass flux and its split [kg m^-2 s^-1]
-     *  `a_face` is the acoustic spectral radius max(|V_L|+c_L, |V_R|+c_R),
-     *  retained as a diagnostic and as the fallback wave speed in Roe-local mode.
+     *  `a_face` is the EQUILIBRIUM acoustic spectral radius
+     *  max(|V_L|+c_L, |V_R|+c_R) with c = sqrt(Gamma1 p/rho). It is the Rusanov
+     *  coefficient when Rusanov is selected and the per-face fallback coefficient
+     *  of both other solvers; under the release Godunov flux and under Roe it is
+     *  otherwise diagnostic only. It is NOT the frozen signal speed the release
+     *  Riemann solve and the CFL use.
      *  The total flux is decomposed into its central and dissipative parts. */
     ///@{
     std::vector<double> a_face;     ///< spectral radius        [m s^-1]
@@ -606,15 +636,41 @@ struct Grid {
     bool  mc3_limiter = false;
     float limiter_beta = 2.0f;
 
-    /// RELEASE numerical flux. True (the model_column release setting) computes the
-    /// corrector dissipation from the 3x3 mixture Roe characteristic decomposition
-    /// of U = (rho, rho u, E); false is the face-local Rusanov/LLF reference solver,
-    /// which is also the automatic per-face fallback whenever a Roe average is not
-    /// admissible. Rusanov is kept for regression and controlled comparison only —
-    /// its acoustic-scale dissipation -1/2 a Delta U is far too large for this
+    /// REFERENCE numerical flux (comparison only, not the release default): the
+    /// corrector dissipation computed from the 3x3 mixture Roe characteristic
+    /// decomposition of U = (rho, rho u, E), linearized about the EQUILIBRIUM Saha
+    /// system, so its acoustic eigenvalues carry the equilibrium index Gamma1. It is
+    /// a general-EOS Roe-type linearization built from the tabulated EOS
+    /// derivatives, not a Roe average constructed to satisfy the exact jump
+    /// condition, so the classical Roe properties are not claimed for it. False
+    /// leaves the face-local Rusanov/LLF solver, which is also the automatic
+    /// per-face fallback whenever a Roe average is not admissible; Rusanov's
+    /// acoustic-scale dissipation -1/2 a Delta U is far too large for this
     /// very-low-Mach evaporation problem and leaves a persistent TR velocity ripple.
-    /// model_column_ic sets it; the struct default keeps the legacy solver untouched.
+    /// Selected by ISO_RIEMANN=roe-local; mutually exclusive with
+    /// swmf_godunov_flux.
     bool roe_characteristic_flux = false;
+
+    /// RELEASE numerical flux. True (the model_column release setting) is the
+    /// SWMF-style Godunov flux built from the exact ideal-gas Riemann solver of
+    /// `single_fluid/exact_rs.hpp`, with the non-ideal EOS content carried as the
+    /// passive specific energy offset of SWMF `util/CRASH/src/test_godunov.f90`.
+    /// The Riemann problem is solved at the FROZEN-COMPOSITION index gamma = 5/3:
+    /// the equilibrium Saha internal energy splits as e_int = p/(5/3-1) + e_ion, so
+    /// the translational gas is monatomic and the ionization reservoir rides in the
+    /// offset, held fixed across the local wave interaction. It selects the flux
+    /// INSTEAD of the Roe linearization, so it takes precedence over
+    /// roe_characteristic_flux; model_column sets exactly one of the two, and every
+    /// other stage of the timestep (reconstruction, Hancock predictor, source,
+    /// boundaries, EOS, conduction) is independent of the choice, which makes the
+    /// face Riemann solver the only variable it changes. Every face whose exact
+    /// solve fails or yields an inadmissible sample falls back to the same
+    /// face-local Rusanov flux the Roe path uses, and is counted in godunov_stats.
+    /// It also sets the timestep: mixture_timestep sizes the step from the frozen
+    /// signal speed sqrt(5/3 p/rho) whenever this flag is true. model_column_ic
+    /// sets it on the Gamma/Saha path; the struct default keeps the two-fluid
+    /// research scenarios on Rusanov.
+    bool swmf_godunov_flux = false;
 
     /// RELEASE thermal reconstruction variable. True (the model_column release
     /// setting) limits
@@ -939,6 +995,10 @@ struct Grid {
     /// The driver (chromo_main, CHROMO_FACE_FLUX_DIAG) sets it per step.
     bool capture_face_flux = false;
     mutable MixtureFaceFluxCapture face_flux_capture;  ///< destination of that capture
+
+    /// Diagnostic-only tally of the release swmf_godunov flux, accumulated over
+    /// the run. Untouched, and left at zero, when that flux is not selected.
+    mutable GodunovFluxStats godunov_stats;
 
     /// Diagnostic-only: when true, every mixture_apply_conduction solve copies
     /// its FINAL CONVERGED outer-face conduction quantities into

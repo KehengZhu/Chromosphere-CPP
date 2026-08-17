@@ -7,7 +7,9 @@
 # the evidence that lnP is a reconstruction improvement rather than a
 # Roe-specific patch; see docs/pressure_reconstruction_recap.md.
 #
-# The release now defaults to Roe + (ln rho,V,ln p), so ISO_RIEMANN=rusanov and
+# ARCHIVED. The release then defaulted to Roe + (ln rho,V,ln p); it now defaults to
+# the SWMF exact-Riemann Godunov flux, with Roe as a reference override.
+# ISO_RIEMANN=rusanov and
 # ISO_RECONSTRUCTION below are reference overrides, not production settings.
 # For a release check use scripts/release_validation.sh instead.
 #

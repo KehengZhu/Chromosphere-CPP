@@ -44,7 +44,7 @@ Which solver runs is decided by data, not by a flag: **a loaded `Gamma1` table s
 
 ## The release configuration in one paragraph
 
-`model_column` is a field-aligned chromosphere-to-corona column on a single straight field line, initialized from the Model C7 atmosphere with the density re-integrated hydrostatically through the Saha closure. It runs the single-fluid equilibrium-mixture solver with Gamma/Saha thermodynamics (ionization energy included), MUSCL reconstruction of `(ln rho, u, ln p)` with the MC3/Koren limiter, a MUSCL-Hancock predictor, the mixture Roe characteristic flux, and implicit physical conduction driven by a 22,000 K external conductive reservoir at the physical outer face — on a coarse-equivalent `N = 500` / R4 mesh (661 actual cells) at `CFL = 0.50`. No environment variable is needed to select any of it; the scenario does. See @ref numerics.
+`model_column` is a field-aligned chromosphere-to-corona column on a single straight field line, initialized from the Model C7 atmosphere with the density re-integrated hydrostatically through the Saha closure. It runs the single-fluid equilibrium-mixture solver with Gamma/Saha thermodynamics (ionization energy included), MUSCL reconstruction of `(ln rho, u, ln p)` with the MC3/Koren limiter, a MUSCL-Hancock predictor, the SWMF-style exact-Riemann Godunov flux at frozen composition, and implicit physical conduction driven by a 22,000 K external conductive reservoir at the physical outer face — on a coarse-equivalent `N = 500` / R4 mesh (661 actual cells) at `CFL = 0.50`. No environment variable is needed to select any of it; the scenario does. See @ref numerics.
 
 ## Primary references
 

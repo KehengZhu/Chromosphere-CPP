@@ -1,6 +1,8 @@
 # `model_column` release numerics
 
-> **Partly superseded (see `docs/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
+> **Partly superseded — the numerical flux row is now historical.** The release face Riemann solver is the SWMF-style exact-Riemann Godunov flux at frozen composition (`docs/swmf_godunov_flux_experiment.md` section 8); the mixture Roe characteristic flux described below is now the reference/comparison solver, reachable with `ISO_RIEMANN=roe-local`. Everything this document says about the Roe flux itself remains accurate — it is no longer the *release* flux. The reconstruction, conduction, mesh, boundary and limitation content is unaffected.
+>
+> **Also partly superseded (see `docs/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
 
 
 **Status: released.** This document describes the numerical method a normal `model_column`
@@ -24,11 +26,11 @@ scenario supplies it and the `ISO_*` model/grid defaults itself.)
 | --- | --- |
 | Model | 1D field-aligned hydrodynamics on a straight field line, gravity on, `B ≡ 1` |
 | Solver / state | single-fluid equilibrium mixture, `U = (rho, rho u, E)` (`src/single_fluid/`); carrier quantities derived, never stored |
-| Update path | `U^n -> MUSCL/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}` (no projection stage) |
+| Update path | `U^n -> MUSCL-Hancock/Godunov hydro -> U* -> implicit physical conduction -> U^{n+1}` (no projection stage) |
 | Thermodynamics | Gamma/Saha equilibrium closure with ionization energy, production `Gamma1` table |
 | Reconstruction | MUSCL on `(ln ρ, V, ln p)`, MC3/Koren limiter, β = 2 |
 | Face temperature | exact inversion of the same Saha closure, `T(ρ, p)` |
-| Numerical flux | mixture **Roe characteristic** flux (3×3 local linearization) |
+| Numerical flux | SWMF-style **exact-Riemann Godunov** flux at frozen composition (`gamma = 5/3`, ionization energy in the passive offset `E0`), face-local Rusanov fallback. *(This row was `mixture Roe characteristic flux` when this document was written.)* |
 | Well balancing | equilibrium-reference (δ-form), plus inner discrete-HSE ghosts (p and ρ) |
 | Conduction | physical only, **structurally**: the operator has no TRAC factor and no artificial mesh-scaled diffusivity term at all |
 | Upper boundary | 22,000 K external conductive reservoir at the physical face |
@@ -44,7 +46,7 @@ false, which leaves the non-release two-fluid scenarios on Rusanov + `(ln ρ, V,
 The release solver lives in `src/single_fluid/` (`mixture.hpp`, `mixture.cpp`,
 `integrator.cpp`) and advances **three** conserved rows per cell. `x`, `rho_i = x·rho`,
 `rho_n = (1-x)·rho`, `n_e`, `n_HI` and `p_e` are derived EOS diagnostics recomputed wherever
-needed. `mixture_advance` contains exactly two stages — the explicit MUSCL/Roe hydro update
+needed. `mixture_advance` contains exactly two stages — the explicit MUSCL-Hancock/Godunov hydro update
 and the implicit physical conduction solve. There is no TRAC stage, no beam heating, no
 volumetric coronal heating, no radiative cooling and no artificial conduction anywhere in
 that path; those are two-fluid research physics, not release physics disabled by a flag.
@@ -75,11 +77,12 @@ small spurious per-step drift heating it used to thermalize.
 
 ## Reference (non-production) overrides
 
-Retained for regression and controlled numerical comparison only. Neither is used in
-production; both log a line naming the release default when set.
+Retained for regression and controlled numerical comparison only. None is used in
+production; each logs a line naming the release default when set.
 
 | Override | Effect | Why it is not the release |
 | --- | --- | --- |
+| `ISO_RIEMANN=roe-local` | mixture Roe characteristic flux (3×3 equilibrium linearization, acoustic eigenvalues carrying `Gamma1`) | it is the *equilibrium* acoustic closure; the release takes the frozen-composition limit instead (`docs/swmf_godunov_flux_experiment.md` §8.1). Selecting it also reverts the CFL to the equilibrium signal speed, so the comparison mode stays self-consistent |
 | `ISO_RIEMANN=rusanov` | local Lax–Friedrichs flux | its acoustic-scale dissipation `−½ a ΔU` with `a ~ c_s` is far too large where `|V| ≪ c_s`, leaving persistent cell-centred velocity/momentum ripple in the upper chromosphere/TR |
 | `ISO_RECONSTRUCTION=lnrho-v-lnt` | limits `(ln ρ, V, ln T)` | density and temperature are limited independently and only then pushed through the nonlinear EOS, manufacturing face-pressure mismatch across the Saha transition |
 
@@ -100,11 +103,13 @@ Invalid values, and the Gamma-only choices requested off the Gamma/Saha path, th
   temperature as Newton hint only — no table, no cache, no tolerance change), ~6.2 → ~3.1 EOS
   evaluations per face state. `docs/pressure_inversion_performance_recap.md`.
 - **Promotion.** Running the new defaults with no environment variables reproduces an
-  explicit `ISO_RIEMANN=roe-local ISO_RECONSTRUCTION=lnrho-v-lnp` run bitwise.
+  explicit `ISO_RIEMANN=roe-local ISO_RECONSTRUCTION=lnrho-v-lnp` run bitwise (the
+  equivalence leg now pins `ISO_RIEMANN=swmf-godunov` instead).
   Release smoke (N500, 100 s, defaults only): `eps_p max` 0.0003 %, `Q_V` 1.35e-3,
   `Q_M` 7.3e-4, `Q_eff` 7.3e-4, `F_eff` 1.09e-9 kg m⁻² s⁻¹, `T_top` 21838 K,
   `p_top` 0.010288 Pa, `n(V<0) = 0`, mass drift −3.0e-4.
-  Run `outputs/model_column/release_roe_lnp_N500_100s*`.
+  Run `outputs/model_column/release_roe_lnp_N500_100s*` (the release smoke artefact is
+  now `release_godunov_lnp_N500_100s*`).
 - **Three-variable architecture.** After the state refactor the same smoke test gives
   `eps_p max` 0.0002 %, `Q_V` 1.32e-3, `Q_M` 7.0e-4, `Q_eff` 6.88e-4,
   `F_eff` 1.11e-9 kg m⁻² s⁻¹, `T_top` 21838.4 K, `p_top` 0.010288 Pa, `n(V<0) = 0`,

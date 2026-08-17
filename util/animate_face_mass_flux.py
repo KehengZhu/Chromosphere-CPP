@@ -10,8 +10,10 @@ Quantities plotted, with face index i = the UPPER face i+1/2 of cell i:
 
     rhoV_cell[i] = rho_cell[i] * v_cell[i]     cell-centred mass flux    [cell_km]
     f_total[i]                                 production numerical face mass flux
-                                               (Roe, or Rusanov) -- the thing the
-                                               continuity row differences [face_km]
+                                               (the release Godunov flux, or the
+                                               Roe / Rusanov reference solver) -- the
+                                               thing the continuity row differences
+                                               [face_km]
     f_ref[i]     = f_total[i] at t = 0         t = 0 baseline flux
     f_eff[i]     = f_total[i] - f_ref[i]       CHANGE in the transport since t = 0
 

@@ -8,12 +8,13 @@ This page describes the discretization. For the equations being discretized see 
 | --- | --- |
 | Model | 1D field-aligned hydrodynamics on a straight field line, gravity on, `B = 1` |
 | State | single-fluid equilibrium mixture, `U = (rho, rho u, E)`; carrier quantities derived, never stored |
-| Update path | `U^n -> MUSCL-Hancock/Roe hydro -> U* -> implicit physical conduction -> U^{n+1}` |
+| Update path | `U^n -> MUSCL-Hancock/Godunov hydro -> U* -> implicit physical conduction -> U^{n+1}` |
 | Splitting | first-order Lie (not Strang) |
 | Thermodynamics | Gamma/Saha equilibrium closure with ionization energy, production `Gamma1` table |
 | Reconstruction | MUSCL on `(ln rho, u, ln p)`, MC3/Koren limiter, `beta = 2` |
 | Face temperature | exact inversion of the same Saha closure, `T(rho, p)` |
-| Numerical flux | mixture Roe characteristic flux (3x3 local linearization), face-local Rusanov fallback |
+| Numerical flux | SWMF-style **exact-Riemann Godunov** flux at frozen composition (`gamma = 5/3`), non-ideal energy carried in the passive offset `E0`, face-local Rusanov fallback |
+| Riemann signal speed | frozen-composition `sqrt(5/3 p/rho)`; the CFL uses the same speed |
 | Conduction | physical only, structurally: the operator has no TRAC factor and no artificial diffusivity term at all |
 | Upper boundary | 22,000 K external conductive reservoir at the physical face |
 | Mesh | coarse-equivalent `N = 500` with R4 outer refinement, giving 661 actual cells |
@@ -43,9 +44,30 @@ The reconstructed variables are `(ln rho, u, ln p)`.
 
 A **MUSCL-Hancock** half step advances the reconstructed states to the time-centred level before the flux. Crucially, the predictor applies the **same momentum source** as the corrector — the flux-tube pressure term plus gravity. Applying the source in the corrector only is what left the dominant discrete hydrostatic inconsistency in earlier versions of this scheme.
 
-Both sides of every face are then built through the authoritative equilibrium face builder, so a face state is on the Saha manifold by construction rather than by interpolation. The numerical flux is the **mixture Roe characteristic flux**: a 3x3 local linearization of `U = (rho, rho u, E)` whose energy characteristic uses the general-EOS response `(dp/de_int)_rho`, not `Gamma1`. Whenever a Roe average is not admissible the scheme falls back to local Rusanov **on that face only**.
+Both sides of every face are then built through the authoritative equilibrium face builder, so a face state is on the Saha manifold by construction rather than by interpolation.
 
-Rusanov (`ISO_RIEMANN=rusanov`) is kept for regression and controlled comparison and must not be used in production: its acoustic-scale dissipation is far too large at the very low Mach numbers of this problem and leaves a persistent transition-region velocity ripple.
+### The release flux: SWMF-style exact-Riemann Godunov at frozen composition
+
+The release numerical flux follows SWMF `util/CRASH/src/test_godunov.f90::get_godunov_flux`, together with the exact Riemann solver `share/Library/src/ModExactRS.f90` (Toro's exact two-rarefaction/two-shock pressure iteration), ported line for line to `src/single_fluid/exact_rs.hpp`. Per face:
+
+1. the **ideal-gas** Riemann problem is solved exactly at a fixed `gamma = 5/3`;
+2. every non-ideal part of the internal energy — here the Saha ionization energy, plus this model's gravitational potential — is carried in a passive **specific energy offset** `E0 = (E - 1/2 rho u^2 - p/(gamma - 1))/rho`, taken from whichever side the contact says is upwind and re-added when the star state's total energy is assembled;
+3. the self-similar solution is sampled at `x/t = 0` and the flux assembled from the sampled state;
+4. any face whose exact solve fails (vacuum guard, non-positive star pressure, iteration budget) or whose sample is inadmissible falls back to the face-local Rusanov flux, and is counted in `chromosphere::GodunovFluxStats`. The driver prints the tally as `godunov.*` lines at the end of every release run and warns on stderr if it is nonzero.
+
+**Why a fixed `gamma = 5/3` is the right index here, and not an approximation being tolerated.** The equilibrium Saha internal energy of this mixture splits exactly as `e_int = p/(5/3 - 1) + e_ion`: a monatomic translational part plus an ionization reservoir. Solving the face Riemann problem at `gamma = 5/3` with `e_ion` riding inertly in `E0` is therefore the **frozen-composition** limit — the ionization state is held fixed while the waves cross the face. That is the appropriate limit when the ionization/recombination relaxation time is long compared with the dynamical time of the disturbance, which is the chromospheric case for hydrogen: the relaxation time is dominated by slow leakage out of the ground state and runs to `10^3`–`10^5 s` in the mid-chromosphere against a chromospheric hydrodynamic timescale of order a minute (Carlsson & Stein 2002; Leenaarts et al. 2007; Leenaarts 2020).
+
+The competing closure — Saha equilibrium re-established *instantaneously within the wave* — instead gives the equilibrium acoustic index `Gamma1`, which the production CRASH table puts at a median `1.090` in this column. **Neither index is universally "wrong"**: `Gamma1` is the equilibrium acoustic response and `5/3` the frozen one, and the release chooses the frozen one on the physical argument above and on the SWMF methodology. The consequence is that the release flux propagates waves about `1.24x` faster than the equilibrium system does, which is why the timestep is sized from the frozen speed as well (see **Timestep control** below).
+
+Measured behaviour on the release model: zero fallbacks over `2.8 x 10^7` face solves, and the star-pressure Newton solve converging in a single iteration at every face. Evidence: `docs/swmf_godunov_flux_experiment.md`.
+
+### Reference face solvers
+
+Both are retained for regression and controlled numerical comparison. Neither is used in production, and both print an override line naming the release default when selected.
+
+**Roe (`ISO_RIEMANN=roe-local`)** — the previous release flux, and the reference solver against which the Godunov cutover was quantified. It is a 3x3 local characteristic linearization of `U = (rho, rho u, E)` about the **equilibrium** system: its energy characteristic uses the general-EOS response `(dp/de_int)_rho` and its acoustic eigenvalues carry `c^2 = Gamma1 p/rho`. It is a general-EOS Roe-*type* linearization built from tabulated EOS derivatives, **not** a Roe average constructed to satisfy the exact jump condition, so the classical Roe properties (Property U, exact discrete shock capture) are not claimed for it. Whenever the average is not admissible it falls back to local Rusanov on that face only. Selecting it also reverts the timestep to the equilibrium signal speed, so the reference mode stays self-consistent.
+
+**Rusanov (`ISO_RIEMANN=rusanov`)** — local Lax-Friedrichs, and also the automatic per-face fallback of both other solvers. Not for production: its acoustic-scale dissipation is far too large at the very low Mach numbers of this problem and leaves a persistent transition-region velocity ripple.
 
 ## Reference-free hydrostatic balance
 
@@ -59,7 +81,7 @@ Be precise about what this claims. The release is **not** a well-balanced scheme
 
 The conduction stage is a nonlinear backward-Euler solve on the mixture energy row alone. Newton iterates on the cell temperatures with a tridiagonal Jacobian; the effective heat capacity, the conductivity inputs and the residual energy all come from **one fused Saha evaluation per cell per pass** rather than three independent solves.
 
-Mass and momentum are untouched, and the accepted energy is the flux-updated internal energy plus the unchanged kinetic and gravitational parts, so the stage is conservative by construction. Because the solve is unconditionally stable it imposes no timestep constraint — the CFL condition comes from the acoustic signal speed `|u| + c_s` alone, which is the only constraint the release has, since it carries no volumetric source term.
+Mass and momentum are untouched, and the accepted energy is the flux-updated internal energy plus the unchanged kinetic and gravitational parts, so the stage is conservative by construction. Because the solve is unconditionally stable it imposes no timestep constraint — the acoustic CFL condition is the only constraint the release has, since it carries no volumetric source term.
 
 Face conductivities on a refined mesh use the width-weighted series-resistance form `chromosphere::face_conductivity_series` rather than an arithmetic average, because the flux crosses two half-cells in series. On a uniform mesh callers keep the legacy arithmetic average so results are unchanged.
 
@@ -73,7 +95,16 @@ Every decode inverts the caloric closure for `T`, so the inversion is the hot pa
 
 ## Timestep control
 
-`chromosphere::mixture_timestep` returns the CFL-limited step from `|u| + c_s`. `CHROMO_CFL=0.50` is the validated production value for the reduced release configuration; the conservative hard-coded default remains 0.25 and stays the comparison reference. Rerun the sweep before trusting 0.50 on different hardware or a materially different model shape. Evidence: `docs/coarse_model_column_physical_conduction_recap.md`.
+`chromosphere::mixture_timestep` returns the CFL-limited step from `|u| + c`, where **`c` is the signal speed of the numerical flux in force**, not unconditionally the equilibrium one:
+
+- release Godunov flux — the frozen-composition speed `sqrt(5/3 p/rho)`;
+- Roe and Rusanov reference fluxes — the equilibrium Saha speed `sqrt(Gamma1 p/rho)`.
+
+This is what keeps `CHROMO_CFL` meaning the CFL of the scheme actually running. Implemented as `max(Gamma1, 5/3)` on the release path, so the bound stays conservative if the table ever returns an index above the monatomic value.
+
+**Measured effect on the canonical release configuration: none.** The CFL-limiting cell of the `N = 500`/R4 column is the topmost cell (2153 km, ~22 kK, hydrogen fully ionized), where the tabulated `Gamma1` is already `5/3`; the 1.24x speed gap lives in the partial-ionization interior, which is nowhere near the limit. The rule therefore leaves `dt`, the step count (17781 over 100 s) and the end time unchanged on this model, and the residual solution difference is at the established float32 round-off sensitivity of this solver. **This also corrects an earlier claim** that running the Godunov flux at `CHROMO_CFL=0.50` gave an effective CFL of about 0.62: measured against the frozen wave speeds, the equilibrium-sized step gave an effective CFL of exactly 0.500. The rule matters as a guarantee for other mesh or model shapes, where a partial-ionization cell could become limiting and the step would then be up to 1.24x shorter than the equilibrium rule would give.
+
+`CHROMO_CFL=0.50` is the validated production value for the reduced release configuration; the conservative hard-coded default remains 0.25 and stays the comparison reference. Rerun the sweep before trusting 0.50 on different hardware or a materially different model shape. The original sweep was run with the Roe flux and the equilibrium signal speed, and it carries over to the release flux only because the step is unchanged on this configuration, as measured above. Evidence: `docs/coarse_model_column_physical_conduction_recap.md`, `docs/swmf_godunov_flux_experiment.md`.
 
 Two run-control variables matter for long runs. `CHROMO_T_END` sets an absolute stop time in physical seconds and disables the legacy `time_mult`-derived step cap, so a long run cannot be silently truncated. `CHROMO_FRAME_DT` sets the snapshot cadence in physical seconds rather than steps, and is required whenever output is enabled on a long run — without it the wall time is dominated by ASCII formatting. Every run prints `termination=end_time|step_cap|other`; always check that a long run ended with `end_time`. See @ref configuration.
 

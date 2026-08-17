@@ -17,6 +17,16 @@ display range; boundary spikes outside that range remain in the data but clip.
 Gamma-table runs automatically use the newer <input.txt>.gamma_diag sidecar so
 temperature, pressure, composition, and conductivity are decoded by the runtime
 EOS rather than by the legacy fixed-gamma conserved-energy formula.
+
+MASS FLUX PANEL. When an <input.txt>.faceflux sidecar is present it is used by
+DEFAULT, and the panel shows the CONSERVATIVE NUMERICAL FACE MASS FLUX f_total —
+the quantity the continuity row is actually differenced from — plotted at the
+face heights. The cell-centred product rho*V is a reconstruction of the flux, not
+the flux: it carries the full cell-centred ripple and is systematically
+misleading near a boundary, where the ghost closure sets the face flux but not
+the cell-centred product. Set ANIM_MASS_FLUX=cell to force the old rho*V panel,
+or ANIM_MASS_FLUX=face to require the sidecar (error if absent). Without a
+sidecar the script falls back to rho*V and says so in the panel title.
 """
 import os
 import sys
@@ -122,8 +132,52 @@ def gamma_primitives(diag, _phi):
     return diag[:, 1], diag[:, 2], diag[:, 0], diag[:, 6], diag[:, 4], diag[:, 5]
 
 
-def _render_frame(k, tmpdir, h, V, T, rho, p, q, mflux, t, nF, ylims, title,
-                  xsplit, q_boundary_clipped):
+def load_face_flux(path):
+    """Read a .faceflux sidecar: -> (face_km, [(t, f_total), ...]).
+
+    Column 1 is the upper-face height in km and column 16 is `f_total`, the
+    production numerical mass flux at that face (see the io_formats page). Both
+    are fixed by the sidecar's own `# columns=` header, which is checked here so
+    a format change fails loudly instead of plotting the wrong column.
+    """
+    face_km = None
+    times, fluxes = [], []
+    cur_t, rows = None, []
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith("# columns="):
+                cols = line.split("=", 1)[1].split()
+                if cols[1] != "face_km" or cols[16] != "f_total":
+                    raise ValueError(
+                        f"{path}: unexpected column layout; expected face_km at 1 "
+                        f"and f_total at 16, got {cols[1]!r} and {cols[16]!r}")
+                continue
+            if line.startswith("# t ="):
+                if cur_t is not None and rows:
+                    a = np.asarray(rows, dtype=float)
+                    if face_km is None:
+                        face_km = a[:, 1]
+                    times.append(cur_t)
+                    fluxes.append(a[:, 16])
+                cur_t = float(line.split("=")[1].split()[0])
+                rows = []
+                continue
+            if line.startswith("#") or not line.strip():
+                continue
+            rows.append(line.split())
+    if cur_t is not None and rows:
+        a = np.asarray(rows, dtype=float)
+        if face_km is None:
+            face_km = a[:, 1]
+        times.append(cur_t)
+        fluxes.append(a[:, 16])
+    if not times:
+        raise ValueError(f"{path}: no capture frames found")
+    return face_km, np.asarray(times), fluxes
+
+
+def _render_frame(k, tmpdir, h, V, T, rho, p, q, mflux_h, mflux, mflux_label, t,
+                  nF, ylims, title, xsplit, q_boundary_clipped):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -162,10 +216,10 @@ def _render_frame(k, tmpdir, h, V, T, rho, p, q, mflux, t, nF, ylims, title,
     ax[1, 1].set_title("Pressure")
     ax[1, 1].set_ylim(*ylims["p"])
 
-    ax[1, 2].plot(h, mflux, lw=1.4, color="C5")
+    ax[1, 2].plot(mflux_h, mflux, lw=1.4, color="C5")
     ax[1, 2].axhline(0, c="k", lw=0.5)
-    ax[1, 2].set_ylabel(r"$\rho V$ [kg/m²/s]")
-    ax[1, 2].set_title("Mass flux  (>0 up = evaporation, <0 down = condensation)")
+    ax[1, 2].set_ylabel(mflux_label[0])
+    ax[1, 2].set_title(mflux_label[1])
     # ax[1, 2].set_ylim(*ylims["mflux"])
 
     panels = [ax[0, 0], ax[0, 1], ax[0, 2], ax[1, 0], ax[1, 1], ax[1, 2]]
@@ -225,8 +279,45 @@ def main():
     prims = [decoder(fr[1], phi) for fr in frames]  # (V, T, rho, p, n_e, n_HI)
     # One cell-centred physical-flux diagnostic for both closure modes.
     qflux = [physical_heat_flux(h, pr[1], pr[4], pr[5]) for pr in prims]
-    # Field-aligned mass flux ρV [kg/m²/s] per frame, >0 up the field (evaporation).
-    mflux = [pr[2] * pr[0] for pr in prims]
+    # ------------------------------------------------------------------
+    # Field-aligned mass flux [kg/m²/s], >0 up the field (evaporation).
+    #
+    # DEFAULT: the conservative numerical FACE flux f_total from the .faceflux
+    # sidecar — the quantity the continuity row is differenced from. The
+    # cell-centred product rho*V is only a reconstruction of it; it carries the
+    # full cell-centred ripple and is systematically misleading in the boundary
+    # cells, where the ghost closure fixes the face flux rather than the
+    # cell-centred product. Fall back to rho*V when no sidecar exists.
+    # ------------------------------------------------------------------
+    mode = os.environ.get("ANIM_MASS_FLUX", "face").lower()
+    if mode not in ("face", "cell"):
+        raise ValueError("ANIM_MASS_FLUX must be 'face' or 'cell'")
+    face_path = in_path + ".faceflux"
+    use_face = mode == "face" and os.path.exists(face_path)
+    if mode == "face" and not use_face:
+        print(f"note: no {face_path}; falling back to the cell-centred rho*V panel. "
+              f"Re-run with CHROMO_FACE_FLUX_DIAG=1 for the conservative face flux.")
+    if use_face:
+        face_km, face_t, face_f = load_face_flux(face_path)
+        # Nearest capture in time for each rendered snapshot. The sidecar stride
+        # is in steps and the snapshot cadence in seconds, so the two grids do
+        # not coincide; report the worst mismatch rather than hiding it.
+        pick = [int(np.abs(face_t - fr[0]).argmin()) for fr in frames]
+        worst = max(abs(face_t[j] - fr[0]) for j, fr in zip(pick, frames))
+        print(f"face-flux sidecar: {face_t.size} captures, "
+              f"t in [{face_t[0]:.1f}, {face_t[-1]:.1f}] s; "
+              f"worst snapshot/capture time mismatch {worst:.2f} s")
+        mflux_h = face_km
+        mflux = [face_f[j] for j in pick]
+        mflux_label = (r"$f_{\rm total}$ [kg/m²/s]",
+                       "Conservative numerical FACE mass flux  "
+                       "(>0 up = evaporation, <0 down = condensation)")
+    else:
+        mflux_h = h
+        mflux = [pr[2] * pr[0] for pr in prims]
+        mflux_label = (r"$\rho V$ [kg/m²/s]",
+                       "Cell-centred mass flux rho*V (NOT the conservative face "
+                       "flux)  (>0 up, <0 down)")
 
     def lim(arrs, log=False, pad=0.05):
         a = np.concatenate(arrs)
@@ -284,7 +375,8 @@ def main():
     save_frames_parallel(
         _render_frame,
         [(k, h, prims[k][0], prims[k][1], prims[k][2], prims[k][3], qflux[k],
-          mflux[k], frames[k][0], nF, ylims, title, xsplit, q_boundary_clipped)
+          mflux_h, mflux[k], mflux_label, frames[k][0], nF, ylims, title,
+          xsplit, q_boundary_clipped)
          for k in range(nF)],
         out_path, fps,
     )

@@ -15,6 +15,7 @@
 //   - Uniform, motionless, gravity-free state is a fixed point of advance_Euler_state
 
 #include "../chromosphere.hpp"
+#include "../src/single_fluid/exact_rs.hpp"
 #include "../src/single_fluid/mixture.hpp"
 #include "../src/two_fluid/two_fluid.hpp"
 #include "../physics.hpp"
@@ -2197,11 +2198,11 @@ static void test_face_flux_capture_matches_production_continuity() {
     clear_decoupling_env();
 }
 
-// Release policy: a normal Gamma/Saha model_column run must select the Roe
-// characteristic flux and the (ln rho,V,ln p) primitive set with NO environment
-// override. The lnT / Rusanov reference configurations must remain reachable
-// explicitly, invalid choices must fail loudly, and the non-gamma path must be
-// untouched by the promotion.
+// Release policy: a normal Gamma/Saha model_column run must select the SWMF
+// exact-Riemann Godunov flux and the (ln rho,V,ln p) primitive set with NO
+// environment override. The Roe, Rusanov and lnT reference configurations must
+// remain reachable explicitly, invalid choices must fail loudly, and the
+// non-gamma path must be untouched by the promotion.
 static void test_model_column_release_numerics_defaults() {
     auto build = [](bool gamma_mode) {
         unsetenv("ISO_GAMMA");
@@ -2224,11 +2225,14 @@ static void test_model_column_release_numerics_defaults() {
     unsetenv("ISO_RIEMANN"); unsetenv("ISO_RECONSTRUCTION");
     {   // 1+2: release defaults, no environment variables set.
         const auto grid = build(true);
-        EXPECT_TRUE(grid->roe_characteristic_flux);
+        EXPECT_TRUE(grid->swmf_godunov_flux);
+        EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(grid->pressure_reconstruct);
     }
-    {   // 6: the non-gamma path keeps Rusanov + (ln rho,V,ln T).
+    {   // 6: the non-gamma path keeps Rusanov + (ln rho,V,ln T) — neither the Roe
+        // linearization nor the Godunov flux may leak onto the two-fluid path.
         const auto grid = build(false);
+        EXPECT_TRUE(!grid->swmf_godunov_flux);
         EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(!grid->pressure_reconstruct);
     }
@@ -2236,23 +2240,48 @@ static void test_model_column_release_numerics_defaults() {
         setenv("ISO_RIEMANN","rusanov",1);
         setenv("ISO_RECONSTRUCTION","lnrho-v-lnt",1);
         const auto grid = build(true);
+        EXPECT_TRUE(!grid->swmf_godunov_flux);
         EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(!grid->pressure_reconstruct);
     }
     {   // Explicitly requesting the release pair is a no-op.
+        setenv("ISO_RIEMANN","swmf-godunov",1);
+        setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
+        const auto grid = build(true);
+        EXPECT_TRUE(grid->swmf_godunov_flux);
+        EXPECT_TRUE(!grid->roe_characteristic_flux);
+        EXPECT_TRUE(grid->pressure_reconstruct);
+    }
+    {   // The Roe characteristic flux stays reachable as the reference solver, and
+        // is mutually exclusive with the release Godunov flux, so the face Riemann
+        // solver is the only variable it changes.
         setenv("ISO_RIEMANN","roe-local",1);
         setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
         const auto grid = build(true);
         EXPECT_TRUE(grid->roe_characteristic_flux);
+        EXPECT_TRUE(!grid->swmf_godunov_flux);
         EXPECT_TRUE(grid->pressure_reconstruct);
+    }
+    {   // ... and it never leaks into a run that did not ask for it.
+        unsetenv("ISO_RIEMANN");
+        const auto grid = build(true);
+        EXPECT_TRUE(!grid->roe_characteristic_flux);
+        EXPECT_TRUE(grid->swmf_godunov_flux);
+    }
+    {   // Both Gamma-path solvers need the equilibrium face builder.
+        setenv("ISO_RIEMANN","swmf-godunov",1);
+        EXPECT_TRUE(throws_any([&] { (void)build(false); }));
+        setenv("ISO_RIEMANN","roe-local",1);
+        EXPECT_TRUE(throws_any([&] { (void)build(false); }));
     }
     {   // 5: invalid choices, and Gamma-only choices off the Gamma path, throw.
         setenv("ISO_RIEMANN","hll",1);
         setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
         EXPECT_TRUE(throws_any([&] { (void)build(true); }));
-        setenv("ISO_RIEMANN","roe-local",1);
+        setenv("ISO_RIEMANN","swmf-godunov",1);
         setenv("ISO_RECONSTRUCTION","lnrho-v-lnrho",1);
         EXPECT_TRUE(throws_any([&] { (void)build(true); }));
+        unsetenv("ISO_RIEMANN");
         setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
         EXPECT_TRUE(throws_any([&] { (void)build(false); }));
     }
@@ -2269,8 +2298,11 @@ static void test_roe_local_face_flux_and_projection() {
 
     // Capture the same reconstructed state with each corrector flux. Roe-local
     // must actually differ from Rusanov on the stratified TR, while remaining a
-    // conservative finite-volume mass flux.
+    // conservative finite-volume mass flux. The release Godunov flux takes
+    // precedence over both, so it has to be off for this comparison to mean
+    // anything.
     grid.capture_face_flux = true;
+    grid.swmf_godunov_flux = false;
     grid.roe_characteristic_flux = false;
     mixture_rhs_explicit(grid, state, field, dt(0));
     const std::vector<double> f_rusanov = grid.face_flux_capture.f_total;
@@ -2314,6 +2346,375 @@ static void test_roe_local_face_flux_and_projection() {
     EXPECT_TRUE(decoded_after.cells.size() == ns);
     for (const MixtureThermo& th : decoded_after.cells)
         EXPECT_TRUE(th.rho > 0.0 && th.T > 0.0 && std::isfinite(th.T));
+
+    clear_decoupling_env();
+}
+
+// ---------------------------------------------------------------------------
+// EXPERIMENTAL swmf-godunov flux
+// ---------------------------------------------------------------------------
+
+// The ported SWMF exact Riemann solver, checked against Toro's five standard
+// tests (Riemann Solvers and Numerical Methods for Fluid Dynamics, 2nd ed.,
+// ch. 4) and against the closed-form answers of the degenerate cases the
+// chromosphere column actually spends its time in.
+static void test_swmf_exact_riemann_solver() {
+    using namespace chromosphere::swmf_rs;
+    const double g = 1.4;
+
+    // Toro's five tests. The published star values carry six significant digits
+    // for p*, so 1e-5 relative is a real check of the iteration; test 2 (the
+    // near-vacuum "123 problem") is quoted to three digits only.
+    struct Case { ExactRsState l, r; double p_star, u_star, p_tol, u_tol; };
+    const Case cases[5] = {
+        {{1.0, 0.0, 1.0},   {0.125, 0.0, 0.1},   0.30313,  0.92745,  1e-5, 1e-4},
+        {{1.0, -2.0, 0.4},  {1.0, 2.0, 0.4},     0.00189,  0.0,      3e-3, 1e-10},
+        {{1.0, 0.0, 1000.0},{1.0, 0.0, 0.01},  460.894,   19.5975,   1e-5, 2e-4},
+        {{1.0, 0.0, 0.01},  {1.0, 0.0, 100.0},  46.0950,  -6.19633,  1e-5, 2e-4},
+        {{5.99924, 19.5975, 460.894}, {5.99242, -6.19633, 46.0950},
+                                          1691.64,    8.68975,  1e-5, 2e-4},
+    };
+    for (const Case& c : cases) {
+        const ExactRsSolution s = exact_rs_pu_star(c.l, c.r, g, g);
+        EXPECT_TRUE(s.status == ExactRsStatus::Ok);
+        EXPECT_TRUE(s.iterations >= 1 && s.iterations <= kMaxIterations);
+        EXPECT_REL(s.p_star, c.p_star, c.p_tol);
+        EXPECT_NEAR(s.u_star, c.u_star, c.u_tol*std::max(1.0, std::abs(c.u_star)));
+        EXPECT_TRUE(s.wl <= s.wr);
+        // Sampling outside the fan must return the data states unchanged.
+        const ExactRsState far_l =
+            exact_rs_sample(s.wl - 1.0, s, c.l, c.r, g, g);
+        const ExactRsState far_r =
+            exact_rs_sample(s.wr + 1.0, s, c.l, c.r, g, g);
+        EXPECT_NEAR(far_l.rho, c.l.rho, 0.0);
+        EXPECT_NEAR(far_r.rho, c.r.rho, 0.0);
+    }
+
+    // x/t = 0 for Sod is the left star state; Toro tabulates rho*_L = 0.42632.
+    {
+        const ExactRsState l{1.0, 0.0, 1.0}, r{0.125, 0.0, 0.1};
+        const ExactRsSolution s = exact_rs_pu_star(l, r, g, g);
+        const ExactRsState f = exact_rs_sample(0.0, s, l, r, g, g);
+        EXPECT_REL(f.rho, 0.42632, 1e-4);
+        EXPECT_REL(f.u, s.u_star, 1e-12);
+        EXPECT_REL(f.p, s.p_star, 1e-12);
+    }
+
+    // Degenerate cases with exact answers, at chromospheric magnitudes.
+    const double gm = 5.0/3.0;
+    const double rho0 = 1.0e-8, p0 = 1.0e-2;
+    {   // A stationary contact carries no mass: this is the property the release
+        // solver is chosen for, and the exact solver must have it identically.
+        const ExactRsState l{rho0, 0.0, p0}, r{0.5*rho0, 0.0, p0};
+        const ExactRsSolution s = exact_rs_pu_star(l, r, gm, gm);
+        EXPECT_TRUE(s.status == ExactRsStatus::Ok);
+        const ExactRsState f = exact_rs_sample(0.0, s, l, r, gm, gm);
+        EXPECT_NEAR(f.rho*f.u, 0.0, 0.0);
+        EXPECT_REL(f.p, p0, 1e-14);
+    }
+    {   // A uniform state in uniform motion is reproduced exactly, for both signs
+        // of the velocity (the two branches of the upwind tie-break).
+        for (double u : {+1.0e3, -1.0e3, +1.0e-3}) {
+            const ExactRsState l{rho0, u, p0}, r{rho0, u, p0};
+            const ExactRsSolution s = exact_rs_pu_star(l, r, gm, gm);
+            EXPECT_TRUE(s.status == ExactRsStatus::Ok);
+            const ExactRsState f = exact_rs_sample(0.0, s, l, r, gm, gm);
+            EXPECT_REL(f.rho, rho0, 1e-14);
+            EXPECT_REL(f.u, u, 1e-12);
+            EXPECT_REL(f.p, p0, 1e-14);
+        }
+    }
+    {   // Guards: the vacuum test and inadmissible input must be reported, not
+        // silently returned as a usable star state.
+        const double c0 = std::sqrt(gm*p0/rho0);
+        const ExactRsState l{rho0, -10.0*c0, p0}, r{rho0, +10.0*c0, p0};
+        const ExactRsSolution vac = exact_rs_pu_star(l, r, gm, gm);
+        EXPECT_TRUE(vac.status == ExactRsStatus::Vacuum);
+        EXPECT_TRUE(vac.wl < 0.0 && vac.wr > 0.0);
+        const ExactRsState bad{-1.0, 0.0, p0};
+        EXPECT_TRUE(exact_rs_pu_star(bad, r, gm, gm).status
+                    == ExactRsStatus::BadInput);
+        EXPECT_TRUE(exact_rs_pu_star(l, {rho0, 0.0, 0.0}, gm, gm).status
+                    == ExactRsStatus::BadInput);
+    }
+
+    // A first-order Godunov solve of Sod with the SWMF flux assembly, including
+    // the specific-energy-offset device that carries the non-ideal EOS content.
+    // Two claims are checked: the scheme converges to the exact solution, and a
+    // nonzero offset is advected passively so it changes nothing about (rho,u,p).
+    const double gm1_inv = 1.0/(g - 1.0);
+    auto sod_l1 = [&](int n, double e0, double& drift, int& fails) {
+        const double dx = 1.0/n, t_end = 0.2;
+        std::vector<double> rho(n), mom(n), en(n);
+        for (int i = 0; i < n; ++i) {
+            const double x = (i + 0.5)*dx;
+            rho[i] = x < 0.5 ? 1.0 : 0.125;
+            mom[i] = 0.0;
+            en[i] = (x < 0.5 ? 1.0 : 0.1)*gm1_inv + rho[i]*e0;
+        }
+        for (double t = 0.0; t < t_end; ) {
+            std::vector<double> pr(n), ve(n), of(n);
+            double smax = 0.0;
+            for (int i = 0; i < n; ++i) {
+                ve[i] = mom[i]/rho[i];
+                pr[i] = (en[i] - 0.5*rho[i]*ve[i]*ve[i] - rho[i]*e0)/gm1_inv;
+                of[i] = (en[i] - 0.5*rho[i]*ve[i]*ve[i] - pr[i]*gm1_inv)/rho[i];
+                smax = std::max(smax,
+                                std::abs(ve[i]) + std::sqrt(g*pr[i]/rho[i]));
+            }
+            double dt = std::min(0.8*dx/smax, t_end - t);
+            std::vector<double> fr(n+1), fm(n+1), fe(n+1);
+            for (int f = 0; f <= n; ++f) {
+                const int a = f == 0 ? 0 : f - 1, b = f == n ? n - 1 : f;
+                const ExactRsState L{rho[a], ve[a], pr[a]};
+                const ExactRsState R{rho[b], ve[b], pr[b]};
+                const ExactRsSolution s = exact_rs_pu_star(L, R, g, g);
+                if (s.status != ExactRsStatus::Ok) { ++fails; continue; }
+                const double e0_up = s.u_star > 0.0 ? of[a] : of[b];
+                const ExactRsState q = exact_rs_sample(0.0, s, L, R, g, g);
+                const double e_star =
+                    q.p*gm1_inv + 0.5*q.rho*q.u*q.u + q.rho*e0_up;
+                fr[f] = q.rho*q.u;
+                fm[f] = q.rho*q.u*q.u + q.p;
+                fe[f] = (e_star + q.p)*q.u;
+            }
+            for (int i = 0; i < n; ++i) {
+                rho[i] -= dt/dx*(fr[i+1]-fr[i]);
+                mom[i] -= dt/dx*(fm[i+1]-fm[i]);
+                en[i]  -= dt/dx*(fe[i+1]-fe[i]);
+            }
+            t += dt;
+        }
+        const ExactRsState L{1.0, 0.0, 1.0}, R{0.125, 0.0, 0.1};
+        const ExactRsSolution s = exact_rs_pu_star(L, R, g, g);
+        double l1 = 0.0;
+        drift = 0.0;
+        for (int i = 0; i < n; ++i) {
+            const double x = (i + 0.5)*dx;
+            const ExactRsState e =
+                exact_rs_sample((x - 0.5)/t_end, s, L, R, g, g);
+            const double v = mom[i]/rho[i];
+            const double p = (en[i] - 0.5*rho[i]*v*v - rho[i]*e0)/gm1_inv;
+            l1 += std::abs(rho[i] - e.rho)*dx;
+            drift = std::max(drift, std::abs(
+                (en[i] - 0.5*rho[i]*v*v - p*gm1_inv)/rho[i] - e0)
+                /std::max(std::abs(e0), 1.0));
+        }
+        return l1;
+    };
+    double drift0 = 0.0, drift1 = 0.0;
+    int fails = 0;
+    const double l1_100 = sod_l1(100, 0.0, drift0, fails);
+    const double l1_400 = sod_l1(400, 0.0, drift0, fails);
+    const double l1_400_offset = sod_l1(400, 3.7e2, drift1, fails);
+    EXPECT_TRUE(fails == 0);
+    EXPECT_TRUE(l1_100 < 0.02);
+    // First-order Godunov on a solution containing a shock and a contact
+    // converges in L1 at the textbook ~0.6-0.7 order, not 1.
+    EXPECT_TRUE(l1_400 < l1_100);
+    EXPECT_TRUE(std::log2(l1_100/l1_400)/2.0 > 0.5);
+    EXPECT_NEAR(drift0, 0.0, 1.0e-12);
+    EXPECT_NEAR(drift1, 0.0, 1.0e-12);
+    // The energy offset must be exactly inert: same L1 error to round-off.
+    EXPECT_REL(l1_400_offset, l1_400, 1.0e-12);
+}
+
+// The RELEASE swmf-godunov flux on the production RHS path: it must be a
+// consistent, conservative face flux that genuinely differs from both reference
+// solvers, must not fall back on a healthy column, and must count and survive a
+// fallback when the exact solve cannot be used.
+static void test_swmf_godunov_flux_mode() {
+    const arma::uword ns = 80;
+    Grid grid;
+    Vec state = setup_decoupling_column(grid, false, ns);
+    model_column_update_bc(grid, state);
+    const MixtureField field = mixture_decode(grid, state);
+    const Vec dt = mixture_timestep(grid, state, field);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
+
+    grid.capture_face_flux = true;
+    grid.roe_characteristic_flux = false;
+    grid.swmf_godunov_flux = false;
+    mixture_rhs_explicit(grid, state, field, dt(0));
+    const std::vector<double> f_rusanov = grid.face_flux_capture.f_total;
+    grid.roe_characteristic_flux = true;
+    mixture_rhs_explicit(grid, state, field, dt(0));
+    const std::vector<double> f_roe = grid.face_flux_capture.f_total;
+
+    grid.roe_characteristic_flux = false;
+    grid.swmf_godunov_flux = true;
+    grid.godunov_stats.clear();
+    const Vec rhs_god = mixture_rhs_explicit(grid, state, field, dt(0));
+    EXPECT_TRUE(!rhs_god.has_nan() && rhs_god.is_finite());
+
+    // A healthy stratified column must be solved exactly at every face, twice
+    // per cell (the i-1/2 and i+1/2 sweeps).
+    const GodunovFluxStats& stats = grid.godunov_stats;
+    EXPECT_TRUE(stats.faces == 2u*ns);
+    EXPECT_TRUE(stats.exact == 2u*ns);
+    EXPECT_TRUE(stats.fallbacks() == 0u);
+    EXPECT_TRUE(stats.max_iterations >= 1u
+                && stats.max_iterations <= (std::uint64_t)swmf_rs::kMaxIterations);
+
+    const MixtureFaceFluxCapture& c = grid.face_flux_capture;
+    double flux_scale = 0.0, delta_rusanov = 0.0, delta_roe = 0.0;
+    double worst_split = 0.0;
+    for (arma::uword i = 0; i < ns; ++i) {
+        EXPECT_TRUE(std::isfinite(c.f_total[i]) && std::isfinite(c.f_diff[i]));
+        flux_scale = std::max(flux_scale, std::abs(c.f_total[i]));
+        delta_rusanov = std::max(delta_rusanov,
+                                 std::abs(c.f_total[i]-f_rusanov[i]));
+        delta_roe = std::max(delta_roe, std::abs(c.f_total[i]-f_roe[i]));
+        worst_split = std::max(worst_split,
+            std::abs(c.f_central[i]+c.f_diff[i]-c.f_total[i])
+            /std::max(std::abs(c.f_total[i]),1e-30));
+    }
+    EXPECT_TRUE(delta_rusanov > 1e-8*std::max(flux_scale,1e-30));
+    EXPECT_TRUE(delta_roe > 1e-12*std::max(flux_scale,1e-30));
+    EXPECT_TRUE(worst_split < 1e-12);
+
+    // The captured face flux is still the one the continuity row differences.
+    double rhs_scale = 0.0, worst_continuity = 0.0;
+    for (arma::uword i = 1; i < ns; ++i) {
+        const double produced =
+            static_cast<double>(rhs_god(arma::sub2ind(sz,i,mix::RHO)));
+        const double from_faces = -(c.f_total[i]-c.f_total[i-1])/grid.ds_i(i);
+        rhs_scale = std::max(rhs_scale,std::abs(c.f_total[i])/grid.ds_i(i));
+        worst_continuity = std::max(worst_continuity,
+            std::abs(from_faces-produced)/std::max(rhs_scale,1e-30));
+    }
+    EXPECT_TRUE(worst_continuity < 1e-5);
+
+    // One real release step must leave every cell decodable.
+    grid.capture_face_flux = false;
+    const Vec after = mixture_advance(grid,state,dt,field);
+    EXPECT_TRUE(!after.has_nan());
+    const MixtureField decoded_after = mixture_decode(grid,after);
+    EXPECT_TRUE(decoded_after.cells.size() == ns);
+    for (const MixtureThermo& th : decoded_after.cells)
+        EXPECT_TRUE(th.rho > 0.0 && th.T > 0.0 && std::isfinite(th.T));
+
+    // Consistency: with no jump anywhere the Godunov flux is the physical flux,
+    // so it must agree with Roe and Rusanov to round-off.
+    {
+        const EosGammaTable table =
+            EosGammaTable::load(production_gamma_table_path());
+        Grid uniform_grid;
+        const Vec uniform = setup_gamma_equilibrium(uniform_grid, table, 8, false);
+        uniform_grid.pressure_reconstruct = true;
+        uniform_grid.mc3_limiter = true;
+        uniform_grid.limiter_beta = 2.0f;
+        const MixtureField ud = mixture_decode(uniform_grid, uniform);
+        uniform_grid.roe_characteristic_flux = true;
+        const Vec r = mixture_rhs_explicit(uniform_grid, uniform, ud, 1.0e-4);
+        uniform_grid.roe_characteristic_flux = false;
+        uniform_grid.swmf_godunov_flux = true;
+        const Vec gd = mixture_rhs_explicit(uniform_grid, uniform, ud, 1.0e-4);
+        EXPECT_TRUE(arma::approx_equal(gd, r, "absdiff", 1.0e-8));
+        for (arma::uword k = 0; k < gd.n_elem; ++k)
+            EXPECT_TRUE(std::abs(gd(k)) < 1.0e-6);
+    }
+
+    // Fallback path: drive one cell far past the two-rarefaction escape speed so
+    // the exact solve reports a vacuum. The result must stay finite and the
+    // fallback must be counted rather than absorbed silently.
+    {
+        const EosGammaTable table =
+            EosGammaTable::load(production_gamma_table_path());
+        Grid fallback;
+        Vec extreme = setup_gamma_equilibrium(fallback, table, 8, true);
+        fallback.pressure_reconstruct = true;
+        fallback.swmf_godunov_flux = true;
+        fallback.godunov_stats.clear();
+        const auto fsz = arma::size(fallback.ns, num_of_mixture_eq);
+        const float rho4 = extreme(arma::sub2ind(fsz, 4, mix::RHO));
+        extreme(arma::sub2ind(fsz, 4, mix::MOM)) = rho4*3.0e5f;
+        extreme(arma::sub2ind(fsz, 4, mix::ENERGY)) =
+            extreme(arma::sub2ind(fsz, 4, mix::ENERGY))
+            + 0.5f*rho4*3.0e5f*3.0e5f;
+        const MixtureField fd = mixture_decode(fallback, extreme);
+        const Vec fb = mixture_rhs_explicit(fallback, extreme, fd, 1.0e-6);
+        EXPECT_TRUE(!fb.has_nan());
+        EXPECT_TRUE(fb.is_finite());
+        EXPECT_TRUE(fallback.godunov_stats.faces == 2u*fallback.ns);
+        EXPECT_TRUE(fallback.godunov_stats.fallbacks() > 0u);
+        EXPECT_TRUE(fallback.godunov_stats.fallback_vacuum > 0u);
+    }
+
+    clear_decoupling_env();
+}
+
+// RELEASE CFL CONSISTENCY. The timestep must be sized from the signal speed of
+// the numerical flux actually in force. The release Godunov flux solves the local
+// Riemann problem at frozen composition (gamma = 5/3), so its acoustic waves are
+// faster than the equilibrium Saha waves the Roe reference flux linearizes
+// (Gamma1 ~ 1.09 in this column). If the release step were still sized from
+// Gamma1, the release would silently run at an effective CFL ~1.24x the requested
+// one. This pins the rule down in both modes.
+static void test_release_timestep_uses_frozen_signal_speed() {
+    const arma::uword ns = 80;
+    Grid grid;
+    Vec state = setup_decoupling_column(grid, false, ns);
+    model_column_update_bc(grid, state);
+    const MixtureField field = mixture_decode(grid, state);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
+    const double frozen_gamma = 5.0/3.0;
+
+    // What the CFL rule must produce for a given acoustic index floor.
+    auto expected_dt = [&](double gamma_floor) {
+        double dt = 1.0e300;
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            const MixtureThermo& th = field.cells[i];
+            const double u =
+                static_cast<double>(state(arma::sub2ind(sz, i, mix::MOM)))/th.rho;
+            const double g = std::max(th.gamma1, gamma_floor);
+            dt = std::min(dt, static_cast<double>(grid.CFL)*grid.ds_i(i)
+                              /(std::abs(u) + std::sqrt(g*th.p/th.rho)));
+        }
+        return dt;
+    };
+
+    grid.swmf_godunov_flux = false;
+    grid.roe_characteristic_flux = true;
+    const double dt_roe = mixture_timestep(grid, state, field)(0);
+    grid.roe_characteristic_flux = false;
+    grid.swmf_godunov_flux = true;
+    const double dt_godunov = mixture_timestep(grid, state, field)(0);
+
+    // Reference mode keeps the equilibrium speed; release mode uses the frozen one.
+    EXPECT_REL(dt_roe, expected_dt(0.0), 1.0e-5);
+    EXPECT_REL(dt_godunov, expected_dt(frozen_gamma), 1.0e-5);
+
+    // The release step can never exceed the reference-mode step, because the
+    // frozen index is never below the tabulated equilibrium one.
+    EXPECT_TRUE(dt_godunov <= dt_roe);
+
+    // No hidden effective-CFL overshoot: measured against the wave speed the
+    // RELEASE flux itself propagates, no cell exceeds the requested CFL.
+    // Non-triviality is checked per cell rather than on the global minimum,
+    // because which cell limits the step depends on the column: the partial-
+    // ionization cells are where Gamma1 is far below 5/3, and they need not be
+    // the cells that set dt.
+    double release_cfl = 0.0, worst_local_ratio = 1.0;
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const MixtureThermo& th = field.cells[i];
+        const double u =
+            static_cast<double>(state(arma::sub2ind(sz, i, mix::MOM)))/th.rho;
+        const double frozen_speed =
+            std::abs(u) + std::sqrt(frozen_gamma*th.p/th.rho);
+        const double equilibrium_speed =
+            std::abs(u) + std::sqrt(th.gamma1*th.p/th.rho);
+        release_cfl = std::max(release_cfl,
+                               dt_godunov*frozen_speed/grid.ds_i(i));
+        worst_local_ratio = std::max(worst_local_ratio,
+                                     frozen_speed/equilibrium_speed);
+    }
+    EXPECT_TRUE(release_cfl <= static_cast<double>(grid.CFL)*(1.0 + 1.0e-5));
+    // The partial-ionization zone really does carry a large gap between the two
+    // signal speeds, so the rule is not a no-op dressed up as one.
+    EXPECT_TRUE(worst_local_ratio > 1.15);
+    std::cout << "        [release CFL] dt_roe/dt_godunov=" << (dt_roe/dt_godunov)
+              << "  max cellwise c_frozen/c_eq=" << worst_local_ratio << '\n';
 
     clear_decoupling_env();
 }
@@ -4718,6 +5119,9 @@ int main() {
     RUN(test_face_flux_capture_matches_production_continuity);
     RUN(test_model_column_release_numerics_defaults);
 RUN(test_roe_local_face_flux_and_projection);
+    RUN(test_swmf_exact_riemann_solver);
+    RUN(test_swmf_godunov_flux_mode);
+RUN(test_release_timestep_uses_frozen_signal_speed);
     RUN(test_outer_conduction_capture_matches_solver_face);
     RUN(test_outer_conduction_physical_face_is_mesh_independent);
     RUN(test_model_column_gamma_ic_uses_cell_average_temperature);

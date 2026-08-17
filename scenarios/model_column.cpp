@@ -531,30 +531,48 @@ Vec model_column_ic(Grid& grid) {
                   << " beta=" << grid.limiter_beta << std::endl;
     }
     // --- release numerical flux and MUSCL primitive set (Gamma/Saha path) ---
-    // The released Gamma/Saha model_column advances the corrector with the 3x3
-    // mixture Roe characteristic flux and limits (log rho, V, log p), recovering
-    // the face temperature by inverting the same authoritative Saha closure. Both
+    // The released Gamma/Saha model_column advances the corrector with the
+    // SWMF-style exact-Riemann Godunov flux — the local Riemann problem solved at
+    // the frozen-composition index gamma = 5/3 with the ionization energy carried
+    // as SWMF's passive offset E0 — and limits (log rho, V, log p), recovering the
+    // face temperature by inverting the same authoritative Saha closure. Both
     // require the equilibrium-manifold face builder, so they are enabled only in
     // gamma_mode; the legacy non-gamma path keeps Rusanov + (log rho, V, log T).
-    grid.roe_characteristic_flux = gamma_mode;
+    grid.swmf_godunov_flux       = gamma_mode;
     grid.pressure_reconstruct    = gamma_mode;
-    // Reference/debug overrides. ISO_RIEMANN=rusanov restores the local
-    // Lax-Friedrichs flux and ISO_RECONSTRUCTION=lnrho-v-lnt the temperature-based
-    // primitive set; both are retained for regression and controlled numerical
-    // comparison only. Neither is needed for a production run.
+    grid.roe_characteristic_flux = false;
+    // Reference/debug overrides. ISO_RIEMANN=roe-local selects the mixture Roe
+    // characteristic flux — the equilibrium (Gamma1) linearization that was the
+    // previous release flux and is kept as the controlled comparison solver —
+    // ISO_RIEMANN=rusanov restores the local Lax-Friedrichs flux, and
+    // ISO_RECONSTRUCTION=lnrho-v-lnt the temperature-based primitive set; all are
+    // retained for regression and controlled numerical comparison only. None is
+    // needed for a production run. The three flux choices are mutually exclusive
+    // by construction here, so the face Riemann solver is the only variable they
+    // change — including the timestep, which mixture_timestep sizes from the
+    // signal speed of whichever flux is in force.
     if (const char* riemann = std::getenv("ISO_RIEMANN")) {
         const std::string choice(riemann);
         if (choice == "rusanov") {
             grid.roe_characteristic_flux = false;
+            grid.swmf_godunov_flux = false;
         } else if (choice == "roe-local") {
             if (!gamma_mode)
                 throw std::invalid_argument("ISO_RIEMANN=roe-local requires Gamma/Saha mode");
             grid.roe_characteristic_flux = true;
+            grid.swmf_godunov_flux = false;
+        } else if (choice == "swmf-godunov") {
+            if (!gamma_mode)
+                throw std::invalid_argument(
+                    "ISO_RIEMANN=swmf-godunov requires Gamma/Saha mode");
+            grid.roe_characteristic_flux = false;
+            grid.swmf_godunov_flux = true;
         } else {
-            throw std::invalid_argument("ISO_RIEMANN must be rusanov or roe-local");
+            throw std::invalid_argument(
+                "ISO_RIEMANN must be rusanov, roe-local or swmf-godunov");
         }
         std::cerr << "[model_column] Riemann override: ISO_RIEMANN=" << choice
-                  << " (release default: roe-local)" << std::endl;
+                  << " (release default: swmf-godunov)" << std::endl;
     }
     if (const char* recon = std::getenv("ISO_RECONSTRUCTION")) {
         const std::string choice(recon);
@@ -575,7 +593,8 @@ Vec model_column_ic(Grid& grid) {
     // One line naming the numerical method actually in force, so a run log always
     // records it without having to enable the face-flux sidecar.
     std::cerr << "[model_column] numerics: flux="
-              << (grid.roe_characteristic_flux ? "roe-local" : "rusanov")
+              << (grid.swmf_godunov_flux ? "swmf-godunov"
+                  : grid.roe_characteristic_flux ? "roe-local" : "rusanov")
               << " reconstruction="
               << (grid.pressure_reconstruct ? "lnrho-v-lnp" : "lnrho-v-lnt")
               << " limiter=" << (grid.mc3_limiter ? "mc3" : "minmod")

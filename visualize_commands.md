@@ -1626,7 +1626,7 @@ fine region starting at 2100 km. Initial temperature spans 6631.35--22674.60 K.
 
 Provenance is the release smoke run `release_roe_lnp_N500_100s`, which was launched
 with no environment overrides, so the mesh and initial state are the scenario's own
-release defaults (mixture Roe, `(ln rho,V,ln p)`, MC3 beta=2 -- confirmed by the
+release defaults AT THE TIME (mixture Roe, `(ln rho,V,ln p)`, MC3 beta=2; the release flux is now `swmf-godunov` -- confirmed by the
 console log's `flux=roe-local reconstruction=lnrho-v-lnp limiter=mc3 beta=2`). The
 script independently rebuilds the faces from `scenarios/mesh.cpp` and cross-checks
 them against the run header (max face error 4.995 m, within the float32
@@ -1732,7 +1732,7 @@ ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
 
 Three-field (density, velocity, total gas pressure) 0–4000 s animation of the
 `(ln rho, V, ln p)` reconstruction acceptance run at N=500 (661 actual cells),
-**Rusanov** reference solver (the release solver is Roe), Gamma/Saha EOS, R4 outer refinement, 22,000 K physical-face
+**Rusanov** reference solver (the release solver was Roe at the time; it is now the SWMF exact-Riemann Godunov flux), Gamma/Saha EOS, R4 outer refinement, 22,000 K physical-face
 conductive boundary, physical conduction only, CFL=0.50. Fields are read from the
 `.gamma_diag` sidecar, so they are the EOS-consistent `x_eq`-derived quantities.
 Left column is the full 1600–2153 km column; right column zooms the refined
@@ -1753,7 +1753,7 @@ Standard 2×3 `animate_isentropic.py` panels (T, V, q∥, ρ, p, ρV) for the
 **Rusanov** reference solver, Gamma/Saha EOS, R4 outer refinement, 22,000 K
 physical-face conductive boundary, physical conduction only, CFL=0.50, 0–4000 s.
 Deliberately the same script, panels, frame cap, and fps as
-`lnp_roe_N500_4000s_evolution.mp4`, so the Rusanov-reference and release-Roe versions
+`lnp_roe_N500_4000s_evolution.mp4`, so the Rusanov-reference and Roe versions
 of the *same* reconstruction are directly comparable.
 
 ```bash
@@ -1769,7 +1769,7 @@ These three were produced during the Roe/reconstruction study but were never ent
 here. Commands below are **reconstructed** from the run files and the standard
 release-movie invocation, and reproduce the figures; they were not recorded at creation.
 All were run with an explicit `ISO_RIEMANN=roe-local`, which was still a diagnostic
-override at the time; Roe is now the release default and needs no override.
+override at the time; Roe later became the release default and then, at the Godunov cutover, a reference override again; `ISO_RIEMANN=roe-local` reproduces these runs exactly.
 
 `lnp_roe_N500_4000s_evolution.mp4` — `(ln rho,V,ln p)` reconstruction + Roe-local, N500, 4000 s.
 `roe_N500_4000s_evolution.mp4` / `roe_N1000_4000s_evolution.mp4` — `(ln rho,V,ln T)` + Roe-local.
@@ -1791,11 +1791,11 @@ ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
 
 ### `lnp_roe_N1000_4000s_evolution.mp4` — N=1000 companion to `lnp_roe_N500_4000s_evolution.mp4`
 
-Same release solver as `lnp_roe_N500_4000s_evolution.mp4` — mixture Roe flux,
+Same solver as `lnp_roe_N500_4000s_evolution.mp4` — mixture Roe flux (the release flux at the time, now a reference override),
 `(ln rho, V, ln p)` MUSCL reconstruction with MC3/beta=2, Gamma/Saha EOS, R4 outer
 refinement, 22,000 K physical-face conductive boundary, hydro-T decoupling, physical
 conduction only, CFL=0.50 — with only the coarse-equivalent resolution raised from
-N=500 to N=1000 (1320 actual cells). Roe and lnP are now release defaults, so the run
+N=500 to N=1000 (1320 actual cells). Roe and lnP were the release defaults when this was run, so the run
 needs no `ISO_RIEMANN`/`ISO_RECONSTRUCTION` override. Run reached
 `termination=end_time` at 4000 s, step 1,455,143, in 1310.1 s wall (12 threads).
 Snapshot cadence 20 s gives 201 frames; standard 2x3 `animate_isentropic.py` panels
@@ -1862,7 +1862,7 @@ and the panels are synchronous by construction.
 
 Definitions (index `i` = the UPPER face `i+1/2` of cell `i`; see also the
 face-flux decomposition section above): `rhoV_cell = rho_cell * v_cell` plotted at
-the cell centres; `f_total` = the production numerical face mass flux (Roe here,
+the cell centres; `f_total` = the production numerical face mass flux (Roe here; the release flux is now the SWMF Godunov flux,
 Rusanov if selected); `f_ref` = `f_total` at `t = 0`, a **diagnostic baseline**;
 `f_eff = f_total - f_ref` = the change in face mass transport since initialization.
 Since the reference-free release (`docs/reference_free_release_recap.md`) the solver
@@ -1910,3 +1910,154 @@ Options: `--zoom LO HI`, `--window LO HI`, `--stride N` / `--max-frames N`
 not sit next to the run, `--final-figure PATH` / `--no-final-figure`,
 `--no-check-output`. A sidecar whose first record is not `t = 0` is rejected, since
 `f_ref` is undefined without it.
+
+---
+
+## 12. Educational / tutorial animations (`visualization/godunov_tutorial/`, `visualization/roe_tutorial/`)
+
+Self-contained teaching material, not production output. Plain 1D ideal-gas Euler
+(`gamma = 1.4`, Sod data) — no gravity, ionization, conduction, source terms or well
+balancing. Two companion pieces in the same visual language, on the same initial data,
+meant to be watched back to back: `godunov_tutorial/` (the **exact** Riemann solver) and
+`roe_tutorial/` (the **linearised** one). Scripts and outputs live together in each
+directory, alongside a `README.md` and a printed numerical summary.
+
+### `godunov_face_flux.mp4`, `godunov_face_flux.gif`
+Nine-scene explainer of `U_L, U_R -> exact Riemann solution -> U(x/t = 0) -> F_face`:
+two cells / one face, MUSCL-reconstructed face states, the local Riemann problem,
+the unfolding fan (with tracer particles advected by the exact `u(x/t)`), the `x`-`t`
+self-similarity picture, sampling at `x/t = 0`, the physical Euler flux, the
+finite-volume update, and a closing exact-Godunov vs Roe comparison.
+1920x1080, 25 fps, 116 s; frames rendered in parallel then encoded with ffmpeg.
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
+  visualization/godunov_tutorial/make_godunov_animation.py --jobs 12
+```
+Options: `--probe` (still frames per scene for layout checks, into `probe/`),
+`--no-gif`, `--fps N`, `--out PATH`, `--gif PATH`, `--keep-frames`.
+
+### `riemann_summary.txt`
+Numerical summary that drives the animation: `p*`, `u*`, wave types and speeds, the
+state sampled at `x/t = 0`, and the resulting mass/momentum/energy fluxes, with
+`F(U_L)`, `F(U_R)`, both averages and the Roe flux for contrast.
+```bash
+.venv/bin/python visualization/godunov_tutorial/exact_riemann.py \
+  > visualization/godunov_tutorial/riemann_summary.txt
+```
+
+### `roe_face_flux.mp4`, `roe_face_flux.gif`
+Twelve-scene explainer of `U_L, U_R -> Roe average -> linearised characteristic waves
+-> F_Roe`: the same face, why the nonlinear flux is linearised, the **secant-not-tangent**
+idea leading to `F_R - F_L = A~ (U_R - U_L)`, the `sqrt(rho)`-weighted Roe average (with
+`(U_L+U_R)/2` explicitly crossed out), the three linear waves, the waterfall decomposition
+`dU = sum_k alpha_k r_k`, the `x`-`t` diagram and eigenvalue-sign upwinding, the two halves
+of the flux formula, the equivalent upwind walk sampled at `x/t = 0`, a side-by-side with
+exact Godunov, when the linearisation is accurate, and where it sits in the solver step.
+1920x1080, 25 fps, 144 s; frames rendered in parallel then encoded with ffmpeg. Imports
+`solve_riemann` from `../godunov_tutorial/exact_riemann.py` for the contrast scenes.
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
+  visualization/roe_tutorial/make_roe_animation.py --jobs 12
+```
+Options: same as above (`--probe`, `--no-gif`, `--fps N`, `--out PATH`, `--gif PATH`,
+`--keep-frames`).
+
+### `roe_summary.txt`
+Numerical summary and verification residuals that drive the animation: `U_L/U_R`,
+`F_L/F_R`, `u~`, `H~`, `a~`, the three eigenvalues, right eigenvectors, wave strengths
+`alpha_k`, each `alpha_k r_k` and `|lam_k| alpha_k r_k`, the intermediate states, the Roe
+matrix, the flux in three equivalent forms, and residuals for `dU = sum alpha_k r_k`,
+`dF = A~ dU`, `A~ = A(u~,H~)`, and consistency. Includes the two non-degenerate checks
+(moving-gas variant and a 200-case random sweep) that the symmetric Sod problem cannot
+provide, plus an exact-Godunov comparison.
+```bash
+.venv/bin/python visualization/roe_tutorial/roe_solver.py \
+  > visualization/roe_tutorial/roe_summary.txt
+```
+
+---
+
+## 13. Release Godunov cutover — N500 4000 s evolution and base mass-flux diagnosis
+
+### Mass-flux panel default changed
+
+`util/animate_isentropic.py` now plots the **conservative numerical face mass flux
+`f_total`** from the `<run>.faceflux` sidecar in its mass-flux panel, at the face
+heights, whenever that sidecar exists. The cell-centred product `rho*V` is only a
+reconstruction of the flux: it carries the full cell-centred ripple and is
+systematically misleading in the boundary cells, where the ghost closure fixes the
+face flux and not the cell-centred product. Set `ANIM_MASS_FLUX=cell` to force the
+old panel; without a sidecar the script falls back to `rho*V` and labels the panel
+accordingly. **Every movie in sections 1-12 above predates this change and shows
+`rho*V`.** New runs should therefore enable `CHROMO_FACE_FLUX_DIAG=1`; choose
+`CHROMO_FACE_FLUX_STRIDE` so the capture cadence is at least as fine as
+`CHROMO_FRAME_DT` (the animator picks the nearest capture in time and prints the
+worst mismatch).
+
+### `lnp_godunov_N500_4000s_evolution.mp4`
+
+The 4000 s N500 release run under the **new release numerics** — SWMF exact-Riemann
+Godunov flux at frozen composition, `(ln rho, V, ln p)` MUSCL reconstruction with
+MC3/beta=2, Gamma/Saha EOS, R4 outer refinement, 22,000 K physical-face conductive
+boundary, physical conduction only, CFL 0.50. No `ISO_RIEMANN` override: this is the
+default. Reached `termination=end_time` at 4000 s, step 712,314 (the identical step
+count to the Roe run, as expected from the CFL audit), 502 s wall on 12 threads,
+941,679,108 exact face solves with **zero fallbacks**. Snapshot cadence 20 s gives
+201 frames; face-flux stride 3300 steps gives 217 captures (worst snapshot/capture
+time mismatch 9.2 s). This is the direct successor to
+`lnp_roe_N500_4000s_evolution.mp4` and the mass-flux panel is now the face flux.
+
+```bash
+CHROMO_T_END=4000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=20 \
+CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_STRIDE=3300 \
+/usr/bin/time -p scripts/run_chromo_realtime.sh \
+  outputs/model_column/lnp_godunov_N500_4000s.txt \
+  full no-ionization model_column - 20.0 no-cooling \
+  > outputs/model_column/lnp_godunov_N500_4000s.console.log 2>&1
+
+ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
+.venv/bin/python util/animate_isentropic.py \
+  outputs/model_column/lnp_godunov_N500_4000s.txt \
+  visualization/model_column/lnp_godunov_N500_4000s_evolution.mp4 25
+```
+
+### `godunov_N500_4000s_base_mass_flux_diagnosis.png`
+
+Six-panel diagnosis of the elevated mass flux near the lower boundary, comparing the
+new release run against the old `lnp_roe_N500_4000s` run the earlier movie was made
+from. Top row: `f_total` versus height at t = 0, 2000, 4000 s for each run, plus
+`|f_diff|` for the release run. Bottom row: base zoom (1600-1640 km) comparing
+`f_total` against cell-centred `rho*V` for each run, plus the per-step mass-density
+increment measured in float32 ULPs of `rho`. Findings, in order of size:
+
+1. **Most of the old base anomaly was a stale run, not a boundary condition.** The
+   `lnp_roe_N500_4000s` run predates the MUSCL-Hancock predictor momentum source.
+   Its t = 0 face velocity is 0.7569 m/s, which is exactly `0.5 * dt * g`
+   (0.0055258 * 273.95 / 2 = 0.75690), and its t = 0 face mass flux is 7.5e-10
+   rather than zero. That is the documented pre-fix defect. The new run starts at
+   `max|f_total| = 1.08e-12` and its `f_total` tracks cell-centred `rho*V` to
+   sub-percent everywhere above cell 0, where the old run had a uniform 1.8x offset.
+2. **A genuine, localized first-cell artifact remains.** At face 0 the dissipative
+   part `f_diff` is -1.7e-10, about **1900x** the interior median, and cell 0's
+   centred `rho*V` overshoots the face flux by 28 %. This is the known base-cell /
+   inner-ghost artifact and it is confined to the single lowest face.
+3. **The broad base-to-top gradient is a slow transient, and float32 prevents it
+   from relaxing.** Above ~1850 km the t = 4000 s profile is flat to about 10 %,
+   i.e. genuinely quasi-steady; the non-flat part is the lowest ~200 km, where
+   `f_total` still runs 2.4x the interior mean. It cannot work itself off: the
+   per-step mass-density increment `dt * (-df/ds)` is **below half a float32 ULP of
+   `rho` in 618 of 660 cells** (median ratio 0.29), so `rho += dt*rhs` rounds back to
+   `rho` every step and the density in the lower chromosphere is frozen at
+   representation round-off. This also explains the previously recorded and
+   unexplained `.faceflux` divergence anomaly in
+   `docs/roe_n1000_lower_chromosphere_sloshing_diagnosis.md` section "Unrelated issue
+   found": the captured flux values are right, but their divergence cannot be
+   reconciled with a density evolution that float32 will not let happen.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
+  util/plot_base_mass_flux_diagnosis.py \
+  "release Godunov (current code)=outputs/model_column/lnp_godunov_N500_4000s.txt" \
+  "Roe, pre predictor-source fix=outputs/model_column/lnp_roe_N500_4000s.txt" \
+  visualization/model_column/godunov_N500_4000s_base_mass_flux_diagnosis.png
+```

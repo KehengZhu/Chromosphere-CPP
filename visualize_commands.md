@@ -2283,3 +2283,28 @@ aside slide — and the other three are backup-slide assets. See
 cd docs/presentations/2026-08-17-group-meeting
 latexmk -pdf -output-directory=build presentation.tex
 ```
+
+---
+
+## 16. Upper-boundary conduction-wall temperature sensitivity (`docs/studies/boundaries/upper_wall_temperature_sensitivity_recap.md`)
+
+One-parameter sweep of the imposed conduction-wall temperature `ISO_T_TOP` at the 2153 km outer face, with the C7 IC and every other piece of release physics/numerics fixed and `ISO_HYDRO_T_DECOUPLE=1` (so only `Grid::outer_conduction_temperature` moves). Double-precision release build (`build_omp`), N=500/R4, 4000 s. All four figures come from one invocation of `util/twall_sweep_diag.py`.
+
+Prerequisite runs (about 3 h wall on 16 cores; ~260 MB of dumps under `outputs/model_column/twall_sweep/`):
+
+```bash
+util/run_twall_sweep.sh          # broad log sweep 10,15,18,22,30,45,70,100 kK + 70 kK CFL control
+SWEEP_CASES="6000:0.50 8000:0.50 11000:0.50 12000:0.50 13000:0.50 14000:0.50" \
+    util/run_twall_sweep.sh      # refinement across the flow reversal
+```
+
+### `twall_sweep_N500_4000s_V_of_t.png`, `..._V_of_h.png`, `..._summary.png`, `..._support.png`
+`V(t)` at 1800/2000/2100 km and the top cell (symlog, so the sub-m/s cold-wall cases stay visible next to the 3 km/s 100 kK transient); quasi-steady `V(h)` full column, resolved-TR zoom and symlog; the summary panel set (V, `rho V`, `q_wall`, `T_top`, log-log upflow branch with the local exponent `dlnV/dlnT`, and the steady enthalpy-flux budget); and the supporting `rho V(h)`, `T(h)` and column-mass-drift diagnostics. The 6 kK run is excluded automatically because it aborts at t≈380 s below the EOS temperature floor; the 100 kK point is supplied explicitly because it needed CFL 0.25.
+
+```bash
+.venv/bin/python util/twall_sweep_diag.py --cfl 0.50 \
+    --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt \
+    --heights 1800 2000 2100 --avg-window 500 \
+    --out-dir visualization/model_column --prefix twall_sweep_N500_4000s \
+    --json outputs/model_column/twall_sweep/twall_sweep_metrics.json
+```

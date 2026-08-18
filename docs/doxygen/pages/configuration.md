@@ -85,7 +85,7 @@ Knobs valid in **both** modes:
 | `ISO_DH` | float, km | `1303` (or `ISO_CORONA_TOP_KM - ISO_H_BASE` when `ISO_CORONA` is on) | Domain span above the base. |
 | `ISO_HEAT_FLUX` | float, non-zero = on | `0` | `0` = Stage-1 adiabatic relaxation (conduction off); non-zero = conduction on. |
 | `ISO_RELAX_TIME` | float, seconds | `0` | Length of an initial Stage-1 adiabatic relaxation phase before conduction and the top jump switch on. |
-| `ISO_T_TOP` | float, K | `0` (= use the IC top-cell temperature) | Any positive value is an **absolute** imposed outer-boundary temperature and is not re-anchored across a relax phase. Release preset 22000. |
+| `ISO_T_TOP` | float, K | `0` (= use the IC top-cell temperature) | Any positive value is an **absolute** imposed outer-boundary temperature and is not re-anchored across a relax phase. Release preset 22000. The column is *very* sensitive to it: the quasi-steady top-of-domain velocity goes as roughly `T_wall^3` and reverses sign near 10 kK — see [Sensitivity to the wall temperature](#config-twall-sensitivity). |
 | `ISO_TJUMP_A` | float | `1.0` | Outer ghost temperature jump `T_ghost1 = a * T_ref`. |
 | `ISO_TJUMP_B` | float | `1.0` | Second ghost jump `T_ghost2 = b * T_ghost1`. |
 | `ISO_HYDRO_T_DECOUPLE` | float, non-zero = on | `0` | Lets the outer **hydro** ghost temperature zero-gradient-extrapolate the live top cell while the conduction solver keeps the fixed wall at the physical outer face. Release preset 1. |
@@ -247,3 +247,17 @@ scripts/run_chromo_realtime.sh out.txt \
 No environment variable is required to select the release solver, its Riemann solver, or its reconstruction: the scenario supplies all of it. See @ref numerics for what those defaults mean numerically and @ref scenario_reference for the scenarios themselves.
 
 Known limitation to keep in mind when choosing a configuration: N500 long-duration evaporation mass flux is **not** established as better than 10 % grid-converged. That is a statement about the resolution required for a particular quantitative claim, not about the release numerical method. See @ref validation.
+
+## Sensitivity to the wall temperature {#config-twall-sensitivity}
+
+`ISO_T_TOP` is the most consequential single knob in the release configuration, so it deserves a number rather than a warning. With everything else fixed at the release configuration (C7 initial condition, N = 500/R4, `ISO_HYDRO_T_DECOUPLE = 1`, physical conduction only, 4000 s, double-precision state) a one-parameter sweep of the wall over 8–100 K gives a quasi-steady top-of-domain velocity of
+
+| `ISO_T_TOP` [kK] | 8 | 10 | 12 | 15 | 18 | **22** | 30 | 45 | 70 | 100 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `V_top` [m/s] | −0.44 | −0.10 | +0.54 | +2.1 | +4.6 | **+9.6** | +27.6 | +93.5 | +310 | +792 |
+
+Four decades of velocity for one decade of wall temperature. The response is a smooth power law on the upflow branch — a fit over `ISO_T_TOP >= 15000` gives `V ~ T_wall^3.09`, with the local exponent falling from 3.7 at the 22 kK release point to 2.6 at 100 kK — and it reverses sign near 10 kK, below which the column drains instead of evaporating. There is no saturation anywhere in the tested range and the `ISO_VCAP` outflow cap never binds (at most 15 % of the cap, at 100 kK).
+
+The mechanism is entirely conductive: the wall thermostats the top cell to within 0.3 %, Spitzer conductivity supplies the `T^2.5`, and a column with no radiative sink must export the resulting conductive flux as the enthalpy flux of the evaporating material, so `V ~ q_wall / [rho_top (h + x chi_H/m_H)]` to within a factor of two over the whole range. Two practical consequences: any quantitative evaporation result is a statement about the chosen wall temperature as much as about the chromosphere, and a wall below about 8 kK drives the top of the column below the `Gamma1` table temperature floor and aborts the run.
+
+Full study, including the time-convergence and CFL caveats: `docs/studies/boundaries/upper_wall_temperature_sensitivity_recap.md`.

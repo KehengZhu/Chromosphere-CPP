@@ -51,6 +51,17 @@ fi
 # case uses the SAME thread count so the comparison is apples-to-apples.
 THREADS="${SWEEP_THREADS:-2}"
 
+# Conservative face mass flux f_total (<out>.faceflux), OFF by default: it is a
+# read-only diagnostic that changes no numerical result (verified byte-identical
+# .gamma_diag with and without it), but it costs ~230 kB per capture, so a 10 s
+# cadence over 4000 s is ~90 MB per run and ~1.2 GB for the whole sweep. Turn it
+# on with SWEEP_FACE_FLUX=1 when the sweep needs the conservative flux rather than
+# the cell-centred product rho*V — e.g. for the overlay movie's mass-flux panel.
+# The default stride 1780 is ~10 s at the CFL 0.50 step and matches the value
+# scripts/release_validation.sh uses.
+FACE_FLUX="${SWEEP_FACE_FLUX:-0}"
+FACE_FLUX_STRIDE="${SWEEP_FACE_FLUX_STRIDE:-1780}"
+
 pids=()
 for case in "${CASES[@]}"; do
     T="${case%%:*}"
@@ -64,6 +75,8 @@ for case in "${CASES[@]}"; do
         CHROMO_T_END="${T_END}" \
         CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT="${FRAME_DT}" \
         CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=2000 \
+        CHROMO_FACE_FLUX_DIAG="${FACE_FLUX}" \
+        CHROMO_FACE_FLUX_STRIDE="${FACE_FLUX_STRIDE}" \
         scripts/run_chromo_realtime.sh "${out}" \
             full no-ionization model_column - 20.0 no-cooling \
             > "${out%.txt}.console.log" 2>&1

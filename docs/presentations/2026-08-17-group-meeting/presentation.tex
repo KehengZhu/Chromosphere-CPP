@@ -1,6 +1,7 @@
 % Group meeting, 2026-08-17 — Keheng Zhu
 % Release path only: the Saha closure and the 1600 km truncation, the SWMF
-% exact-Riemann Godunov flux, and a short note on a storage-precision fix.
+% exact-Riemann Godunov flux, a short note on a storage-precision fix, and the
+% upper-boundary conduction-wall temperature sensitivity.
 %
 % Scope note: this deck deliberately presents ONLY the release path. The
 % equilibrium-Gamma1 Roe reference flux, the Roe-vs-Godunov comparison and the
@@ -36,7 +37,8 @@
 \definecolor{f64}{RGB}{31,119,180}
 
 \title[Release numerics update]{Release numerics update}
-\subtitle{The ionization closure, the domain, and the new face solver}
+\subtitle{The ionization closure, the domain, the new face solver, and how much
+          the top boundary matters}
 \author{Keheng Zhu}
 \institute{University of Michigan}
 \date{17 August 2026}
@@ -58,6 +60,8 @@
         \item A new face solver: the SWMF exact Riemann problem.
         \item[]
         \item {\color{gray}A precision fix, briefly.}
+        \item[]
+        \item How much does the \emph{top} boundary set the answer?
       \end{enumerate}
     \end{column}
     \begin{column}{0.38\textwidth}
@@ -210,13 +214,74 @@
       \vspace{12pt}
 
       {\color{gray}A double-precision control, everything else identical, makes
-      it flat. Not physics, not the solver, not the boundary --- and evaporation
-      at the top moves only $\sim$3\%.}
+      it flat. Not physics, not the solver, not the boundary. It is \emph{not}
+      cosmetic: top-of-domain evaporation drops $\sim$28\% (13.18 $\rightarrow$
+      9.50\,m/s), so every float32-era evaporation number was high.}
     \end{column}
     \begin{column}{0.52\textwidth}
       \includegraphics[width=\textwidth]{precision_ftotal_4000s.png}
     \end{column}
   \end{columns}
+\end{frame}
+
+% ============================================================ D. upper boundary
+\section{The upper boundary}
+
+\begin{frame}{How much does the top boundary set the answer?}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      \includegraphics[width=\textwidth]{twall_response.png}
+    \end{column}
+    \begin{column}{0.43\textwidth}
+      \footnotesize
+      \textbf{One knob: $T_{\rm wall}$ at the 2153\,km face.}
+      \vspace{4pt}
+
+      8, 10, 11, 12, 13, 14, 15, 18,\\
+      \textbf{22}, 30, 45, 70, 100\,kK
+      \vspace{2pt}
+
+      \src{13 runs $\times$ 4000\,s. Same C7 start, everything else fixed.}
+      \vspace{10pt}
+      \begin{itemize}\itemsep8pt
+        \item $-0.4 \rightarrow +792$\,m/s.\\
+              \textbf{Four decades of $V$ per decade of $T_{\rm wall}$.}
+        \item Reverses near 10\,kK: the column \textbf{drains}, not evaporates.
+        \item \alert{Local slope 3.7 at our 22\,kK.}\\
+              10\% in the wall $\Rightarrow$ 40\% in the evaporation.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \vspace{2pt}
+  \src{\hfill $\rho V$ flat to 14\% in height: a mass-flux response. $V(h)$
+       rises only because $\rho$ falls.}
+\end{frame}
+
+\begin{frame}{Conduction sets it; ionization pays for it}
+  \begin{columns}[c]
+    \begin{column}{0.47\textwidth}
+      \footnotesize
+      \textbf{Three links, all measured:}
+      \vspace{6pt}
+      \begin{enumerate}\itemsep7pt
+        \item \textbf{Thermostat.} $T_{\rm top}$ tracks $T_{\rm wall}$ to 0.3\%,
+              so $\Delta T \propto T_{\rm wall}^{0.8}$ --- self-limiting.
+        \item \textbf{Spitzer.} $\kappa\propto T^{2.50}\ \Rightarrow\
+              q_{\rm wall}\propto T_{\rm wall}^{3.3}$.\\
+              \src{All the nonlinearity. Mach $\le0.015$.}
+        \item \textbf{Export.} No radiative sink, so\\
+              $V \simeq q_{\rm wall}/[\rho_{\rm top}(h + x\chi_H/m_H)]$.
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.51\textwidth}
+      \includegraphics[width=\textwidth]{twall_enthalpy_budget.png}
+    \end{column}
+  \end{columns}
+  \vspace{-2pt}
+  \begin{center}\footnotesize
+    Within a factor of two across four decades, no fitting.
+    \alert{Ionization is 59\% of that denominator at 22\,kK.}
+  \end{center}
 \end{frame}
 
 % ============================================================ status
@@ -227,23 +292,51 @@
     SWMF exact Riemann; implicit conduction; 107 test cases green.
   \end{center}
   \vfill
-  \begin{enumerate}\itemsep12pt
-    \item \textbf{Saha vs.\ finite relaxation --- the real open question.}
-          We freeze composition \emph{inside} the Riemann problem, then re-impose
-          instantaneous Saha equilibrium \emph{after every step}. Not justified
-          when $\tau_{\rm ion}$ is long. Finite-rate network, or a relaxation
-          source?
-    \item \textbf{Resolution.} N500 long-duration evaporation mass flux is not
-          established as $<$10\% grid-converged.
-    \item \textbf{Minor, tracked:} one localized artifact at the first interior
-          face --- survives the precision control, so it is a real
-          boundary-closure effect.
+  \begin{enumerate}\itemsep11pt
+    \item \textbf{Saha vs.\ finite relaxation.} Composition frozen \emph{inside}
+          the Riemann problem, re-equilibrated \emph{after every step}.\\
+          Finite-rate network, or a relaxation source?
+    \item \textbf{The top boundary is the dominant lever.} $V\propto
+          T_{\rm wall}^{3}$.\\
+          Couple to a real corona, or keep quoting a chosen wall?
+    \item \textbf{Resolution.} N500 evaporation mass flux: not established as
+          $<$10\% grid-converged.
+    \item \textbf{Minor, tracked.} One artifact at the first interior face ---
+          survives the precision control, so it is real.
   \end{enumerate}
   \vfill
 \end{frame}
 
 % ============================================================ backup
 \appendix
+
+\begin{frame}{Backup: what the wall sweep does \emph{not} establish}
+  \begin{columns}[c]
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{itemize}\itemsep8pt
+        \item \textbf{Quasi-steady, not steady.} $V_{\rm top}$ still falling
+              2--6\% per 500\,s --- magnitudes are upper bounds, the trend is
+              not.
+        \item \textbf{Reversal bracketed at 8--11\,kK}, not pinned.
+        \item \textbf{6\,kK is outside the model:} the top cools below the
+              $\Gamma_1$ table floor and aborts.
+        \item \textbf{100\,kK needed CFL 0.25.} Matched 70\,kK control:
+              $2.6\times10^{-5}$.
+        \item \textbf{Back-pressure fixed} --- only the thermal BC moves.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      % near-square crop: size it by height, or it overflows the frame
+      \includegraphics[height=0.66\textheight]{twall_massflux_uniform.png}
+      \vspace{-2pt}
+      \begin{center}
+        \src{$\rho V$ flat with height: a real steady mass flux.}
+      \end{center}
+    \end{column}
+  \end{columns}
+\end{frame}
+
 \begin{frame}{Backup: sources}
   \scriptsize
   \begin{tabular}{ll}
@@ -255,8 +348,11 @@
     Relaxation timescales & Carlsson \& Stein 2002; Leenaarts et al.\ 2007; Leenaarts 2020 \\
     Toro tests, $E_0$ passivity, 0 fallbacks & \texttt{tests/chromo\_tests.cpp}; \\
       & \texttt{docs/studies/numerics/swmf\_godunov\_flux\_experiment.md} \\
-    float32 vs float64 control & \texttt{docs/studies/numerics/float32\_precision\_control\_experiment.md} \\
-    Figure provenance & \texttt{figures/README.md}; \texttt{visualize\_commands.md} \S14--15 \\
+    float32 vs float64 control & \texttt{docs/studies/numerics/float32\_precision\_control\_experiment.md}; \\
+      & \texttt{docs/studies/numerics/state\_precision\_release\_cutover.md} \\
+    Wall-temperature sweep & \texttt{docs/studies/boundaries/upper\_wall\_temperature\_sensitivity\_recap.md}; \\
+      & \texttt{util/run\_twall\_sweep.sh}, \texttt{util/twall\_sweep\_diag.py} \\
+    Figure provenance & \texttt{figures/README.md}; \texttt{visualize\_commands.md} \S14--16 \\
     Test counts & \texttt{./build\_omp/chromo\_tests}, current tree \\
     \bottomrule
   \end{tabular}
@@ -264,7 +360,8 @@
   \begin{center}
     Flux cutover: \texttt{022ea34}\quad$\cdot$\quad
     Reference-free release: \texttt{34ecb00}\quad$\cdot$\quad
-    Precision control: \texttt{ac3d9e0}
+    Precision cutover: \texttt{78109a9}\quad$\cdot$\quad
+    Wall sweep: \texttt{030347a}
   \end{center}
 \end{frame}
 

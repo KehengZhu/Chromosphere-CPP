@@ -227,14 +227,34 @@ def analyse(label, t_wall, path, heights, avg_window):
 
 # --------------------------------------------------------------------------
 def wall_colors(t_walls):
-    """Perceptually monotone colour per T_wall on a log scale.
+    """Ordered, visually separable colour per T_wall.
+
+    Rank-spaced, not value-spaced. The sweep deliberately clusters six walls
+    between 10 and 15 kK to resolve the flow reversal, and on a log-*value* scale
+    those six land within a few percent of one another in the colour range — on
+    plasma they came out as one dark purple and could not be told apart on a
+    slide. Rank spacing gives every run an equal share of the range, and turbo
+    spans the widest hue range of the built-in monotone maps, so neighbouring
+    runs differ in hue rather than only in lightness.
 
     Not a diverging map: the mid-range of coolwarm is near-white and the 18-30 kK
     curves — the ones nearest the 22 kK release baseline — became invisible.
     """
-    norm = mcolors.LogNorm(vmin=min(t_walls), vmax=max(t_walls))
-    cmap = plt.get_cmap("plasma")
-    return {t: cmap(0.9 * norm(t)) for t in t_walls}, norm, cmap
+    uniq = sorted(set(t_walls))
+    norm = mcolors.LogNorm(vmin=min(uniq), vmax=max(uniq))
+    cmap = plt.get_cmap("turbo")
+    # Trim both ends: turbo's extremes are a very dark blue and a very dark red,
+    # both of which read as near-black at slide size.
+    lo, hi, n = 0.05, 0.93, max(len(uniq) - 1, 1)
+
+    def darken(c):
+        """Cap luminance so turbo's yellow band stays visible on white."""
+        lum = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+        f = min(1.0, 0.62 / lum) if lum > 0.0 else 1.0
+        return (c[0] * f, c[1] * f, c[2] * f, c[3])
+
+    return ({t: darken(cmap(lo + (hi - lo) * i / n)) for i, t in enumerate(uniq)},
+            norm, cmap)
 
 
 def plot_v_of_t(runs, heights, out_png, avg_window):

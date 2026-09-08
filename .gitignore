@@ -27,6 +27,9 @@ util/data/
 visualization/
 scenarios/data/*.dat
 outputs/
+# Scratch/ad-hoc scripts and analysis, not part of the codebase.
+/tmp/
+# (subpaths below are now redundant with /tmp/ but kept for clarity of intent)
 /tmp/Chromosphere-CPP/
 # scratch run directory used by scripts/release_validation.sh
 /tmp/release_validation/

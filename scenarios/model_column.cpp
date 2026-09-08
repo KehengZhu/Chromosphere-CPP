@@ -102,6 +102,28 @@ bool  kQflux = false;
 // that extra hydro constraint, holding the conductive energy input fixed.
 // Default 0 ⇒ unchanged behaviour.
 bool  kHydroTDecouple = false;
+// ISO_OUTER_T_HYDRO_WALL=1 (decoupled mode only): the HYDRO ghost temperature is
+// PINNED to the same fixed wall the conduction rows see, T_hydro = T_cond = a·T_ref,
+// instead of zero-gradient-extrapolating the live top cell. The wall stays a
+// PHYSICAL-FACE conduction datum (unlike baseline decouple=0, where the wall reverts
+// to a ghost-CENTRE datum), so relative to the release this moves exactly one thing:
+// the thermal state the outer-face reconstruction and Riemann problem carry.
+bool  kOuterHydroTWall = false;
+// ISO_OUTER_P_NEUMANN: the outer ghost pressure stops being the FIXED reservoir
+// back-pressure kOuterPRef and is extrapolated off the LIVE top cell instead — a
+// Neumann pressure closure. Subsonic outflow admits exactly ONE incoming
+// characteristic, so exactly one condition may be imposed from outside; this swaps
+// WHICH variable carries it, from the back-pressure to the temperature, and is
+// therefore only well posed with a FIXED hydro ghost temperature
+// (ISO_OUTER_T_HYDRO_WALL=1, or baseline decouple=0). Two readings of "no imposed
+// pressure", both selectable because they are physically different statements:
+//   1 = dp/ds = 0            — p_g1 = p_g0 = p_top, the literal zero-gradient BC.
+//       Note this is NOT gravitationally consistent: the interior needs
+//       dp/ds = −ρg, so the ghost withholds the hydrostatic support of the top cell.
+//   2 = dp/ds = −ρg          — the same trapezoidal EOS-closed ladder the release
+//       uses (hse_rung), but ANCHORED ON THE LIVE TOP CELL instead of kOuterPRef.
+//       Hydrostatically consistent, and imposes no external pressure datum at all.
+int   kOuterPNeumann = 0;
 
 double gamma_density_from_pressure(const Grid& grid, double pressure, double temperature) {
     if (!(pressure > 0.0) || !(temperature > 0.0))
@@ -262,6 +284,24 @@ Vec model_column_ic(Grid& grid) {
     // Upper-BC over-specification experiment: hydro ghost T free-floats (zero
     // gradient), conduction wall unchanged. Default 0 ⇒ baseline behaviour.
     kHydroTDecouple    = (env_f("ISO_HYDRO_T_DECOUPLE", 0.0f) != 0.0f);
+    // Outer-face closure variant: which ONE condition the subsonic-outflow face
+    // imposes. Release = fixed back-pressure + free hydro T. Setting both knobs is
+    // the swap: fixed hydro/conduction T + a Neumann pressure.
+    kOuterHydroTWall   = (env_f("ISO_OUTER_T_HYDRO_WALL", 0.0f) != 0.0f);
+    kOuterPNeumann     = static_cast<int>(env_f("ISO_OUTER_P_NEUMANN", 0.0f));
+    if (kOuterPNeumann < 0 || kOuterPNeumann > 2)
+        throw std::runtime_error(
+            "model_column_ic: ISO_OUTER_P_NEUMANN must be 0 (fixed reservoir "
+            "back-pressure, the release), 1 (dp/ds = 0) or 2 (dp/ds = -rho g, "
+            "anchored on the live top cell)");
+    if (kOuterPNeumann && kHydroTDecouple && !kOuterHydroTWall)
+        throw std::runtime_error(
+            "model_column_ic: a nonzero ISO_OUTER_P_NEUMANN removes the imposed "
+            "outer pressure, so the one condition the subsonic-outflow face admits "
+            "must come from the temperature. Combine it with "
+            "ISO_OUTER_T_HYDRO_WALL=1 (fixed hydro ghost T at the conduction wall) "
+            "or with ISO_HYDRO_T_DECOUPLE=0; with the release's extrapolated hydro "
+            "temperature the face would impose nothing and the column drains.");
 
     // Adiabatic index. Default 5/3. ISO_GAMMA near 1 (e.g. 1.05) makes the gas
     // nearly isothermal — a polytropic stand-in for the radiative thermostat the
@@ -872,8 +912,12 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         // temperature. ISO_HYDRO_T_DECOUPLE=1: the hydro ghost instead zero-gradient-
         // extrapolates the live top cell (T_hydro_g0 = T_hydro_g1 = T_top) and only the
         // conduction rows keep the wall, via grid.outer_conduction_temperature.
+        // ISO_OUTER_T_HYDRO_WALL=1 (decoupled mode): the hydro ghost carries the wall
+        // value again, T_hydro = T_cond = a·T_ref, while the wall REMAINS a physical-
+        // face conduction datum — the fixed-T half of the pressure/temperature swap.
         const Real T_cond_wall = a_live * kTtopRef;
-        const Real T_g0 = kHydroTDecouple ? T_top : T_cond_wall;
+        const bool hydro_T_free = kHydroTDecouple && !kOuterHydroTWall;
+        const Real T_g0 = hydro_T_free ? T_top : T_cond_wall;
         const Real T_g1 = kHydroTDecouple ? T_g0  : b_live * T_g0;
         grid.outer_conduction_temperature_override = kHydroTDecouple;
         grid.outer_conduction_temperature          = T_cond_wall;
@@ -936,13 +980,29 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
                       << " Pa  p_top=" << p_top << " Pa  T_top=" << T_top
                       << " K  T_hydro_g0=" << T_g0 << " K  T_cond_wall="
                       << T_cond_wall << " K  hydro_T_decouple="
-                      << (kHydroTDecouple ? 1 : 0) << std::endl;
+                      << (kHydroTDecouple ? 1 : 0)
+                      << "  hydro_T_wall=" << (kOuterHydroTWall ? 1 : 0)
+                      << "  p_neumann=" << kOuterPNeumann << std::endl;
         }
-        Real p_g0 = kOuterPRef;
+        // The outer ghost pressures. Mode 0 (release): the fixed reservoir back-
+        // pressure, then one hydrostatic rung up. Mode 1: dp/ds = 0, so the ghost pair
+        // is uniform in p and the reconstruction sees no imposed pressure slope either.
+        // Mode 2: the same hydrostatic ladder as mode 0, re-anchored on the live top
+        // cell. In modes 1 and 2 the externally imposed condition is T_g instead.
+        Real p_g0 = kOuterPNeumann == 1 ? p_top : kOuterPRef;
+        if (kOuterPNeumann == 2) {
+            Real rho_ladder;                      // ladder off the LIVE top cell
+            hse_rung(p_top, rho_top, T_g0, p_g0, rho_ladder);
+        }
         if (p_g0 < 1.0e-12f) p_g0 = 1.0e-12f;
         const Real rho_g0 = ghost_density(p_g0, T_g0);
         Real p_g1, rho_g1;
-        hse_rung(p_g0, rho_g0, T_g1, p_g1, rho_g1);
+        if (kOuterPNeumann == 1) {
+            p_g1   = p_g0;
+            rho_g1 = ghost_density(p_g1, T_g1);
+        } else {
+            hse_rung(p_g0, rho_g0, T_g1, p_g1, rho_g1);
+        }
 
         // Velocity. Stage 1 (relaxation): static reservoir V=0. Stage 2: Mach-capped
         // OUTFLOW so the evaporation upflow can leave, while |V| ≤ kVcapMach·c_s

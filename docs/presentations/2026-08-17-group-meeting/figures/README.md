@@ -10,5 +10,9 @@ Kept inside the talk's own folder so the deck stays buildable from a fresh clone
 | `precision_ulp_mechanism.png` | Crop of panel (f). **Not used** — the precision result is one aside slide, and the ULP mechanism is stated in a sentence instead. Kept for the "how do you know?" question. |
 | `precision_mass_budget.png` | Crop of panel (e). **Not used** — unreadable at slide size. |
 | `precision_base_zoom.png` | Crop of panel (c). **Not used** — kept as a backup asset for the first-face-artifact question. |
+| `twall_response.png` | Crop of panel (0,0) of `visualization/model_column/twall_sweep_N500_4000s_summary.png` — quasi-steady V vs `T_wall`. |
+| `twall_enthalpy_budget.png` | Crop of panel (1,2) of the same figure — measured V against the steady enthalpy-flux estimate. |
+| `twall_local_slope.png` | Crop of panel (0,2). **Not used** — the log-log fit and the local exponent are quoted as numbers instead. Kept for the "is it really a power law?" question. |
+| `twall_massflux_uniform.png` | Crop of the left panel of `visualization/model_column/twall_sweep_N500_4000s_support.png` — height-independent `rho V`. Backup slide. Near-square, so the deck sizes it by `height`, not `width`. |
 
-Only `c7_ionization_profile_compare.png` and `precision_ftotal_4000s.png` appear in the deck; the other three are backup assets. The four crops are reproduced by the snippet recorded in `visualize_commands.md` section 15. The parent figure comes from `util/plot_precision_control.py`; see `docs/studies/numerics/float32_precision_control_experiment.md`.
+Used in the deck: `c7_ionization_profile_compare.png`, `precision_ftotal_4000s.png`, `twall_response.png`, `twall_enthalpy_budget.png`, `twall_massflux_uniform.png`. The rest are backup assets. Every crop is reproduced by the snippets recorded in `visualize_commands.md` section 15. Parent figures and their studies: `util/plot_precision_control.py` with `docs/studies/numerics/float32_precision_control_experiment.md` and `docs/studies/numerics/state_precision_release_cutover.md`; `util/twall_sweep_diag.py` with `docs/studies/boundaries/upper_wall_temperature_sensitivity_recap.md`.

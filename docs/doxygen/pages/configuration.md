@@ -89,6 +89,8 @@ Knobs valid in **both** modes:
 | `ISO_TJUMP_A` | float | `1.0` | Outer ghost temperature jump `T_ghost1 = a * T_ref`. |
 | `ISO_TJUMP_B` | float | `1.0` | Second ghost jump `T_ghost2 = b * T_ghost1`. |
 | `ISO_HYDRO_T_DECOUPLE` | float, non-zero = on | `0` | Lets the outer **hydro** ghost temperature zero-gradient-extrapolate the live top cell while the conduction solver keeps the fixed wall at the physical outer face. Release preset 1. |
+| `ISO_OUTER_T_HYDRO_WALL` | float, non-zero = on | `0` | Diagnostic only. In decoupled mode, pins the outer **hydro** ghost temperature back to the conduction wall (`T_hydro = T_cond = ISO_T_TOP`) while the wall stays a physical-face conduction datum. Only useful together with `ISO_OUTER_P_NEUMANN` — see [Which variable carries the outer condition](#config-outer-closure-swap). |
+| `ISO_OUTER_P_NEUMANN` | integer, `0`\|`1`\|`2` | `0` (fixed reservoir back-pressure) | Diagnostic only. Replaces the fixed outer back-pressure `kOuterPRef` with a Neumann pressure closure extrapolated off the live top cell: `1` = `dp/ds = 0`, `2` = `dp/ds = -rho g` (the release ladder re-anchored on the live top cell). Rejected unless the hydro ghost temperature is fixed, since otherwise the face would impose nothing. Mode `1` **destroys the model** — see [Which variable carries the outer condition](#config-outer-closure-swap). |
 | `ISO_VCAP` | float, Mach | `0.1` | Outer outflow velocity cap as a fraction of the sound speed. |
 | `ISO_INNER_T_NEUMANN` | float, non-zero = on | `0` (Dirichlet) | Conduction lower BC: Dirichlet fixed reservoir temperature vs Neumann (insulating). |
 
@@ -261,3 +263,34 @@ Four decades of velocity for one decade of wall temperature. The response is a s
 The mechanism is entirely conductive: the wall thermostats the top cell to within 0.3 %, Spitzer conductivity supplies the `T^2.5`, and a column with no radiative sink must export the resulting conductive flux as the enthalpy flux of the evaporating material, so `V ~ q_wall / [rho_top (h + x chi_H/m_H)]` to within a factor of two over the whole range. Two practical consequences: any quantitative evaporation result is a statement about the chosen wall temperature as much as about the chromosphere, and a wall below about 8 kK drives the top of the column below the `Gamma1` table temperature floor and aborts the run.
 
 Full study, including the time-convergence and CFL caveats: `docs/studies/boundaries/upper_wall_temperature_sensitivity_recap.md`.
+
+## Which variable carries the outer condition {#config-outer-closure-swap}
+
+Subsonic outflow at the 2153 km face admits exactly one incoming characteristic, so exactly one condition may be imposed from outside. The release puts it in the **pressure** (fixed reservoir back-pressure `kOuterPRef`) and leaves the hydro ghost temperature free. `ISO_OUTER_T_HYDRO_WALL` and `ISO_OUTER_P_NEUMANN` exist to put it in the **temperature** instead, and both outcomes are worth knowing before anyone tries it again.
+
+| | release | `T_HYDRO_WALL=1`, `P_NEUMANN=1` (`dp/ds = 0`) | `T_HYDRO_WALL=1`, `P_NEUMANN=2` (`dp/ds = -rho g`) |
+|---|---:|---:|---:|
+| column mass at 4000 s | 99.994 % | **49.94 %** | 98.97 % |
+| `V_top` [m/s] | +9.50 | **−2462.5** (= the `ISO_VCAP` cap) | +0.49 |
+| top-face `f_total` [kg m⁻² s⁻¹] | +2.70e−10 | **−4.13e−07** | +1.47e−11 |
+| `T` at 1900 km [K] | 6654 | **23694** (fully ionized) | 6670 |
+| `p_top` drift over 4000 s | ~0 % | +493 % | +5.8 %, still rising |
+| termination | `end_time` | `end_time` | `end_time` |
+
+`dp/ds = 0` **destroys the model.** The interior needs `dp/ds = -rho g`, so a zero-gradient face permanently withholds the top cell's hydrostatic support; the column collapses inward, the transition region marches down past 1900 km within 200 s, half the column mass is pushed out through the base, and by 1000 s the run is a perfectly steady 23.7 kK fully ionized downdraft whose velocity is set by `ISO_VCAP` and nothing else. It never crashes and it reports `godunov.fallbacks=0`: **a clean termination is not evidence that a boundary closure is sound.**
+
+`dp/ds = -rho g` is hydrostatically consistent and survives 4000 s, but with the pressure *level* unpinned it drifts secularly and the conduction-driven evaporation signal — the thing the model exists to measure — falls by a factor of ~19. Stability was not the reason to prefer the fixed back-pressure; measurability is.
+
+That last point was then tested where it matters, on a wall-temperature comparison at 22 kK and 100 kK (both CFL 0.25; 100 kK fails the conduction Newton at 0.50 under either closure):
+
+| quasi-steady, 4000 s | release 22 kK | release 100 kK | unanchored 22 kK | unanchored 100 kK |
+|---|---:|---:|---:|---:|
+| `V_top` [m/s] | +9.645 | +791.9 | +0.542 | +37.7 |
+| `f_top / f_base` | +0.997 | +1.086 | −0.067 | −0.144 |
+| column mass | 99.994 % | 99.887 % | 98.978 % | **77.3 %** |
+| `p_top(t)/p_top(0)` | 1.000 | 1.000 | 1.057 | **2.276, rising** |
+| `T` at 1900 km [K] | 6654 | 6546 | 6670 | **21931** |
+
+The two-point exponent of `V ~ T_wall^n` is 2.911 anchored and 2.802 unanchored, so the **shape** of the wall response survives while every absolute value is ~20x too small (17.8x at 22 kK, 21.0x at 100 kK). Meanwhile the top and base mass fluxes take opposite signs — the column drains downward with an evaporative trickle on top — and at 100 kK the transition region migrates down to 1900 km and destroys the chromosphere there. A closure that reproduces the right power law and the wrong everything else is the worst kind to leave available without this warning.
+
+Both knobs are diagnostic only and no release number may be quoted from them. Full study, including the controls that place the failure in the missing hydrostatic slope rather than the missing anchor: `docs/studies/boundaries/outer_bc_pressure_temperature_swap_recap.md`.

@@ -57,8 +57,10 @@ The authoritative index of which study is current and which is superseded is the
 | File | What it is |
 | --- | --- |
 | `writeup_standards.md` | **Authoritative.** How to catch the write-ups up after a code change. Referenced by the root `CLAUDE.md`. |
+| `publication_strategy_plan.md` | The AWSoM-R gap this work fills, the publication plan built on it, measured cost against the host's real-time budget, and the instantaneous-Saha justification plan |
+| `project_context_zh.md` | **中文.** Plain-language explanation of AWSoM-R, the opening in its chromospheric closure, and what this work delivers — for a reader who has not read Sokolov et al. (2021). Derived from `publication_strategy_plan.md`, which stays authoritative for every planning decision. |
 | `scenario_reconciliation_plan.md` | Proposed scenario consolidation; partly implemented |
-| `electron_temperature_plan.md` | Three-temperature (`T_e != T_i`) design, two-fluid solver only |
+| `electron_temperature_plan.md` | Three-temperature (`T_e != T_i`) design, two-fluid solver only. **Note:** the *release* `T_e != T_i` question is scoped separately — see `publication_strategy_plan.md` §2.7, which measures τ_eq = 0.09–3.9 ms over the release domain and defers the split to Tier 2. |
 | `event-data-to-code.md` | How observations of the 2024-08-01 M8.2 flare become model inputs |
 | `codexpro.md` | Saved workspace-profile notes |
 

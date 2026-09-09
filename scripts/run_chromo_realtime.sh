@@ -44,7 +44,15 @@ export CHROMO_PROGRESS_STRIDE="${CHROMO_PROGRESS_STRIDE:-10000}"
 # N=500/R4, 661-cell physical-conduction-only model_column release. Other
 # scenarios retain the solver's conservative CHROMO_CFL=0.25 fallback unless
 # CHROMO_CFL is explicitly supplied.
-if [[ "${4:-}" == "model_column" ]]; then
+#
+# model_column_2t (the EXPERIMENTAL two-temperature test study) is included
+# because it is the SAME mesh, model shape and configuration as the release
+# column, and because its acoustic CFL rule is byte-for-byte the release rule:
+# the frozen signal speed sqrt(5/3 p/rho) depends only on the TOTAL pressure, so
+# splitting the temperature does not change it. Running it at a different CFL
+# would make the comparison against the release uncontrolled — the two runs would
+# not even take the same number of steps.
+if [[ "${4:-}" == "model_column" || "${4:-}" == "model_column_2t" ]]; then
     export CHROMO_CFL="${CHROMO_CFL:-0.50}"
 fi
 

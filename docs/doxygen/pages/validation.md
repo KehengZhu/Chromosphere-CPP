@@ -130,6 +130,37 @@ The four `release_reject_*` cases check the *reason* for the failure, not merely
 
 **The source-split momentum form assumes constant area.** The release runs `B = 1`, where this is not an issue. On a variable-area flux tube the split form is not generally equivalent to the conservative area-weighted operator; that path is not part of the release.
 
+## The single-temperature assumption, measured
+
+Not a limitation but a positive result, and the only place in this document where a release
+assumption is checked against a *different solver* rather than against a refinement of itself.
+
+The release is a single-fluid equilibrium mixture with one temperature. A separate experimental
+two-temperature solver (`src/two_temp/`, scenario `model_column_2t`, @ref two_temp_physics) was
+built and run on exactly the release column — same atmosphere, mesh, gravity, table, CFL and
+boundary geometry, one shared IC/BC implementation, so the temperature split is the only variable.
+At `T_e = T_i` the two closures degenerate exactly: at t = 0 the two states are **bit-identical**
+in all three release rows.
+
+Over 4000 s the two temperatures never meaningfully separate. The global maximum over every cell
+and all 712,031 steps is `max |T_e - T_i|/T_i = 3.28e-3`, reached at t ~ 0.022 s in the top cell
+during the boundary switch-on and decaying as `1/t`; the quasi-steady value is `9.0e-6`
+(0.0715 K). The two-temperature run reproduces the release top-of-domain velocity and mass flux to
+**0.176 %** and the column pressure to `3.1e-5`. The mechanism is timescale separation: `tau_eq` is
+`9.2e-5` to `4.0e-3 s` against a conduction/evaporation timescale of order `1e3 s`.
+
+**What this licenses and what it does not.** It validates the single-temperature closure *for this
+configuration* — a 1600–2153 km chromospheric column with physical conduction only and a 22 kK
+electron-conducted outer reservoir. It says nothing about a flare, beam-heated, much hotter or much
+more rarefied regime, where `tau_eq` rises and the electron heat flux is far larger. Only N=500 was
+run, so the decoupling itself is not grid-converged. Evidence:
+`docs/studies/conduction/two_temperature_test_study.md`.
+
+**The experimental solver itself has no registered CTest case** and is not exercised by
+`scripts/release_validation.sh` — it is a test study, not a shipped path. What *is* verified after
+adding it is that the release is unaffected: all 9 CTest cases pass and `release_validation.sh`
+completes clean with the two-temperature sources compiled in.
+
 ## Rejected approaches
 
 Both of these were prototyped and measured, and **must not be reintroduced without new evidence**.
@@ -158,3 +189,4 @@ The authoritative records live in `docs/`. Current code is always the source of 
 | `docs/studies/conduction/physical_conductive_flux_recap.md` | Diagnostic definition current, numbers historical | The plotted conductive flux is `q_phys = -(kappa_e + kappa_n) dT/ds` and excludes every solver-only term. |
 | `docs/studies/numerics/static_local_refinement.md` | Current | The static local-refinement mesh builder — not AMR. |
 | `docs/studies/performance/openmp_parallelization_recap.md` | Current | Thread-count scaling and the bit-identical serial/OpenMP result. |
+| `docs/studies/conduction/two_temperature_test_study.md` | Current; **EXPERIMENTAL, non-release** | That the release's single-temperature assumption holds on the release column to about 0.2 % in the evaporation observables, measured against a separate `T_e != T_i` solver. Also the characteristic derivation of the two-temperature boundary conditions, and two bugs found and fixed in the experimental path. |

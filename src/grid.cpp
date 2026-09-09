@@ -56,6 +56,13 @@ void Grid::init(arma::uword ns_in, Real CFL_in) {
     inner_boundary0_i.zeros(num_of_eq);
     inner_boundary1_i.zeros(num_of_eq);
 
+    // Experimental two-temperature ghosts (src/two_temp/). Four rows, matching
+    // num_of_two_temp_eq, which that solver's header declares.
+    tt_outer_boundary0.zeros(4);
+    tt_outer_boundary1.zeros(4);
+    tt_inner_boundary0.zeros(4);
+    tt_inner_boundary1.zeros(4);
+
     B_state_imh.zeros(n_state);
     B_state_iph.zeros(n_state);
     B_state.zeros(n_state);

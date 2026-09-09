@@ -26,6 +26,7 @@
  */
 #include "chromosphere.hpp"
 #include "single_fluid/mixture.hpp"
+#include "two_temp/two_temp.hpp"
 #include "two_fluid/two_fluid.hpp"
 #include "physics.hpp"
 #include "profiling.hpp"
@@ -211,21 +212,25 @@ int main(int argc, char** argv) {
             grid.eos_gamma_table = EosGammaTable::load(gamma_table_path);
             if (explicit_only)
                 throw std::logic_error("the release solver has no explicit-only mode");
-            if (scenario_name != "model_column")
-                throw std::logic_error("the release solver currently supports only model_column");
+            if (scenario_name != "model_column" && scenario_name != "model_column_2t")
+                throw std::logic_error(
+                    "the Gamma1/Saha solvers currently support only model_column "
+                    "(release) and model_column_2t (experimental two-temperature)");
         } catch (const std::exception& e) {
             std::cerr << "release-solver error: " << e.what() << std::endl;
             return 1;
         }
     }
-    // A loaded Gamma1 table selects the RELEASE single-fluid solver; without it
-    // the driver runs the historical two-fluid research solver.
-    const bool release_mode = !grid.eos_gamma_table.empty();
+    // A loaded Gamma1 table selects a Saha/Gamma1 solver; without it the driver
+    // runs the historical two-fluid research solver. WHICH Gamma1 solver — the
+    // release single-fluid one or the experimental two-temperature one — is
+    // decided by the scenario, below, after its IC has run.
+    const bool gamma_mode = !grid.eos_gamma_table.empty();
     grid.enable_ionization = ionization_on;
     grid.enable_radiative_cooling = cooling_on;
     // Legacy two-fluid research knobs. They have no meaning for the release
     // solver, which is a single-fluid common-temperature equilibrium mixture.
-    if (!release_mode) {
+    if (!gamma_mode) {
         // "neutrals off" experiment: SINGLE_FLUID=1 slaves neutrals to the ion
         // fluid. Default (unset/0) is the full two-fluid model.
         if (const char* e = std::getenv("SINGLE_FLUID")) {
@@ -242,6 +247,9 @@ int main(int argc, char** argv) {
                          "no-ionization" << std::endl;
             return 1;
         }
+        // ENABLE_TE is the HISTORICAL two-fluid three-temperature knob and stays
+        // rejected here. The experimental two-temperature solver is selected by
+        // the `model_column_2t` scenario, not by a legacy flag on a release run.
         for (const char* legacy : {"SINGLE_FLUID", "ENABLE_TE", "ISO_TWO_FLUID",
                                    "ISO_IONIZATION"}) {
             if (std::getenv(legacy)) {
@@ -253,10 +261,22 @@ int main(int argc, char** argv) {
         }
     }
     Vec xn = sc.ic(grid);
+    // The scenario's IC is what decides between the two Gamma1/Saha solvers.
+    const bool two_temp_mode = grid.two_temperature;
+    const bool release_mode = gamma_mode && !two_temp_mode;
+    TwoTempWorkspace two_temp_work;
+    if (two_temp_mode) two_temp_work.resize(grid.ns);
     if (release_mode && xn.n_elem != grid.n_mixture_state) {
         std::cerr << "release-solver error: the scenario returned a state of "
                   << xn.n_elem << " elements, expected " << grid.n_mixture_state
                   << " (rho, rho u, E per cell)" << std::endl;
+        return 1;
+    }
+    if (two_temp_mode && xn.n_elem != grid.ns*num_of_two_temp_eq) {
+        std::cerr << "two-temperature error: the scenario returned a state of "
+                  << xn.n_elem << " elements, expected "
+                  << grid.ns*num_of_two_temp_eq
+                  << " (rho, rho u, E, E_e per cell)" << std::endl;
         return 1;
     }
 
@@ -299,7 +319,8 @@ int main(int argc, char** argv) {
     //           the 1e-3 conversion)
     //   then, repeated: a "# t = T step = S" marker followed by ns lines of
     //   num_of_eq space-separated conserved-variable values.
-    const arma::uword state_rows = release_mode ? num_of_mixture_eq : num_of_eq;
+    const arma::uword state_rows = two_temp_mode ? num_of_two_temp_eq
+        : release_mode ? num_of_mixture_eq : num_of_eq;
     std::ofstream fout;
     if (write_output) fout.open(out_path);
     // NOTE: a default-constructed std::ofstream has goodbit, so `if (stream)` is
@@ -335,6 +356,36 @@ int main(int argc, char** argv) {
                    << "# columns=rho_total v_cm T x_eq n_e n_HI p_total Gamma1 kappa_physical kappa_solver\n";
     }
 
+    // EXPERIMENTAL two-temperature sidecar. Same frame layout as `.gamma_diag`
+    // (a header pair, a heights row, then `# t = ... step = ...` markers followed
+    // by one row per cell), so the analysis scripts share a reader. `tau_eq` is
+    // the LOCAL electron-heavy energy-equilibration time 1/(nu_ei + nu_en) that
+    // the implicit exchange stage actually used, which makes the stiffness of the
+    // coupling readable straight off the output.
+    std::ofstream two_temp_diag;
+    if (two_temp_mode && write_gamma_diag) {
+        two_temp_diag.open(out_path+".twotemp");
+        if (!two_temp_diag) throw std::runtime_error("cannot open two-temperature sidecar");
+        two_temp_diag << grid.ns << " 14\n";
+        Real cum_km = 0.0f;
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            cum_km += grid.ds_i(i)*1.0e-3f;
+            two_temp_diag << "  " << (cum_km+grid.out_base_km);
+        }
+        two_temp_diag << "\n# EOS_MODE=two_temperature\n"
+                      << "# GAMMA_TABLE=" << gamma_table_path << "\n"
+                      << "# GAMMA_TABLE_SHA256=" << gamma_table_sha256 << "\n"
+                      << "# state=(rho, rho u, E, E_e); T_e and T_i are DERIVED\n"
+                      << "# p_total = n_H k_B (T_i + x T_e), x = x_Saha(n_H, T_e)\n"
+                      << "# kappa_e acts on T_e, kappa_i (neutral H) acts on T_i\n"
+                      << "# Q_ei = g_ei (T_i - T_e) [W m^-3], positive = heating electrons\n"
+                      << "# tau_eq = 1.5 n_e k_B / g_ei [s]\n"
+                      << "# outer_Ti_neumann=" << grid.tt_outer_Ti_neumann << "\n"
+                      << "# columns=rho_total v T_e T_i x_eq n_e n_HI p_total p_e p_i "
+                         "kappa_e kappa_i Q_ei tau_eq\n";
+        two_temp_diag.precision(10);
+    }
+
     auto write_frame = [&](Real t_now, long long step_now) {
         ProfileScope output_timer(ProfileRegion::Output);
         if (fout.is_open()) {
@@ -365,6 +416,32 @@ int main(int argc, char** argv) {
                            << "  " << physical_conductivity(th.n_e,th.n_HI,th.T)
                            << "  " << physical_conductivity(th.n_e,th.n_HI,th.T)
                            << '\n';
+            }
+        }
+        if (two_temp_diag.is_open()) {
+            two_temp_diag << "# t = " << t_now << " step = " << step_now << '\n';
+            const auto sz = arma::size(grid.ns, num_of_two_temp_eq);
+            for (arma::uword i = 0; i < grid.ns; ++i) {
+                auto at = [&](arma::uword k) -> double {
+                    return static_cast<double>(xn(arma::sub2ind(sz, i, k)));
+                };
+                const TwoTempThermo th = two_temp_decode(
+                    grid.eos_gamma_table, at(tt::RHO), at(tt::MOM),
+                    at(tt::ENERGY), at(tt::E_ELEC), two_temp_cell_phi(grid, i),
+                    std::numeric_limits<double>::quiet_NaN());
+                const double g_ex =
+                    two_temp_exchange_conductance(th.n_e, th.n_HI, th.T_e);
+                const double tau_eq = (g_ex > 0.0)
+                    ? 1.5*th.n_e*eos_constants::k_b/g_ex
+                    : std::numeric_limits<double>::infinity();
+                two_temp_diag << "  " << th.rho << "  " << at(tt::MOM)/th.rho
+                              << "  " << th.T_e << "  " << th.T_i
+                              << "  " << th.x << "  " << th.n_e << "  " << th.n_HI
+                              << "  " << th.p << "  " << th.p_e << "  " << th.p_i
+                              << "  " << two_temp_kappa_e(th.n_e, th.n_HI, th.T_e)
+                              << "  " << two_temp_kappa_i(th.n_e, th.n_HI, th.T_i)
+                              << "  " << g_ex*(th.T_i - th.T_e)
+                              << "  " << tau_eq << '\n';
             }
         }
     };
@@ -521,6 +598,7 @@ int main(int argc, char** argv) {
     MixtureField decoded_storage[2];
     MixtureField* decoded=&decoded_storage[0];
     const MixtureField* previous_decoded=nullptr;
+    TwoTempField two_temp_previous;
     if (schedule.due(step, time)) {
         write_frame(time, step);
         schedule.note_written(step, time);
@@ -533,7 +611,12 @@ int main(int argc, char** argv) {
             sc.update_bc(grid, xn);
         }
         Vec dt;
-        if (release_mode) {
+        if (two_temp_mode) {
+            two_temp_decode_into(grid, xn, two_temp_work.decoded,
+                                 two_temp_work.stats,
+                                 two_temp_previous.ns ? &two_temp_previous : nullptr);
+            dt = two_temp_timestep(grid, xn, two_temp_work.decoded);
+        } else if (release_mode) {
             mixture_decode_into(grid,xn,*decoded,state_generation,previous_decoded);
             dt = mixture_timestep(grid,xn,*decoded);
         } else {
@@ -557,7 +640,13 @@ int main(int argc, char** argv) {
                       << "  T_c = " << grid.trac_cutoff_T << std::endl;
         }
 
-        if (release_mode)
+        if (two_temp_mode) {
+            xn = two_temp_advance(grid, xn, dt, two_temp_work.decoded,
+                                  two_temp_work);
+            // Keep this step's decode as the next step's Newton seed. The hint
+            // only accelerates the inversion; it never changes the root.
+            two_temp_previous = two_temp_work.decoded;
+        } else if (release_mode)
             xn = mixture_advance(grid,xn,dt,*decoded);
         else
             xn = explicit_only ? advance_Euler_explicit_state(grid,xn,dt)
@@ -606,7 +695,9 @@ int main(int argc, char** argv) {
     }
     // Release swmf_godunov flux: report what the exact Riemann solver did, so a
     // silent fallback to Rusanov can never be mistaken for a Godunov result.
-    if (grid.swmf_godunov_flux) {
+    // (The experimental two-temperature solver keeps its own tally, below, and
+    // never touches grid.godunov_stats, so its zeros are not printed here.)
+    if (grid.swmf_godunov_flux && !two_temp_mode) {
         const GodunovFluxStats& g = grid.godunov_stats;
         std::cout << "godunov.faces=" << g.faces << '\n'
                   << "godunov.exact=" << g.exact << '\n'
@@ -625,6 +716,29 @@ int main(int argc, char** argv) {
             std::cerr << "WARNING: the swmf-godunov flux fell back to Rusanov on "
                       << g.fallbacks() << " of " << g.faces << " face solves."
                       << std::endl;
+    }
+    // EXPERIMENTAL two-temperature tally. `max_relative_decoupling` is the
+    // headline measurement of the study; the clamp counters must all be zero for
+    // the run to be quotable.
+    if (two_temp_mode) {
+        const TwoTempStats& t = two_temp_work.stats;
+        std::cout << "twotemp.max_relative_decoupling=" << t.max_relative_decoupling << '\n'
+                  << "twotemp.godunov_faces=" << t.godunov_faces << '\n'
+                  << "twotemp.godunov_fallbacks=" << t.godunov_fallbacks << '\n'
+                  << "twotemp.clamps=" << t.clamps()
+                  << " (face_pe=" << t.face_pe_clamps
+                  << " decode_Te=" << t.decode_Te_clamps
+                  << " decode_Ti=" << t.decode_Ti_clamps << ")\n"
+                  << "twotemp.conduction_iterations_max="
+                  << t.max_conduction_iterations << std::endl;
+        if (t.godunov_fallbacks != 0)
+            std::cerr << "WARNING: the two-temperature Godunov flux fell back to "
+                         "Rusanov on " << t.godunov_fallbacks << " of "
+                      << t.godunov_faces << " face solves." << std::endl;
+        if (t.clamps() != 0)
+            std::cerr << "WARNING: the two-temperature solver clamped a state "
+                      << t.clamps() << " times; no number from this run is "
+                         "quotable." << std::endl;
     }
     print_runtime_profile(std::cout);
     if (eos_counting_on) {

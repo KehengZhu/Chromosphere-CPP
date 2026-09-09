@@ -70,6 +70,60 @@ TRAC, nonthermal beam heating, volumetric coronal heating, radiative cooling, an
 
 ---
 
+# The experimental two-temperature model {#two_temp_physics}
+
+**Not release physics.** This is a test study, run only by `model_column_2t` on the solver in `src/two_temp/`, asking one question the release cannot answer from inside its own assumptions: **how far do the electron and heavy-particle temperatures drift apart in the modelled 1600–2153 km column?** The release path is unaffected by its presence.
+
+## Governing equations
+
+One fluid, one velocity, **two** temperatures, on the same prescribed flux tube. Electrons are massless and comoving — quasi-neutrality plus zero field-aligned current — so there is still exactly one momentum equation. Protons and neutral hydrogen are lumped into a single **heavy** population at `T_i`: they exchange energy through charge exchange and elastic collisions far faster than anything resolved here, and the release model has no ion/neutral drift either.
+
+```
+d_t(rho)   + (1/A) d_s(A rho u)         = 0
+d_t(rho u) + (1/A) d_s(A (rho u^2 + p)) = p d_s(ln A) - rho d_s(phi_g)
+d_t(E)     + (1/A) d_s(A (E + p) u)     = -(1/A) d_s(A (q_e + q_i))
+d_t(E_e)   + (1/A) d_s(A E_e u)         = -p_e (1/A) d_s(A u)
+                                          -(1/A) d_s(A q_e) + Q_ei
+```
+
+`E` keeps its release meaning — the **total** energy — so mass, momentum and total energy stay in exact conservation form and the release numerical flux applies to those three rows unchanged. The heavy internal energy is then **derived**, `e_i = E - E_e - 1/2 rho u^2 - rho phi_g`, which makes `T_i = (2/3) e_i / (n_H k_B)` purely algebraic with no inversion at all. This "total energy plus electron energy" split is the standard two-temperature MHD formulation (AWSoM/BATS-R-US; van der Holst et al. 2010, Sokolov et al. 2021), and it is the same split the historical two-fluid `cons::E_E` row already uses.
+
+## Closure
+
+```
+n_H  = rho / m_H                       (protons + neutrals)
+x    = x_Saha(n_H, T_e)                (ionization is an ELECTRON process)
+n_e  = x n_H,   n_HI = (1 - x) n_H
+p_e  = n_e k_B T_e
+p_i  = n_H k_B T_i
+p    = p_e + p_i = n_H k_B (T_i + x T_e)
+E_e  = 3/2 p_e + x n_H chi_H           (the electron pool OWNS the ionization reservoir)
+E    = 3/2 p_i + E_e + 1/2 rho u^2 + rho phi_g
+q_e  = -kappa_e(n_e, n_HI, T_e) d_s T_e
+q_i  = -kappa_n(n_e, n_HI, T_i) d_s T_i
+Q_ei = g_ei (T_i - T_e),  g_ei = 3/2 n_e k_B (nu_ei + nu_en)
+```
+
+**At `T_e = T_i = T` this degenerates exactly to the release closure**: `p = (1+x) n_H k_B T` and `E_e + (3/2) p_i = (3/2) p + x n_H chi_H = e_int`. That exact degeneracy is the experiment's control, and it is enforced in code by taking the electron caloric pair as literal differences of the public release EOS functions rather than re-deriving them.
+
+**Why the ionization energy sits in the electron pool, and why Saha is evaluated at `T_e`.** Hydrogen ionization and recombination in this regime are electron-impact processes: the energy `chi_H` per ionization is taken from, and returned to, the electron thermal reservoir. Putting it anywhere else would mean the heavy population paid for a transition it does not mediate.
+
+## Conduction and collisional coupling
+
+The two conductive channels are the release's own two, each now evaluated at the temperature that actually drives it: Spitzer `kappa_e` at `T_e`, neutral-hydrogen `kappa_n` at `T_i`. Spitzer **proton** conduction is deliberately omitted — about 2.3 % of `kappa_e` for hydrogen — precisely so that `kappa_e + kappa_n` reproduces the release total conductivity *exactly* at `T_e = T_i`, leaving the temperature split as the only changed variable.
+
+The equilibration conductance `g_ei` uses the translational electron capacity `(3/2) n_e k_B` times `nu_ei + nu_en`, with the Spitzer/NRL electron-ion rate and the Vranjes & Krstic (2013) electron-neutral cross-section. Both channels matter: the lower chromosphere is weakly ionized, so `n_HI >> n_e` there and electron-neutral collisions carry a large share of the electron thermalization. The resulting local equilibration time across this column is short — of order 0.09 ms at the base rising to a few ms at the top — which is why the initial condition sets `T_e = T_i` and lets the solver, not the IC, generate any split.
+
+## Boundaries
+
+The conductive reservoir at the top is assigned to the **electron** channel (Dirichlet `T_e = 22,000 K`), with the heavy channel insulating, because conduction down from the transition region and corona is electron-conducted and there are no neutrals above the domain to supply a heavy flux. The base is Dirichlet on both temperatures, which is a property of a collisionally equilibrated dense reservoir rather than an added assumption. Both *hydrodynamic* temperatures free-float at the outflow face, because the subsonic-outflow characteristic budget admits exactly one imposed condition and the reservoir back-pressure already spends it. The full derivation is in @ref numerics-two-temp-bc.
+
+## What this model deliberately does not contain
+
+No finite-rate ionization, no radiative cooling, no TRAC, no beam, no volumetric heating, no ion/neutral drift, no anisotropic ion temperature. **The release's open modelling question carries over unchanged and is if anything sharper here**: the Riemann solve freezes composition while the EOS decode re-imposes instantaneous Saha equilibrium after every step — now at `T_e`. The algorithm is still `Saha-equilibrated state -> frozen-composition hydro step -> Saha-equilibrated state`, an operator-split instantaneous-relaxation approximation that is not justified when the physical relaxation time is long.
+
+---
+
 # The historical two-fluid model {#two_fluid_physics}
 
 Not the release path. Kept because it is the only path with finite-rate ionization, separate species temperatures and the full source-term catalogue, and because several scenarios still run on it.

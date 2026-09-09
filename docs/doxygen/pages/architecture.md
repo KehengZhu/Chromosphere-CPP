@@ -4,22 +4,25 @@ This page describes where code lives, what depends on what, who owns the state, 
 
 ## The dependency rule
 
-There are two solvers over one shared mesh. `chromosphere.hpp` (the Grid, the two conserved-row index sets, the scratch and diagnostic-capture structures) and `eos.hpp` (the pure-hydrogen Saha closure and the CRASH `Gamma1` table) form the shared layer. Both solver directories depend on that layer and on nothing else of each other's.
+There are three solvers over one shared mesh. `chromosphere.hpp` (the Grid, the conserved-row index sets, the scratch and diagnostic-capture structures) and `eos.hpp` (the pure-hydrogen Saha closure and the CRASH `Gamma1` table) form the shared layer. Every solver directory depends on that layer and on nothing else of the others'.
 
 @verbatim
-                 chromosphere.hpp  +  eos.hpp
-                    (Grid)            (closure)
-                        ^                ^
-                        |                |
-            +-----------+                +-----------+
-            |                                        |
-   src/single_fluid/                         src/two_fluid/
-   RELEASE                                   HISTORICAL research
-   U = (rho, rho u, E)   -- no edge -->       7-row carrier state
-   3 conserved rows        <-- no edge --     ion/neutral/electron
+                       chromosphere.hpp  +  eos.hpp
+                          (Grid)            (closure)
+                        ^          ^          ^
+                        |          |          |
+            +-----------+     +----+----+     +-----------+
+            |                 |                           |
+   src/single_fluid/     src/two_temp/            src/two_fluid/
+   RELEASE               EXPERIMENTAL             HISTORICAL research
+   U = (rho, rho u, E)   U = (rho,rho u,E,E_e)    7-row carrier state
+   3 conserved rows      4 conserved rows         ion/neutral/electron
+   one temperature       T_e != T_i               three temperatures
 @endverbatim
 
-`src/single_fluid/mixture.hpp` does not include `two_fluid/two_fluid.hpp`, and `two_fluid/two_fluid.hpp` does not include `single_fluid/mixture.hpp`. The two do not share a conserved-state width, a packing convention, a timestep function, or a boundary-ghost buffer. The only translation unit that includes both headers is `chromo_main.cpp`, which selects between them at run time. See @ref shared, @ref release_solver and @ref two_fluid_solver.
+`src/single_fluid/mixture.hpp` does not include `two_fluid/two_fluid.hpp`, and `two_fluid/two_fluid.hpp` does not include `single_fluid/mixture.hpp`. No two of the three share a conserved-state width, a packing convention, a timestep function, or a boundary-ghost buffer. The only translation unit that includes all three headers is `chromo_main.cpp`, which selects between them at run time. See @ref shared, @ref release_solver, @ref two_temp_solver and @ref two_fluid_solver.
+
+There is exactly one edge between solver directories, and it is deliberate: `src/two_temp/hydro.cpp` includes `single_fluid/exact_rs.hpp`. That header is the standalone port of the SWMF **ideal-gas** Riemann solver — a self-contained numerical routine, not release physics — and the two-temperature system's frozen-composition acoustics are identical to the release's (see @ref numerics), so re-porting it would have produced two copies of the same code to no benefit. Nothing else in `src/two_temp/` reaches into `src/single_fluid/`, and nothing in `src/single_fluid/` reaches into `src/two_temp/`, so the release path is unaffected by the experiment's presence.
 
 ## Annotated file tree
 
@@ -51,6 +54,17 @@ There are two solvers over one shared mesh. `chromosphere.hpp` (the Grid, the tw
 | `src/single_fluid/mixture.cpp` | State decode, MUSCL reconstruction of `(ln rho, u, ln p)` with the MC3/Koren limiter, the release SWMF exact-Riemann Godunov flux with face-local Rusanov fallback, the Roe and Rusanov reference fluxes, the flux-tube pressure + gravity source, and the flux-consistent CFL timestep. |
 | `src/single_fluid/exact_rs.hpp` / `.cpp` | Line-for-line port of the SWMF exact ideal-gas Riemann solver (`share/Library/src/ModExactRS.f90`): the star-state pressure/velocity iteration and the self-similar sampler the release flux calls at every face. |
 | `src/single_fluid/integrator.cpp` | Implicit backward-Euler physical conduction, `mixture_conduction_residual_max`, and `mixture_advance` — the whole two-stage release timestep. |
+
+### Experimental two-temperature solver, `src/two_temp/` (non-release)
+
+Selected only by the `model_column_2t` scenario. See @ref two_temp_solver for the governing equations and @ref physics_model for the closure.
+
+| Path | What it holds |
+| --- | --- |
+| `src/two_temp/two_temp.hpp` | Four-row experimental API and the full governing-equation statement: `tt::` row indices, TwoTempThermo, TwoTempField, TwoTempWorkspace, TwoTempStats, and the stage entry points `two_temp_decode_into`, `two_temp_rhs_explicit`, `two_temp_timestep`, `two_temp_apply_conduction`, `two_temp_advance`. |
+| `src/two_temp/closure.cpp` | The two-temperature thermodynamic closure: the electron caloric pair `two_temp_electron_energy` / `two_temp_electron_capacity` taken as exact differences of the release EOS, the safeguarded-Newton inversion for `T_e`, the state decode and pack, the algebraic face-state builder, `two_temp_kappa_e` / `two_temp_kappa_i`, and the electron-heavy exchange conductance. |
+| `src/two_temp/hydro.cpp` | Explicit stage: MUSCL reconstruction of `(ln rho, u, ln p, ln T_e)`, the MUSCL-Hancock predictor, the SWMF exact-Riemann Godunov flux on the three release rows with face-local Rusanov fallback, the electron energy upwinded on the contact with the exact mass flux, and the geometric pressure/gravity plus electron-compression sources. |
+| `src/two_temp/conduction.cpp` | Coupled implicit backward-Euler `(T_e, T_i)` conduction and collisional exchange, solved by Newton on a 2x2-block tridiagonal Jacobian, plus the per-channel boundary closures. |
 
 ### Historical two-fluid solver, `src/two_fluid/`
 
@@ -113,13 +127,14 @@ Multiple Grids can therefore coexist in one process, and `tests/chromo_tests.cpp
 
 ## Solver selection
 
-Selection is by **data**, not by a flag: a non-empty `Grid::eos_gamma_table` selects the release single-fluid solver; an empty one selects the historical two-fluid solver.
+Selection is by **data**, not by a flag: a non-empty `Grid::eos_gamma_table` selects a Saha/`Gamma1` solver, and an empty one selects the historical two-fluid solver. *Which* Saha solver — the release single-fluid one or the experimental two-temperature one — is then decided by the scenario's IC, through `Grid::two_temperature`.
 
 The chain is:
 
-1. `make_scenario("model_column", ...)` in `scenarios/scenario.cpp` calls `set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat")` unconditionally, and rejects `ISO_GAMMA` outright. `model_gentle` and the other two-fluid scenarios never set it.
-2. `chromo_main.cpp` reads `GAMMA_TABLE`, hashes the file and assigns `grid.eos_gamma_table = EosGammaTable::load(path)`. `release_mode` is then simply `!grid.eos_gamma_table.empty()`.
-3. Both solvers guard their own entry points against the other's Grid, so a mismatch throws rather than silently computing nonsense:
+1. `make_scenario("model_column", ...)` in `scenarios/scenario.cpp` calls `set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat")` unconditionally, and rejects `ISO_GAMMA` outright. `model_column_2t` does the same. `model_gentle` and the other two-fluid scenarios never set it.
+2. `chromo_main.cpp` reads `GAMMA_TABLE`, hashes the file and assigns `grid.eos_gamma_table = EosGammaTable::load(path)`. `gamma_mode` is then simply `!grid.eos_gamma_table.empty()`.
+3. `xn = sc.ic(grid)` runs. `model_column_2t_ic` sets `grid.two_temperature = true` and returns a four-row state; `model_column_ic` leaves the flag false and returns a three-row state. The driver then fixes `two_temp_mode = grid.two_temperature` and `release_mode = gamma_mode && !two_temp_mode`, and checks the returned state length against the width that choice implies (`grid.n_mixture_state` or `grid.ns*num_of_two_temp_eq`).
+4. Each solver guards its own entry points against the others' Grid, so a mismatch throws rather than silently computing nonsense:
 
 | Guard site | Condition | Result |
 | --- | --- | --- |
@@ -131,8 +146,9 @@ The chain is:
 | `advance_Euler_state` (`src/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws; points at `mixture_advance` |
 | `advance_Euler_explicit_state` (`src/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws |
 | `advance_RK4` (`src/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws |
+| `two_temp_decode_into` (`src/two_temp/closure.cpp`) | `eos_gamma_table.empty()` | throws `"the two-temperature solver requires a Gamma1 table"` |
 
-The driver adds its own release-mode preconditions before the first step: it rejects `explicit` mode, any scenario other than `model_column`, a simultaneously supplied `ISO_GAMMA`, finite-rate `ionization`, and the legacy variables `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID` and `ISO_IONIZATION`. It also checks that the scenario returned exactly `grid.n_mixture_state` elements.
+The driver adds its own preconditions before the first step for either Saha solver: it rejects `explicit` mode, any scenario other than `model_column` or `model_column_2t`, a simultaneously supplied `ISO_GAMMA`, finite-rate `ionization`, and the legacy variables `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID` and `ISO_IONIZATION`. `ENABLE_TE` stays rejected specifically because it is the *historical two-fluid* three-temperature knob — the experimental two-temperature solver is selected by the scenario, never by a legacy flag on a release command line. The driver also checks that the scenario returned exactly the state width its solver expects.
 
 ## Lifecycle of one run
 
@@ -141,19 +157,22 @@ The driver adds its own release-mode preconditions before the first step: it rej
         |
   Grid::init(sc.peek_ns(), cfl)           src/grid.cpp  -- allocate ns-sized fields
         |
-  [GAMMA_TABLE loaded?] -> release_mode   chromo_main.cpp
+  [GAMMA_TABLE loaded?] -> gamma_mode     chromo_main.cpp
         |
   xn = sc.ic(grid)                        scenario IC: geometry, B, gravity,
         |                                 ghost buffers, initial conserved state;
         |                                 may call Grid::resize(ns_new) for a
         |                                 locally refined mesh
         |
-  +---- per step ------------------------------------------------+
-  |  sc.update_bc(grid, xn)               refresh ghost buffers   |
-  |  dt = mixture_timestep(...)  |  cal_dt_i(...)                 |
-  |  xn = mixture_advance(...)   |  advance_Euler_state(...)      |
-  |  write_frame / sidecar records when the schedule says so      |
-  +---------------------------------------------------------------+
+  [grid.two_temperature?] -> which        two_temp_mode, else release_mode
+        |                    Saha solver
+        |
+  +---- per step ---------------------------------------------------+
+  |  sc.update_bc(grid, xn)               refresh ghost buffers     |
+  |  dt = mixture_timestep(...) | two_temp_timestep(...)| cal_dt_i() |
+  |  xn = mixture_advance(...)  | two_temp_advance(...) | advance_.. |
+  |  write_frame / sidecar records when the schedule says so         |
+  +-----------------------------------------------------------------+
         |
   final frame + termination report        termination=end_time|step_cap|other
 @endverbatim
@@ -166,7 +185,7 @@ One static library, five executables, and a CTest suite.
 
 | Target | Sources | Purpose |
 | --- | --- | --- |
-| `chromosphere` (STATIC) | `src/*.cpp`, `src/single_fluid/*.cpp`, `src/two_fluid/*.cpp`, `scenarios/*.cpp` | Both solvers, the shared layer, and all scenarios. `PUBLIC` include dirs: repository root, `src`, `include`. |
+| `chromosphere` (STATIC) | `src/*.cpp`, `src/single_fluid/*.cpp`, `src/two_temp/*.cpp`, `src/two_fluid/*.cpp`, `scenarios/*.cpp` | All three solvers, the shared layer, and all scenarios. `PUBLIC` include dirs: repository root, `src`, `include`. |
 | `chromo_main` | `chromo_main.cpp` | The simulation driver. |
 | `chromo_tests` | `tests/chromo_tests.cpp` | The C++ test binary. |
 | `eos_validate_saha` | `util/eos/validate_saha.cpp` | Offline cross-check of every CRASH `zAv` row against the actual double/log-domain C++ Saha implementation. Built but not registered as a CTest. |

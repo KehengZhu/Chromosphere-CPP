@@ -128,6 +128,37 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
         sc.update_bc = [](Grid& g, const Vec& xn) { model_column_update_bc(g, xn); };
         return sc;
     }
+    // EXPERIMENTAL two-temperature (T_e != T_i) twin of the release column. It
+    // takes exactly the release model/grid defaults — same atmosphere, mesh,
+    // gravity, boundary geometry, Gamma1 table and CFL — so that the ONLY
+    // controlled variable against `model_column` is the temperature split, and
+    // then selects the four-row solver of src/two_temp/. It is a test study, not
+    // a release capability: nothing a `model_column` command line can set
+    // reaches it, and it changes no release default.
+    if (name == "model_column_2t") {
+        if (std::getenv("ISO_GAMMA"))
+            throw std::runtime_error(
+                "make_scenario: model_column_2t is built on the Saha/Gamma1 "
+                "closure; ISO_GAMMA (the historical fixed-gamma two-fluid index) "
+                "has no meaning here.");
+        set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
+        set_env_default("ISO_H_BASE",                     "1600");
+        set_env_default("ISO_DH",                         "553");
+        set_env_default("ISO_NS",                         "500");
+        set_env_default("ISO_HEAT_FLUX",                  "1");
+        set_env_default("ISO_T_TOP",                      "22000");
+        set_env_default("ISO_HYDRO_T_DECOUPLE",           "1");
+        set_env_default("ISO_REFINE_PROFILE",             "outer");
+        set_env_default("ISO_REFINE_FACTOR",              "4");
+        set_env_default("ISO_REFINE_S_LO_KM",             "500");
+        set_env_default("ISO_REFINE_TRANSITION_KM",       "20");
+        sc.peek_ns   = []() { return column_peek_ns(); };
+        sc.ic        = [](Grid& g) { return model_column_2t_ic(g); };
+        sc.update_bc = [](Grid& g, const Vec& xn) {
+            model_column_2t_update_bc(g, xn);
+        };
+        return sc;
+    }
     if (name == "analytic_canopy") {
         sc.peek_ns   = []() { return analytic_canopy_peek_ns(); };
         sc.ic        = [](Grid& g) { return analytic_canopy_ic(g); };

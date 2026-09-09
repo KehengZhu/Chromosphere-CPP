@@ -123,6 +123,18 @@ const arma::uword num_of_mixture_eq = 3;
 /// the two solvers do not share a state width.
 const arma::uword num_of_eq = 7;
 
+// ============================================================================
+// Experimental two-temperature state — NON-RELEASE, see src/two_temp/
+// ============================================================================
+//
+// The experimental (T_e != T_i) solver keeps its own four-row conserved state
+// (rho, rho u, E, E_e) and its own row indices in `tt::`
+// (src/two_temp/two_temp.hpp). Nothing about it is declared here except the two
+// things the SHARED Grid must own: its four ghost buffers and the one flag that
+// selects it. Its scratch workspace lives in TwoTempWorkspace, owned by the
+// driver, so this experimental path adds no scratch to the Grid and cannot
+// affect the release solver.
+
 /// Conserved-variable indices (writeup eq 61).
 ///
 /// Three-temperature extension (docs/design/electron_temperature_plan.md): a 7th
@@ -1077,6 +1089,41 @@ struct Grid {
     Vec outer_boundary0_i, outer_boundary1_i;
     Vec inner_boundary0_i, inner_boundary1_i;
     ///@}
+
+    ///@}
+
+    /** @name Experimental two-temperature ghost buffers (length 4) */
+    ///@{
+    /// The two hydrodynamic ghost layers of the EXPERIMENTAL two-temperature
+    /// solver (`src/two_temp/`), in its own (rho, rho u, E, E_e) rows, nearest
+    /// layer first. Written only by `model_column_2t`; untouched by both the
+    /// release and the two-fluid paths.
+    ///@{
+    Vec tt_outer_boundary0, tt_outer_boundary1;
+    Vec tt_inner_boundary0, tt_inner_boundary1;
+    ///@}
+
+    /// EXPERIMENTAL TWO-TEMPERATURE ONLY. Select the separate-electron-temperature
+    /// solver of `src/two_temp/`, whose conserved state is the four rows
+    /// (rho, rho u, E, E_e). Set ONLY by the `model_column_2t` scenario; the
+    /// release `model_column` scenario leaves it false and the release solver
+    /// never reads it, so a release run is byte-for-byte unaffected. This is not a
+    /// release capability behind a flag — it selects a different solver
+    /// directory, the same way a loaded Gamma1 table selects the release solver
+    /// over the two-fluid one.
+    bool two_temperature = false;
+
+    /// EXPERIMENTAL TWO-TEMPERATURE ONLY. Outer-face conduction boundary condition
+    /// on the HEAVY-particle temperature. True (the default, and the
+    /// characteristically and physically motivated choice) makes the outer face
+    /// insulating for the heavy channel: the fully ionized plasma above the domain
+    /// top has no neutral-hydrogen conductive flux to supply, and Spitzer proton
+    /// conduction — not modelled here — is only about 2.3 % of kappa_e. False
+    /// instead imposes the same Dirichlet wall temperature on T_i that the
+    /// electron channel gets, which is the controlled comparison
+    /// (`TT_OUTER_TI=dirichlet`). The ELECTRON channel keeps the release's
+    /// physical-face Dirichlet reservoir in both cases.
+    bool tt_outer_Ti_neumann = true;
 
     ///@}
 

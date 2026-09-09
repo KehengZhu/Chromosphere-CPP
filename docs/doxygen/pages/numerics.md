@@ -123,6 +123,50 @@ This is what keeps `CHROMO_CFL` meaning the CFL of the scheme actually running. 
 
 Two run-control variables matter for long runs. `CHROMO_T_END` sets an absolute stop time in physical seconds and disables the legacy `time_mult`-derived step cap, so a long run cannot be silently truncated. `CHROMO_FRAME_DT` sets the snapshot cadence in physical seconds rather than steps, and is required whenever output is enabled on a long run — without it the wall time is dominated by ASCII formatting. Every run prints `termination=end_time|step_cap|other`; always check that a long run ended with `end_time`. See @ref configuration.
 
+## The experimental two-temperature scheme {#numerics-two-temp}
+
+**Not release numerics.** `src/two_temp/` advances the four-row state `U = (rho, rho u, E, E_e)` with the release's two-stage Lie split, the single scalar conduction solve replaced by a coupled 2x2-block one:
+
+@verbatim
+    U^n -> explicit MUSCL-Hancock/Godunov hydro -> U* -> implicit coupled
+           (T_e, T_i) conduction + collisional exchange -> U^{n+1}
+@endverbatim
+
+**The acoustics are unchanged, and that is a result rather than an approximation.** Both electrons and heavy particles are monatomic, so at frozen composition the total internal energy still splits exactly as
+
+@verbatim
+    e_int = e_h + e_e = (3/2) p_h + (3/2) p_e + e_ion = p/(5/3 - 1) + e_ion
+@endverbatim
+
+*independently of how the thermal energy is shared between the two pools*. The release SWMF-style exact-Riemann Godunov flux at `gamma = 5/3`, carrying the ionization energy in SWMF's passive specific-energy offset `E0`, is therefore exactly as valid here as for the release; the frozen signal speed is still `sqrt(5/3 p/rho)`; and `two_temp_timestep` is the release CFL rule verbatim. The stiff collisional exchange imposes no step limit because it is solved implicitly.
+
+The extra physical content rides on a **second characteristic at `lambda = u`**. In primitive variables `(rho, u, p, p_e)` the electron energy equation reduces to the adiabatic electron-pressure law `d_t p_e + u d_s p_e + (5/3) p_e d_s u = 0`, and the flux Jacobian has characteristic polynomial `mu^2 (mu^2 - c^2)` with `mu = u - lambda`. The eigenvalues are `{u - c, u, u, u + c}`, and the doubled `u` is not defective: its two-dimensional eigenspace is spanned by the usual entropy/density mode and by a **pure electron-heavy partition mode**. The three rows the release flux acts on are exactly the rows whose characteristic structure is unchanged; the fourth row is advected on the contact, upwinded with the exact mass flux the Riemann solve already produced.
+
+Reconstruction adds a fourth slot: `(ln rho, u, ln p, ln T_e)` with the same MC3/Koren limiter at `beta = 2`. The **total** pressure remains the directly reconstructed mechanical variable, so the electron/heavy split is the only thing the new slot changes. Face states are built algebraically from `(rho, u, p, T_e)` with no temperature inversion at all: `x = x_Saha(n_H, T_e)`, `p_e = x n_H k_B T_e`, `p_i = p - p_e`, `T_i = p_i/(n_H k_B)`. If a reconstruction leaves `p_e >= p` the **electron** share is capped and the event is counted, because the total pressure is authoritative and must be preserved exactly.
+
+**Conduction and collisional exchange** are solved together by Newton on `(T_e, T_i)` with a 2x2-block tridiagonal Jacobian: the two channels never couple across cells, so the sub- and super-diagonal blocks are diagonal and only the 2x2 diagonal block carries the exchange. The accepted energies are the backward-Euler targets rather than an EOS round-trip of the converged temperatures, so the discrete energy balance holds exactly and the antisymmetric exchange cancels between the pools. Mass and momentum are untouched and both conductive fluxes are re-summed into the total-energy row, so the stage conserves total energy by construction.
+
+The electron caloric pair is taken as exact differences of the *public release EOS functions* — `E_e = e_int(rho,T_e) - (3/2) n_H k_B T_e` and likewise for the capacity — so the two solvers can never drift apart thermodynamically, and at `T_e = T_i` the pools re-sum to `e_int`. Inverting `E_e` for `T_e` uses a **safeguarded Newton with guaranteed bisection progress** (`rtsafe`). The guarantee is not decorative: near full ionization the caloric curve has a very sharp knee, because at `x -> 1` the electron capacity collapses to the translational value while just below the knee `dx/dT_e` makes it orders of magnitude larger. A Newton step taken from the flat side overshoots the knee by thousands of kelvin, and an inversion safeguarded *only* against leaving the bracket oscillates between the two bracket ends indefinitely — each iterate landing strictly inside by ~1e-10 K, so the out-of-bracket test never fires and the bracket shrinks by ~1e-10 K per pass. That was an observed run-ending failure (at `rho = 8.26e-11`, `x = 0.999965`), not a hypothetical.
+
+Every guard the solver can trip is counted in `TwoTempStats` and printed as a `twotemp.*` tally at the end of the run: face `p_e` caps, both decode clamps, Godunov fallbacks, the maximum conduction Newton pass count, and the headline `max_relative_decoupling`. A nonzero clamp or fallback count invalidates the run.
+
+### Two-temperature boundary conditions {#numerics-two-temp-bc}
+
+The hyperbolic and parabolic stages need separate accounting, and conflating them is the usual way to get this wrong.
+
+**Hyperbolic stage — count the characteristics.** At the outer face the flow is subsonic outflow (`0 < u < c`), so of `{u - c, u, u, u + c}` three characteristics *leave* the domain and only `u - c` enters. Exactly **one** condition may be imposed from outside, and the release already spends it on the fixed reservoir back-pressure `kOuterPRef`. Both hydrodynamic temperatures — equivalently the entropy mode and the electron/heavy partition mode, which are precisely the two modes riding the doubled `lambda = u` — must therefore **free-float**, and are zero-gradient extrapolated from the live top cell. Imposing a temperature there would over-specify the problem. At the 1600 km base the flow enters the domain subsonically, so three characteristics are incoming, three conditions are admissible, and the scenario's Dirichlet reservoir in density and *both* temperatures with `v = 0` is within budget.
+
+**Parabolic stage — one condition per channel per end.** Conduction is a separate operator and needs its own four conditions:
+
+| Face | Electron channel | Heavy channel | Why |
+| --- | --- | --- | --- |
+| Outer (2153 km) | **Dirichlet** `T_e = 22,000 K` | **Neumann** (zero flux) | Conduction down from the transition region and corona is **electron**-conducted: the plasma above is fully ionized and Spitzer `kappa_e ~ T^{5/2}` carries it. The heavy channel modelled here is *neutral-hydrogen* conduction, and there are no neutrals above the domain to supply a flux, so zero heavy flux is the consistent statement. `TT_OUTER_TI=dirichlet` runs the controlled comparison. |
+| Inner (1600 km) | **Dirichlet** `T_0` | **Dirichlet** `T_0` | The dense base is collisionally equilibrated — the local equilibration time is about 0.09 ms there — so `T_e = T_i = T_0` is a property of the reservoir, not an extra assumption. `ISO_INNER_T_NEUMANN=1` makes both channels insulating instead. |
+
+This is also the point of the study: assigning the 22,000 K conductive reservoir to the electron channel *specifically* is the physically meaningful thing the temperature split buys, where the release necessarily applies it to one lumped temperature.
+
+**Separate conductivities.** `two_temp_kappa_e` is the release Spitzer expression evaluated at `T_e`; `two_temp_kappa_i` is the release neutral-hydrogen expression evaluated at `T_i`. Spitzer *proton* conduction is deliberately **not** added: it is about 2.3 % of `kappa_e` for hydrogen, and omitting it makes `kappa_e + kappa_n` reproduce the release total conductivity *exactly* at `T_e = T_i`, so the experiment changes only which temperature each existing channel acts on. The exchange conductance `g_ei` is the translational electron capacity `(3/2) n_e k_B` times `nu_ei + nu_en`; both channels are kept because the weakly ionized lower chromosphere has `n_HI >> n_e`, where electron-neutral collisions are the faster route to a common temperature.
+
 ## The two-fluid scheme
 
 For contrast: the historical solver uses TVD-MUSCL with the symmetric minmod limiter, the Rusanov / local Lax-Friedrichs flux, and a semi-implicit operator-split driver with the stage sequence listed in `src/two_fluid/integrators.cpp`. Its implicit branch is currently disabled at the call site (see the known issue in @ref physics_model). Explicit RK4 is also available for the explicit-only path. Those are two-fluid entry points; the release timestep is `chromosphere::mixture_advance`.

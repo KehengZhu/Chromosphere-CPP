@@ -1,18 +1,22 @@
 /*!
  * @defgroup shared Shared infrastructure
- * @brief Code both solvers depend on: the mesh, the thermodynamic closure, the
+ * @brief Code every solver depends on: the mesh, the thermodynamic closure, the
  *        physics formula library, and the runtime support layer.
  *
  * The dependency direction is strictly one way:
  *
  * @verbatim
- *      chromosphere.hpp  +  eos.hpp        (shared)
- *              ^                  ^
- *        single_fluid          two_fluid
+ *          chromosphere.hpp  +  eos.hpp        (shared)
+ *              ^              ^            ^
+ *        single_fluid      two_temp     two_fluid
  * @endverbatim
  *
- * Neither solver directory includes the other, and the two do not share a
- * conserved-state width, a packing convention, or a timestep path.
+ * No solver directory includes another's solver code, and no two of them share a
+ * conserved-state width, a packing convention, or a timestep path. The one
+ * exception is deliberate and one-directional: the experimental two-temperature
+ * solver reuses `single_fluid/exact_rs.hpp`, the standalone port of the SWMF
+ * ideal-gas Riemann solver, because that solver is a self-contained ideal-gas
+ * routine and not release physics.
  */
 
 /*!

@@ -48,15 +48,22 @@ add_compile_definitions(ARMA_DONT_USE_LAPACK ARMA_DONT_USE_BLAS)
 # Two solvers, two source directories, one shared infrastructure layer.
 #   src/*.cpp             shared: profiling, EOS, Grid geometry/broadcast
 #   src/single_fluid/     RELEASE: U = (rho, rho u, E) equilibrium mixture
+#   src/two_temp/         EXPERIMENTAL test study: U = (rho, rho u, E, E_e),
+#                         separate electron and heavy-particle temperatures.
+#                         Reuses only single_fluid/exact_rs.hpp (a standalone
+#                         port of the SWMF ideal-gas Riemann solver).
 #   src/two_fluid/        HISTORICAL research: seven-row carrier state
-# Neither solver directory depends on the other.
+# No solver directory depends on another's solver code.
 add_library(chromosphere STATIC
     src/profiling.cpp
     src/eos.cpp
     src/grid.cpp
     src/single_fluid/mixture.cpp
-src/single_fluid/exact_rs.cpp
+    src/single_fluid/exact_rs.cpp
     src/single_fluid/integrator.cpp
+    src/two_temp/closure.cpp
+    src/two_temp/hydro.cpp
+    src/two_temp/conduction.cpp
     src/two_fluid/state.cpp
     src/two_fluid/flux.cpp
     src/two_fluid/rhs.cpp

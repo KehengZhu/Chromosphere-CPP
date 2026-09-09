@@ -2,12 +2,13 @@
 
 Everything `chromo_main` writes is line-oriented ASCII. This page is the on-disk layout of each file. The writer is `chromo_main.cpp`; it is the authority for every column name quoted here. See @ref driver for the driver's control flow and @ref architecture for where the pieces live.
 
-A run writes at most five files: the main snapshot at the path given as `argv[1]` (default `outputs/output.txt`), three sidecars derived from that path by suffix, and one appended log.
+A run writes at most six files: the main snapshot at the path given as `argv[1]` (default `outputs/output.txt`), four sidecars derived from that path by suffix, and one appended log.
 
 | File | Enabled by | Default |
 | --- | --- | --- |
 | `<out>` (main snapshot) | `CHROMO_OUTPUT` | on |
 | `<out>.gamma_diag` | `CHROMO_GAMMA_DIAG`, release solver only | on |
+| `<out>.twotemp` | `CHROMO_GAMMA_DIAG`, experimental two-temperature solver only | on |
 | `<out>.faceflux` | `CHROMO_FACE_FLUX_DIAG`, release solver only | off |
 | `<out>.outercond` | `CHROMO_OUTER_COND_DIAG`, release solver only | off |
 | `outputs/output.log` | always | always |
@@ -42,7 +43,7 @@ so it is the **upper face** height of cell `i`, not the cell centre — `ds_i` i
 
 **Then, repeated per frame:** a marker line `# t = <t> step = <step>` followed by exactly `ns` rows. Each row is one cell, in increasing cell index, holding `state_rows` values each preceded by two spaces, written in row-index order `k = 0 .. state_rows-1`. Values are the stored conserved-state numbers (`chromosphere::Real`, `double` in the release) printed at the default stream precision, i.e. **six significant digits** — so the on-disk format is a fixed ASCII text format and is unaffected by the storage precision the solver was built with. There is no binary state I/O anywhere in this code. The final state is always written even when it does not land on the output cadence, so the last frame may not be a multiple of the stride.
 
-`state_rows` takes exactly two values.
+`state_rows` takes exactly three values.
 
 ### `state_rows == 3` — release snapshot
 
@@ -55,6 +56,19 @@ The single-fluid equilibrium-mixture state `U = (rho, rho u, E)`, indices `mix::
 | 2 | `mix::ENERGY` | total energy density `E = e_int(rho,T) + 1/2 rho u^2 + rho phi_g` | J m<sup>-3</sup> |
 
 `e_int` includes the hydrogen ionization energy. The ionization fraction `x`, `n_e`, `n_HI`, `p_e` and `T` are **not** in this file — they are derived EOS diagnostics, and the `.gamma_diag` sidecar is where the driver writes them out.
+
+### `state_rows == 4` — experimental two-temperature snapshot
+
+The four-row `(T_e != T_i)` state of `src/two_temp/`, indices `tt::`. Written only by `model_column_2t`.
+
+| Column | Symbol | Meaning | Units |
+| --- | --- | --- | --- |
+| 0 | `tt::RHO` | total mass density | kg m<sup>-3</sup> |
+| 1 | `tt::MOM` | field-aligned momentum density `rho u` | kg m<sup>-2</sup> s<sup>-1</sup> |
+| 2 | `tt::ENERGY` | **total** energy density `E = (3/2) p_i + E_e + 1/2 rho u^2 + rho phi_g` | J m<sup>-3</sup> |
+| 3 | `tt::E_ELEC` | electron internal energy **including** the ionization reservoir, `E_e = (3/2) p_e + x n_H chi_H` | J m<sup>-3</sup> |
+
+The first three rows carry exactly the release meanings. `T_e`, `T_i` and every carrier quantity are derived, and the `.twotemp` sidecar is where they are written out.
 
 ### `state_rows == 7` — two-fluid snapshot
 
@@ -115,6 +129,48 @@ Then, per frame, a `# t = <t> step = <step>` marker and `ns` rows of 10 values, 
 | 7 | `Gamma1` | CRASH adiabatic (acoustic) index | — |
 | 8 | `kappa_physical` | `physical_conductivity(n_e, n_HI, T)` = `physical_kappa_e + physical_kappa_n` | W m<sup>-1</sup> K<sup>-1</sup> |
 | 9 | `kappa_solver` | the identical call; see the header note | W m<sup>-1</sup> K<sup>-1</sup> |
+
+## `<out>.twotemp`
+
+The experimental two-temperature sidecar, written when `CHROMO_GAMMA_DIAG` is on **and** the run is a `model_column_2t` run. Deliberately the same shape as `.gamma_diag` — a count/width line, a heights line, `#` provenance lines, then `# t = ... step = ...` frame markers followed by one row per cell — so analysis scripts can share a reader.
+
+@verbatim
+661 14
+  1601.1  1602.21  ...                  (ns heights, km)
+# EOS_MODE=two_temperature
+# GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat
+# GAMMA_TABLE_SHA256=<64 hex>
+# state=(rho, rho u, E, E_e); T_e and T_i are DERIVED
+# p_total = n_H k_B (T_i + x T_e), x = x_Saha(n_H, T_e)
+# kappa_e acts on T_e, kappa_i (neutral H) acts on T_i
+# Q_ei = g_ei (T_i - T_e) [W m^-3], positive = heating electrons
+# tau_eq = 1.5 n_e k_B / g_ei [s]
+# outer_Ti_neumann=1
+# columns=rho_total v T_e T_i x_eq n_e n_HI p_total p_e p_i kappa_e kappa_i Q_ei tau_eq
+# t = 0 step = 0
+  ...                                   (ns rows of 14 values)
+@endverbatim
+
+Line 1 is `ns 14`. The `# outer_Ti_neumann=` line records which outer heavy-channel condition the run used (`TT_OUTER_TI`), so a file identifies its own boundary configuration. Every row is a fresh `two_temp_decode` of the corresponding snapshot cell with a NaN temperature seed — a clean re-derivation, not a solver cache dump. Unlike `.gamma_diag` this file is written at **10 significant digits**, because the quantity of interest is the *difference* `T_e - T_i`, which is small compared with either temperature.
+
+| Column | Name | Meaning | Units |
+| --- | --- | --- | --- |
+| 0 | `rho_total` | total mass density | kg m<sup>-3</sup> |
+| 1 | `v` | field-aligned velocity, positive along increasing `s` | m s<sup>-1</sup> |
+| 2 | `T_e` | electron temperature | K |
+| 3 | `T_i` | heavy-particle (proton + neutral) temperature | K |
+| 4 | `x_eq` | Saha ionization fraction evaluated at `T_e` | — |
+| 5 | `n_e` | electron number density `x n_H` | m<sup>-3</sup> |
+| 6 | `n_HI` | neutral hydrogen number density `(1-x) n_H` | m<sup>-3</sup> |
+| 7 | `p_total` | total pressure `n_H k_B (T_i + x T_e)` | Pa |
+| 8 | `p_e` | electron partial pressure `n_e k_B T_e` | Pa |
+| 9 | `p_i` | heavy partial pressure `n_H k_B T_i` | Pa |
+| 10 | `kappa_e` | Spitzer electron conductivity at `T_e` | W m<sup>-1</sup> K<sup>-1</sup> |
+| 11 | `kappa_i` | neutral-hydrogen conductivity at `T_i` | W m<sup>-1</sup> K<sup>-1</sup> |
+| 12 | `Q_ei` | collisional exchange `g_ei (T_i - T_e)`; positive heats the electrons | W m<sup>-3</sup> |
+| 13 | `tau_eq` | local electron-heavy equilibration time `1.5 n_e k_B / g_ei` | s |
+
+Note the velocity column is column 1 here but column 1 is named `v_cm` in `.gamma_diag`; both are SI m s<sup>-1</sup>, and the `_cm` suffix there is historical.
 
 ## `<out>.faceflux`
 

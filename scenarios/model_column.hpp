@@ -50,8 +50,9 @@
  *   ISO_RELAX_TIME    Stage-1 adiabatic relaxation phase length [s] (default 0)
  *   ISO_TJUMP_A/_B    top ghost-T jump factors a, b (default 1)
  *   ISO_T_TOP         absolute imposed top-boundary temperature [K] (release: 22000)
- *   ISO_HYDRO_T_DECOUPLE  hydro ghost T free-floats; conduction keeps the fixed
- *                     PHYSICAL-FACE wall (release preset: 1)
+ *   ISO_HYDRO_T_DECOUPLE  1 = hydro ghost T free-floats and conduction keeps the
+ *                     fixed wall at the PHYSICAL FACE; 0 = one fixed ghost T
+ *                     serves hydro and conduction (release preset: 0)
  *   ISO_VCAP          outer outflow Mach cap (default 0.1)
  *   ISO_INNER_T_NEUMANN  conduction lower BC: 0 = Dirichlet (default) / 1 = Neumann
  *   ISO_REFINE_*      static local mesh refinement (scenarios/mesh.hpp)

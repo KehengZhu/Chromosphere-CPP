@@ -101,13 +101,15 @@ bool  kQflux = false;
 // it; the additional fixed hydro T pins the thermal/entropy state as well, which is
 // the suspected source of the ~20-30 km top boundary layer. This flag removes ONLY
 // that extra hydro constraint, holding the conductive energy input fixed.
-// Default 0 ⇒ unchanged behaviour.
+// Code default 0, and the release preset also sets 0: on the N=500/R4 mesh the top
+// cell relaxes to the wall in ~0.1 s, so the extra hydro constraint is inert
+// (V_top within 1 %) — see outer_temperature_bc_single_t_recap.md.
 bool  kHydroTDecouple = false;
 // ISO_OUTER_T_HYDRO_WALL=1 (decoupled mode only): the HYDRO ghost temperature is
 // PINNED to the same fixed wall the conduction rows see, T_hydro = T_cond = a·T_ref,
 // instead of zero-gradient-extrapolating the live top cell. The wall stays a
 // PHYSICAL-FACE conduction datum (unlike baseline decouple=0, where the wall reverts
-// to a ghost-CENTRE datum), so relative to the release this moves exactly one thing:
+// to a ghost-CENTRE datum), so relative to decouple=1 this moves exactly one thing:
 // the thermal state the outer-face reconstruction and Riemann problem carry.
 bool  kOuterHydroTWall = false;
 // ISO_OUTER_P_NEUMANN: the outer ghost pressure stops being the FIXED reservoir
@@ -286,11 +288,11 @@ Vec model_column_ic(Grid& grid) {
     kVcapMach          = env_f("ISO_VCAP", 0.1f);
     kInnerTNeumann     = (env_f("ISO_INNER_T_NEUMANN", 0.0f) != 0.0f);
     // Upper-BC over-specification experiment: hydro ghost T free-floats (zero
-    // gradient), conduction wall unchanged. Default 0 ⇒ baseline behaviour.
+    // gradient), conduction wall unchanged. Default 0 ⇒ the release single-T BC.
     kHydroTDecouple    = (env_f("ISO_HYDRO_T_DECOUPLE", 0.0f) != 0.0f);
     // Outer-face closure variant: which ONE condition the subsonic-outflow face
-    // imposes. Release = fixed back-pressure + free hydro T. Setting both knobs is
-    // the swap: fixed hydro/conduction T + a Neumann pressure.
+    // imposes. Release = fixed back-pressure + fixed ghost T (decouple=0). Setting
+    // both knobs is the swap: fixed hydro/conduction T + a Neumann pressure.
     kOuterHydroTWall   = (env_f("ISO_OUTER_T_HYDRO_WALL", 0.0f) != 0.0f);
     kOuterPNeumann     = static_cast<int>(env_f("ISO_OUTER_P_NEUMANN", 0.0f));
     if (kOuterPNeumann < 0 || kOuterPNeumann > 2)
@@ -304,7 +306,7 @@ Vec model_column_ic(Grid& grid) {
             "outer pressure, so the one condition the subsonic-outflow face admits "
             "must come from the temperature. Combine it with "
             "ISO_OUTER_T_HYDRO_WALL=1 (fixed hydro ghost T at the conduction wall) "
-            "or with ISO_HYDRO_T_DECOUPLE=0; with the release's extrapolated hydro "
+            "or with ISO_HYDRO_T_DECOUPLE=0; with the decoupled extrapolated hydro "
             "temperature the face would impose nothing and the column drains.");
 
     // Adiabatic index. Default 5/3. ISO_GAMMA near 1 (e.g. 1.05) makes the gas
@@ -948,9 +950,9 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         //     corona is resolved and a=b=1 (the ghost just extends it).
         //   * T_hydro_g0/g1 — what the HYDRO ghost carries (its EOS density and
         //     internal energy, hence the outer-face reconstruction and Riemann state).
-        // Baseline (default): the hydro ghost IS the wall, T_hydro = a·T_ref, b·a·T_ref
-        // — one ghost state serving both roles, so the outer face fixes pressure AND
-        // temperature. ISO_HYDRO_T_DECOUPLE=1: the hydro ghost instead zero-gradient-
+        // Baseline (default, and the release): the hydro ghost IS the wall,
+        // T_hydro = a·T_ref, b·a·T_ref — one ghost state serving both roles, so the
+        // outer face fixes pressure AND temperature. ISO_HYDRO_T_DECOUPLE=1: the hydro ghost instead zero-gradient-
         // extrapolates the live top cell (T_hydro_g0 = T_hydro_g1 = T_top) and only the
         // conduction rows keep the wall, via grid.outer_conduction_temperature.
         // ISO_OUTER_T_HYDRO_WALL=1 (decoupled mode): the hydro ghost carries the wall
@@ -963,7 +965,7 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         grid.outer_conduction_temperature_override = kHydroTDecouple;
         grid.outer_conduction_temperature          = T_cond_wall;
         // EXPERIMENTAL two-temperature leg. The hydro ghost carries BOTH
-        // temperatures, and in the release preset (hydro_T_free) BOTH free-float
+        // temperatures, and in the model_column_2t preset (hydro_T_free) BOTH free-float
         // with the top cell — which is the characteristically correct closure: the
         // 4x4 system's eigenvalues are {u-c, u, u, u+c}, so at this subsonic
         // OUTFLOW face three characteristics leave and only u-c enters, and the

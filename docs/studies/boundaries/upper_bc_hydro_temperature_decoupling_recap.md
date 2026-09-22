@@ -1,5 +1,7 @@
 # Upper-BC experiment: decoupling the hydro ghost temperature from the conduction wall
 
+> **Superseded 2026-09-22.** The release returned to a single fixed outer ghost temperature (`ISO_HYDRO_T_DECOUPLE=0`). The last-cell reversal reported below does not reproduce in current numerics, and on the release mesh the two closures differ by < 1 % in `V_top`. See `outer_temperature_bc_single_t_recap.md`.
+
 Stage goal: in `model_column`, stop the outer hydro ghost from carrying a *fixed* temperature (22 000 K) and let it zero-gradient-extrapolate the live top cell, while the Stage-D conduction solver keeps seeing exactly the same fixed hot Dirichlet wall. This isolates the extra thermal/entropy constraint the hydro side was imposing at a subsonic outflow face where the fixed reservoir back-pressure `kOuterPRef` already supplies the one admissible incoming condition. No characteristic/NSCBC redesign, no domain extension, no lower-BC change, no pressure-closure change.
 
 ## 1. Files changed and the core diff

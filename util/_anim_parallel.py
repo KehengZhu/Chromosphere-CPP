@@ -25,6 +25,8 @@ def save_frames_parallel(worker_fn, frame_args, out_path, fps, n_workers=None):
     worker_fn(k, tmpdir, *per_frame_args) must save tmpdir/frame_{k:06d}.png.
     frame_args: list of tuples (k, *per_frame_args), one per frame.
     """
+    if n_workers is None and os.environ.get("ANIM_WORKERS"):
+        n_workers = int(os.environ["ANIM_WORKERS"])  # default: every core
     tmpdir = tempfile.mkdtemp(prefix="chromo_anim_")
     try:
         # Inject tmpdir as second arg after k.

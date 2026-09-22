@@ -2447,6 +2447,18 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_outer_bc_co
     --out visualization/model_column/outer_bc_closure_swap_4000s.mp4 --fps 20
 ```
 
+### `outer_bc_singleT_vs_release_1500s.mp4`
+
+The release outer temperature BC (single T: one fixed 22 kK temperature in the hydro ghost cells, which is also the conduction Dirichlet datum at the ghost centre, `ISO_HYDRO_T_DECOUPLE=0`) overlaid on the previous decoupled release (free `T_hydro`, 22 kK conduction datum at the physical face). Same six panels as `outer_bc_closure_swap_4000s.mp4`. 0–1500 s from the two 4000 s runs `outputs/model_column/release_singleT_N500_4000s` and `outputs/model_column/twall_sweep/twall_22kK_cfl0.50`, 76 frames (20 s snapshot cadence), 8 fps, 9.5 s. Previous release dark grey and thick, release thin red. The mass-flux panel is the conservative face flux `f_total`. Face-flux captures are step-strided, so that panel can lag the other five by up to 3.9 s.
+
+What it shows: the lines coincide in every panel. V_top is 4 % lower under single T at 20 s, and the gap settles to about 0.9 % from 400 s on (11.98 vs 12.10 m/s at 1500 s). T_top is 80–200 K cooler, because the conduction datum sits a full cell away instead of half a cell. T differences above 0.1 % are confined to the top ~13 km. Analysis: `docs/studies/boundaries/outer_temperature_bc_single_t_recap.md`.
+
+```bash
+ANIM_WORKERS=14 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_outer_bc_compare.py \
+    --preset singleT --t-max 1500 \
+    --out visualization/model_column/outer_bc_singleT_vs_release_1500s.mp4 --fps 8
+```
+
 ### `outer_bc_closure_swap_transient_200s.mp4`
 
 The same six panels over **0–200 s at 1 s cadence** (201 frames, 12 fps, 17 s) for the release and the two swap variants. The 20 s cadence of the 4000 s movie gives the collapse only three frames, which is where the entire mechanism lives: both Neumann variants launch a **downward-propagating compression front** from the outer face at t = 0, and this movie resolves it crossing the column (at t = 40 s it sits near 1780 km with everything above it falling). Their fates then separate — `dp/ds = -rho g` decays back to a few m/s while `dp/ds = 0` keeps accelerating to the cap.

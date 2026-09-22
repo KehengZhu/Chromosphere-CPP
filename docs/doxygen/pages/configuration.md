@@ -72,7 +72,7 @@ Sidecar layouts are documented on @ref io_formats.
 
 `model_column`, `model_column_2t` and `model_gentle` share one IC/BC implementation (`scenarios/model_column.cpp`) but never share a solver. All three install override-preserving defaults with `setenv(..., overwrite=0)` before the IC runs, so an explicit assignment in the environment always wins.
 
-`model_column` presets: `GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat`, `ISO_H_BASE=1600`, `ISO_DH=553`, `ISO_NS=500`, `ISO_HEAT_FLUX=1`, `ISO_T_TOP=22000`, `ISO_HYDRO_T_DECOUPLE=1`, `ISO_REFINE_PROFILE=outer`, `ISO_REFINE_FACTOR=4`, `ISO_REFINE_S_LO_KM=500`, `ISO_REFINE_TRANSITION_KM=20`.
+`model_column` presets: `GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat`, `ISO_H_BASE=1600`, `ISO_DH=553`, `ISO_NS=500`, `ISO_HEAT_FLUX=1`, `ISO_T_TOP=22000`, `ISO_HYDRO_T_DECOUPLE=0`, `ISO_REFINE_PROFILE=outer`, `ISO_REFINE_FACTOR=4`, `ISO_REFINE_S_LO_KM=500`, `ISO_REFINE_TRANSITION_KM=20`.
 
 `model_column_2t` presets: **exactly the same list**, deliberately — the experimental two-temperature leg must differ from the release in nothing but the temperature split, or the comparison is not controlled. It adds only `TT_OUTER_TI` (default `neumann`) and rejects `ISO_RIEMANN` / `ISO_RECONSTRUCTION`, which have no meaning for a solver with one flux and one primitive set.
 
@@ -90,7 +90,7 @@ Knobs valid in **both** modes:
 | `ISO_T_TOP` | float, K | `0` (= use the IC top-cell temperature) | Any positive value is an **absolute** imposed outer-boundary temperature and is not re-anchored across a relax phase. Release preset 22000. The column is *very* sensitive to it: the quasi-steady top-of-domain velocity goes as roughly `T_wall^3` and reverses sign near 10 kK — see [Sensitivity to the wall temperature](#config-twall-sensitivity). |
 | `ISO_TJUMP_A` | float | `1.0` | Outer ghost temperature jump `T_ghost1 = a * T_ref`. |
 | `ISO_TJUMP_B` | float | `1.0` | Second ghost jump `T_ghost2 = b * T_ghost1`. |
-| `ISO_HYDRO_T_DECOUPLE` | float, non-zero = on | `0` | Lets the outer **hydro** ghost temperature zero-gradient-extrapolate the live top cell while the conduction solver keeps the fixed wall at the physical outer face. Release preset 1. |
+| `ISO_HYDRO_T_DECOUPLE` | float, non-zero = on | `0` | Release preset `0`: one fixed outer temperature `ISO_T_TOP` in both hydro ghosts, which conduction also reads as its Dirichlet datum at the ghost centre. `1` lets the **hydro** ghost temperature zero-gradient-extrapolate the live top cell while conduction keeps a fixed wall at the physical outer face (the release until 2026-09-22; `model_column_2t` preset). See [Outer temperature](#config-outer-temperature). |
 | `ISO_OUTER_T_HYDRO_WALL` | float, non-zero = on | `0` | Diagnostic only. In decoupled mode, pins the outer **hydro** ghost temperature back to the conduction wall (`T_hydro = T_cond = ISO_T_TOP`) while the wall stays a physical-face conduction datum. Only useful together with `ISO_OUTER_P_NEUMANN` — see [Which variable carries the outer condition](#config-outer-closure-swap). |
 | `ISO_OUTER_P_NEUMANN` | integer, `0`\|`1`\|`2` | `0` (fixed reservoir back-pressure) | Diagnostic only. Replaces the fixed outer back-pressure `kOuterPRef` with a Neumann pressure closure extrapolated off the live top cell: `1` = `dp/ds = 0`, `2` = `dp/ds = -rho g` (the release ladder re-anchored on the live top cell). Rejected unless the hydro ghost temperature is fixed, since otherwise the face would impose nothing. Mode `1` **destroys the model** — see [Which variable carries the outer condition](#config-outer-closure-swap). |
 | `ISO_VCAP` | float, Mach | `0.1` | Outer outflow velocity cap as a fraction of the sound speed. |
@@ -232,7 +232,7 @@ Additionally, `CHROMO_FACE_FLUX_DIAG` and `CHROMO_OUTER_COND_DIAG` are rejected 
 
 ## Validated production defaults
 
-`CHROMO_CFL=0.50` is the validated production runtime default for the **reduced `model_column` release configuration only**: coarse-equivalent N = 500, R4 outer refinement, 661 actual cells, the 22,000 K conductive boundary at the physical outer face, and physical conduction only. Evidence: `docs/studies/conduction/coarse_model_column_physical_conduction_recap.md`.
+`CHROMO_CFL=0.50` is the validated production runtime default for the **reduced `model_column` release configuration only**: coarse-equivalent N = 500, R4 outer refinement, 661 actual cells, a fixed 22,000 K outer ghost temperature, and physical conduction only. Evidence: `docs/studies/conduction/coarse_model_column_physical_conduction_recap.md`. That sweep ran with the previous decoupled outer temperature closure. It carries over because the step is limited by the top cell's sound speed and is unchanged (`dt = 5.63e-3 s` under both closures), and the 4000 s single-temperature run ends with `termination=end_time` and zero Godunov fallbacks.
 
 The hard-coded C++ solver default remains `CHROMO_CFL=0.25` (`chromo_main.cpp` and `Grid::CFL`), 0.25 stays the comparison reference, and **the C++ default must not be changed**. `scripts/run_chromo_realtime.sh` supplies 0.50 as an override-preserving default and only when the scenario argument is exactly `model_column`; every other scenario keeps 0.25 unless `CHROMO_CFL` is given explicitly. Rerun the CFL sweep before trusting 0.50 on different hardware or a materially different model shape.
 
@@ -259,7 +259,7 @@ Known limitation to keep in mind when choosing a configuration: N500 long-durati
 
 ## Sensitivity to the wall temperature {#config-twall-sensitivity}
 
-`ISO_T_TOP` is the most consequential single knob in the release configuration, so it deserves a number rather than a warning. With everything else fixed at the release configuration (C7 initial condition, N = 500/R4, `ISO_HYDRO_T_DECOUPLE = 1`, physical conduction only, 4000 s, double-precision state) a one-parameter sweep of the wall over 8–100 K gives a quasi-steady top-of-domain velocity of
+`ISO_T_TOP` is the most consequential single knob in the release configuration, so it deserves a number rather than a warning. With everything else fixed at the release configuration of the time (C7 initial condition, N = 500/R4, `ISO_HYDRO_T_DECOUPLE = 1` — the previous decoupled closure, not re-run under the current single-temperature release — physical conduction only, 4000 s, double-precision state) a one-parameter sweep of the wall over 8–100 K gives a quasi-steady top-of-domain velocity of
 
 | `ISO_T_TOP` [kK] | 8 | 10 | 12 | 15 | 18 | **22** | 30 | 45 | 70 | 100 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -271,11 +271,25 @@ The mechanism is entirely conductive: the wall thermostats the top cell to withi
 
 Full study, including the time-convergence and CFL caveats: `docs/studies/boundaries/upper_wall_temperature_sensitivity_recap.md`.
 
+## Outer temperature: one fixed ghost-cell temperature {#config-outer-temperature}
+
+The release (`ISO_HYDRO_T_DECOUPLE=0`) puts one fixed temperature, `T_c = ISO_T_TOP = 22 000 K`, in both upper hydro ghosts. Together with the fixed back-pressure `kOuterPRef`, the ghost state is a coronal reservoir at `(p_ref, T_c)`. Conduction reads its Dirichlet datum from the same first ghost, at the ghost centre, one top-cell width (276 m) from the top-cell centre: `q_top = kappa_face (T_c - T_top) / ds_top`, with `kappa_face` the harmonic mean of the top-cell and ghost conductivities.
+
+Formally that is two conditions on a subsonic outflow face, which admits one. It makes no measurable difference here because conduction resets the top-cell temperature far faster than the flow renews it. The top cell's thermal relaxation time `tau_th = rho c_v ds_top d / kappa_face` is 0.08 s, against a top-cell advection time `ds_top / V` of 7–29 s. So `T_top` is set by the conductive balance whatever the ghost carries, and at an outflow face the Riemann solution samples the interior entropy anyway. Against the previous decoupled closure (hydro ghost T from the top cell, conduction datum at the physical face) on the release mesh at 4000 s:
+
+| | decoupled (previous) | pinned hydro T, face datum | **single T (release)** |
+|---|---:|---:|---:|
+| `V_top` [m/s] | 9.501 | 9.515 | **9.419** |
+| `T_c - T_top` [K] | 69.7 | — | 139.4 |
+| top-face `f_total` [kg m⁻² s⁻¹] | 2.702e−10 | — | 2.683e−10 |
+
+Pinning the hydro ghost temperature is inert (+0.15 %). Nearly all of the −0.86 % comes from moving the conduction datum half a cell outward, a first-order offset in the top-cell width that converges away under refinement. **The equivalence needs conduction.** With `ISO_HEAT_FLUX=0` the fixed 22 kK ghost is inconsistent with the 22.67 kK initial top cell and nothing relaxes it: the 20 s conduction-off residual rises from 5.7e−3 to 1.4e−2 m/s and its refinement order falls from ~2 to ~1. With the ghost matched to the initial top cell it returns to the decoupled values to four digits. Full study: `docs/studies/boundaries/outer_temperature_bc_single_t_recap.md`.
+
 ## Which variable carries the outer condition {#config-outer-closure-swap}
 
-Subsonic outflow at the 2153 km face admits exactly one incoming characteristic, so exactly one condition may be imposed from outside. The release puts it in the **pressure** (fixed reservoir back-pressure `kOuterPRef`) and leaves the hydro ghost temperature free. `ISO_OUTER_T_HYDRO_WALL` and `ISO_OUTER_P_NEUMANN` exist to put it in the **temperature** instead, and both outcomes are worth knowing before anyone tries it again.
+Subsonic outflow at the 2153 km face admits exactly one incoming characteristic. This study was run under the previous decoupled closure, which put that one condition in the **pressure** (fixed reservoir back-pressure `kOuterPRef`) and left the hydro ghost temperature free. `ISO_OUTER_T_HYDRO_WALL` and `ISO_OUTER_P_NEUMANN` exist to put it in the **temperature** instead, and both outcomes are worth knowing before anyone tries it again. The current release fixes both the pressure and the ghost temperature; the temperature is inert on the release mesh (see [Outer temperature](#config-outer-temperature)), and the pressure is the condition that cannot be dropped.
 
-| | release | `T_HYDRO_WALL=1`, `P_NEUMANN=1` (`dp/ds = 0`) | `T_HYDRO_WALL=1`, `P_NEUMANN=2` (`dp/ds = -rho g`) |
+| | decoupled (previous release) | `T_HYDRO_WALL=1`, `P_NEUMANN=1` (`dp/ds = 0`) | `T_HYDRO_WALL=1`, `P_NEUMANN=2` (`dp/ds = -rho g`) |
 |---|---:|---:|---:|
 | column mass at 4000 s | 99.994 % | **49.94 %** | 98.97 % |
 | `V_top` [m/s] | +9.50 | **−2462.5** (= the `ISO_VCAP` cap) | +0.49 |

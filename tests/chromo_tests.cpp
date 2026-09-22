@@ -997,7 +997,7 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     EXPECT_TRUE(std::string(std::getenv("ISO_DH")) == "553");
     EXPECT_TRUE(std::string(std::getenv("ISO_HEAT_FLUX")) == "1");
     EXPECT_TRUE(std::string(std::getenv("ISO_T_TOP")) == "22000");
-    EXPECT_TRUE(std::string(std::getenv("ISO_HYDRO_T_DECOUPLE")) == "1");
+    EXPECT_TRUE(std::string(std::getenv("ISO_HYDRO_T_DECOUPLE")) == "0");
     EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_PROFILE")) == "outer");
     EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_FACTOR")) == "4");
     EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_S_LO_KM")) == "500");
@@ -1900,25 +1900,33 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
     // achievable bound resolution dependent, which is why the evolution runs on
     // a fresh coarse-equivalent N=500 grid -- refined to 661 cells, the shipped
     // release mesh -- instead of the 48-cell grid used for the structural checks
-    // above. Measured on that mesh after 5 steps at the production CFL 0.50:
-    //   max|V| = 5.9e-3 m/s, max|rho u| = 5.4e-13, ||dU||/||U|| = 9.2e-8
-    // (5.8e-3 / 4.2e-13 / 5.1e-8 at CFL 0.25 -- the residual is a quasi-steady
-    // balance here, not simply proportional to dt). The bounds below carry
-    // 3-5x headroom on each. For scale, the conduction-
+    // above. Measured on that mesh after 5 steps at the production CFL 0.50 in the
+    // double release build:
+    //   max|V| = 4.9e-3 m/s, max|rho u| = 1.4e-13, ||dU||/||U|| = 7.9e-9
+    // (the float32-era values were 5.9e-3 / 5.4e-13 / 9.2e-8). The bounds below
+    // carry >= 4x headroom on each. For scale, the conduction-
     // driven evaporation this model exists to study runs at 15-40 m/s, and the
     // t=0 face mass-flux defect of this same configuration sits ~1.3x above the
     // float32 round-off floor of the stored state. On a 14x coarser grid the
     // same max|V| is ~0.76 m/s, so do NOT reuse these numbers off the release
     // mesh (docs/studies/numerics/reference_free_release_recap.md).
     // Built through make_scenario so the run really is the release preset
-    // (1600-2153 km, outer R4 refinement, 22000 K wall, decoupled hydro ghost T),
-    // not a bare uniform grid with library defaults, and at the VALIDATED
+    // (1600-2153 km, outer R4 refinement, 22000 K wall), not a bare uniform grid
+    // with library defaults -- with ONE deliberate exception: the outer hydro ghost
+    // temperature follows the top cell (ISO_HYDRO_T_DECOUPLE=1). With conduction
+    // off nothing relaxes the release's fixed 22 kK ghost toward the 22.67 kK
+    // initial top cell, and that IC/BC entropy jump (max|V| 1.2e-2 here) would mask
+    // the interior predictor defect this check exists to catch. The single-T
+    // closure with its ghost matched to the IC reproduces the decoupled 20 s
+    // residuals to four digits
+    // (docs/studies/boundaries/outer_temperature_bc_single_t_recap.md §4). And at the VALIDATED
     // PRODUCTION CFL 0.50 rather than the solver's conservative 0.25 fallback:
     // the predictor defect this regression exists to catch grows like dt, so an
     // automated guard has to run at the timestep production actually uses.
     clear_model_column_release_defaults_env();
     Scenario release_sc = make_scenario("model_column", "");
     setenv("ISO_HEAT_FLUX", "0", 1);   // conduction OFF: this is the HSE leg
+    setenv("ISO_HYDRO_T_DECOUPLE", "1", 1);   // IC-consistent outer ghost T, see above
     Grid release_grid;
     release_grid.init(release_sc.peek_ns(), 0.50f);
     release_grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());

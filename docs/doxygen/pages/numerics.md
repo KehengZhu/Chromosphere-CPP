@@ -17,7 +17,7 @@ This page describes the discretization. For the equations being discretized see 
 | Numerical flux | SWMF-style **exact-Riemann Godunov** flux at frozen composition (`gamma = 5/3`), non-ideal energy carried in the passive offset `E0`, face-local Rusanov fallback |
 | Riemann signal speed | frozen-composition `sqrt(5/3 p/rho)`; the CFL uses the same speed |
 | Conduction | physical only, structurally: the operator has no TRAC factor and no artificial diffusivity term at all |
-| Upper boundary | 22,000 K external conductive reservoir at the physical face |
+| Upper boundary | fixed coronal reservoir in the ghost cells: back-pressure `kOuterPRef` and `T_c = 22,000 K`; conduction datum at the first ghost centre |
 | Mesh | coarse-equivalent `N = 500` with R4 outer refinement, giving 661 actual cells |
 | CFL | 0.50 (validated for this configuration; the hard-coded solver default stays 0.25) |
 

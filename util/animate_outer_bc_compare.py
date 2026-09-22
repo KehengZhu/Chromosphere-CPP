@@ -30,7 +30,7 @@ two CLOSURES rather than one parameter:
 
 Usage:
     python util/animate_outer_bc_compare.py [--run "LABEL=path.txt"]...
-        [--out FILE.mp4] [--fps 20]
+        [--out FILE.mp4] [--fps 20] [--t-max SECONDS]
 
 Defaults reproduce the catalogued figure. Env:
     ANIM_MAX_FRAMES  frame budget (default 400; the run is subsampled in time)
@@ -83,6 +83,25 @@ PRESETS = {
         colors=["#2f3640", "#c0392b", "#1f6fb2", "#7f8c8d"],
         widths=[2.8, 1.8, 1.8, 1.4],
         styles=["-", "-", "-", "-"],
+        f_linthresh_frac=1.0e-3,
+    ),
+    # The outer-temperature-BC decision: the release single-T closure (one fixed
+    # 22 kK temperature in the hydro ghost cells, which is also the conduction
+    # Dirichlet datum at the ghost CENTRE, ISO_HYDRO_T_DECOUPLE=0) against the
+    # previous decoupled release. Same pressure anchor in both, so only the
+    # temperature treatment differs.
+    "singleT": dict(
+        title=("model_column outer temperature BC — N=500/R4, double state, CFL 0.50, "
+               "22 kK: single ghost-cell T (release) vs decoupled (previous)"),
+        runs=[
+            ("previous release: free $T_{\\rm hydro}$, $T_{\\rm cond}=22$ kK at the face",
+             "outputs/model_column/twall_sweep/twall_22kK_cfl0.50.txt"),
+            ("release: single $T=22$ kK in the ghost cells (hydro + conduction)",
+             "outputs/model_column/release_singleT_N500_4000s.txt"),
+        ],
+        colors=["#2f3640", "#c0392b"],
+        widths=[2.8, 1.4],
+        styles=["-", "-"],
         f_linthresh_frac=1.0e-3,
     ),
     "twall": dict(
@@ -194,6 +213,9 @@ def main():
     ap.add_argument("--out", default="visualization/model_column/"
                                      "outer_bc_tfix_pneumann_vs_release.mp4")
     ap.add_argument("--fps", type=int, default=20)
+    ap.add_argument("--t-max", type=float, default=None,
+                    help="end the movie at this physical time [s] (default: the "
+                         "overlap of all runs)")
     args = ap.parse_args()
 
     preset = PRESETS[args.preset]
@@ -214,6 +236,8 @@ def main():
     # every other run is sampled at its nearest snapshot, worst mismatch reported.
     base = min(runs, key=lambda r: r["times"][-1])
     times = base["times"]
+    if args.t_max is not None:
+        times = times[times <= args.t_max + 1.0e-6]
     max_frames = int(os.environ.get("ANIM_MAX_FRAMES", "400"))
     if len(times) > max_frames:
         times = times[np.unique(np.linspace(0, len(times) - 1,

@@ -37,6 +37,13 @@ a 0.90-1.10 fan that is separated over the whole 1600-2153 km. The release run i
 then the flat unit reference line rather than a curve. Set ANIM_P_PANEL=abs to get
 the old absolute log-Pa panel back; the panel title always says which one is drawn.
 
+Set ANIM_P_PANEL=ic to divide each run by ITS OWN t = 0 profile instead,
+p(h,t)/p(h,0). Every run starts from the same C7 IC, so the denominator is shared
+and no run is privileged: the release run is a curve like the others (it drifts
+~1 % itself), and each run's bend sits at its own transition region. The
+baseline ratio instead puts a corner at the 22 kK TR height into every other
+curve, which reads as a boundary effect when it is a TR-height difference.
+
 ONE DELIBERATE DEVIATION from the single-run movie, forced by overlaying 13 runs
 whose responses span four decades: **V, q and the mass flux use symlog axes, and V
 is in m/s, not km/s.** The 8 kK wall drains at -0.4 m/s while the 100 kK wall
@@ -185,7 +192,7 @@ def _render_frame(k, tmpdir, h, mflux_h, series, colors, widths, t_walls, t, nF,
             a.set_yscale("log")
             a.set_ylim(lim[1], lim[2])
         elif lim[0] == "lin":
-            # The p ratio: unity is the release baseline, so mark it.
+            # The p ratio: unity is the reference (release run or IC), so mark it.
             a.axhline(1.0, c="k", lw=0.5)
             a.set_ylim(lim[1], lim[2])
         else:
@@ -328,8 +335,8 @@ def main():
     # transient and leaves a fan that is separated over the whole domain.
     # ------------------------------------------------------------------
     p_mode = os.environ.get("ANIM_P_PANEL", "rel").lower()
-    if p_mode not in ("rel", "abs"):
-        raise ValueError("ANIM_P_PANEL must be 'rel' or 'abs'")
+    if p_mode not in ("rel", "abs", "ic"):
+        raise ValueError("ANIM_P_PANEL must be 'rel', 'abs' or 'ic'")
     ref = next((j for j, r in enumerate(runs) if r["t_wall"] == T_WALL_RELEASE), None)
     if p_mode == "rel" and ref is None:
         print(f"note: no {T_WALL_RELEASE/1e3:g} kK run in this set; falling back to "
@@ -342,6 +349,18 @@ def main():
         p_index = None                                         # already on frames
         p_label = (r"$p\,/\,p_{22\,\rm kK}$",
                    "Pressure relative to the 22 kK release baseline (dimensionless)")
+        p_lim = ("lin",) + linlim(pooled_p)
+    elif p_mode == "ic":
+        # Each run over its own t = 0 snapshot (the shared C7 IC).
+        late = [r["t_wall"] for r in runs if r["times"][0] != 0.0]
+        if late:
+            raise SystemExit(f"ANIM_P_PANEL=ic needs a t = 0 snapshot; missing for "
+                             f"{', '.join(f'{t/1e3:g} kK' for t in late)}")
+        pooled_p = [r["p"][picks[j]] / r["p"][0] for j, r in enumerate(runs)]
+        p_index = None
+        p_label = (r"$p(h,t)\,/\,p(h,0)$",
+                   "Pressure relative to the shared C7 initial condition "
+                   "(dimensionless)")
         p_lim = ("lin",) + linlim(pooled_p)
     else:
         pooled_p = [r["p"] for r in runs]

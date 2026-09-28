@@ -2401,6 +2401,54 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=abs .venv/bin/python util/an
     --out visualization/model_column/twall_sweep_N500_4000s_overlay_p_abs.mp4 --fps 20
 ```
 
+### `twall_sweep_N500_4000s_overlay_p_ic.mp4`
+
+The same movie with the pressure panel **relative to the shared C7 initial condition**, `p(h,t)/p(h,0)` (`ANIM_P_PANEL=ic`), kept alongside the baseline-relative and absolute versions. Every other panel and every frame are identical. Since all runs start from the same IC, the denominator is the same for every run and none is privileged. The 22 kK release run is a curve like the others (about 1 % below its IC under the TR at 4000 s), and each run's bend sits at **its own** transition region. That is why this version exists. In the baseline-relative panel, the sharp turn near the top (0.90 at 2104 km for 100 kK) reads like an upper-boundary inconsistency, but it is a TR-height difference. The hot TR is nearly isobaric (scale height ≳ 10³ km against ~230 km in the chromosphere), and the 100 kK wall has moved its TR base from ~2138 km down to ~2104 km. At fixed height, that compares hot, flat plasma with the release run's still-stratified chromosphere. Compared at equal column mass instead of equal height, every wall from 8 to 100 kK matches the release pressure to within 0.16 %, and `(p − p_top)/(g·m)` is 1.000–1.004: the pressure is hydrostatic everywhere below the TR. The small ~0.2 % ripple on the 100 kK curve at 1650–1950 km also appears in its `V` and `f_total`, so it is a flow feature of that run, not something the normalization creates.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=ic .venv/bin/python util/animate_twall_sweep.py \
+    --cfl 0.50 \
+    --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt \
+    --out visualization/model_column/twall_sweep_N500_4000s_overlay_p_ic.mp4 --fps 20
+```
+
+### `twall_sweep_N500_p_abs_top_t2000.png`
+
+Absolute pressure in Pa, not normalized, for all 13 accepted walls at t = 2000 s, restricted to h ≥ 2100 km. Over the full column the walls sit within a line width of each other, but the top ~50 km carries the whole spread, so zooming in separates them without dividing by any reference. A dot marks each run's TR base (first cell with T > 7.5 kK). The dots show that the "kink" in the normalized panels is simply where each run's p(h) turns from the steep chromospheric slope (scale height ~230 km) to the nearly flat hot-TR slope: 2116 km for 100 kK, 2127 km for 70 kK, ~2139 km for the walls near the release. Every p(h) decreases monotonically with height apart from one feature: at the 70 and 100 kK TR base there is a 1–2e-5 Pa (~0.2 %) notch over two to three cells, where T rises 2.4x per 0.28 km cell. That is about 3x the run's whole momentum-flux budget `rho V^2` (6.7e-6 Pa at 100 kK), so it is a feature of the under-resolved thermal front, not the acceleration of the evaporating gas.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_twall_sweep_p_top.py \
+    --time 2000 --hmin 2100 \
+    --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt \
+    --out visualization/model_column/twall_sweep_N500_p_abs_top_t2000.png
+```
+
+### `twall_relaxation_phases.png`, `twall_relaxation_spacetime.png`, `twall_relaxation_timescales.png`
+
+How the evaporation mass flux relaxes and then decays across the sweep, each stage against its analytic estimate. Study: `docs/studies/boundaries/twall_mass_flux_relaxation_timescales.md`. Post-processing only: the 13 accepted sweep runs with their `.faceflux` sidecars (prerequisites above), plus the current single-T release run `outputs/model_column/release_singleT_N500_4000s` for the flux-profile check. Metrics go to `outputs/model_column/twall_sweep/twall_relaxation_metrics.json`.
+
+**`twall_relaxation_phases.png`** (six panels):
+- (a) **wave phase** — `F_base/F_top − 1` with multiples of the one-way acoustic time (dotted) and a ±5 % band;
+- (b) **TR relaxation** — `F·L_TR/J`, with `J` the first-principles steady-TR integral;
+- (c) **the drift** — `F` keeps falling while `F·L_TR` stays flat, both normalized at 1000 s;
+- (d) **the contraction law** — `L_TR` growth against evaporated mass `Φ`, with the linear coefficient `K`;
+- (e) **the adiabatic test** — `T` change at fixed column mass, measured (lines) against the parcel-lift adiabat (circles), cut 10 km below the TR base;
+- (f) **the flux profile** — `f_total(z)/f_top`, averaged over 3800–4000 s to suppress the hot-wall ripple, against the contraction prediction (dashed). 100 kK is omitted there because its ±30 % spatial ripple dominates even after averaging; the black line is the release run.
+
+**`twall_relaxation_spacetime.png`**: `f_total(z,t)/f_top(t)` for 22 and 100 kK over 0–900 s, with the ±`c_eq` characteristics launched from the top at t = 0.
+
+**`twall_relaxation_timescales.png`**: per wall temperature (≥ 15 kK):
+- when the wave phase is over (5 %);
+- when the TR is relaxed, with the fitted `τ_TR`;
+- the flux-drift e-folding `1/r` at 4000 s, measured and from contraction alone.
+
+Walls ≤ 14 kK sit at the flow reversal, where `F → 0` makes every ratio meaningless, so they are left out of the ratio panels and the timescale figure. Colours are the sweep's rank-spaced `wall_colors()`.
+
+```bash
+.venv/bin/python util/twall_relaxation_diag.py \
+    --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt
+```
+
 ## 17. Outer-face closure swap: fixed `T_hydro` + Neumann pressure (`docs/studies/boundaries/outer_bc_pressure_temperature_swap_recap.md`)
 
 The release outer face imposes its one admissible external condition as a **fixed reservoir back-pressure** and lets the hydro ghost temperature free-float. These two movies put the opposite choice on the same axes: hydro ghost temperature **pinned** to the 22 kK conduction wall (`ISO_OUTER_T_HYDRO_WALL=1`) and the pressure **Neumann**, in both readings — `ISO_OUTER_P_NEUMANN=1` (`dp/ds = 0`) and `=2` (`dp/ds = -rho g`, the release hydrostatic ladder re-anchored on the live top cell) — plus the control that pins the temperature and keeps the release back-pressure, which isolates the pressure closure as the cause. Canonical release configuration otherwise (N=500/R4, double state, CFL 0.50, physical conduction only); the release baseline is the 22 kK run of the section-16 sweep, so the IC, mesh, flux and snapshot cadence are shared exactly.
@@ -2595,4 +2643,20 @@ Development/validation artifacts from the 5 s, 6-frame smoke run (`outputs/model
 ```bash
 .venv/bin/python util/animate_two_temp.py outputs/model_column_2t/smoke5s.txt.twotemp --fps 4
 .venv/bin/python util/animate_two_temp.py outputs/model_column_2t/smoke5s.txt.twotemp --snapshot
+```
+
+## 20. Analytic steady-evaporation lookup table (`docs/studies/boundaries/analytic_evaporation_J_table.md`)
+
+### `analytic_J_table.png`
+
+The steady-TR invariant `J = F·L_TR = ∫ κ/(h − h_c) dT` of the release equations, with `h_c = h_Saha(T_c, p_top)`, tabulated over `T_top` 15–200 kK, `p_top` 1e-3–10 Pa and `T_c` 6.0–7.0 kK. Four panels:
+- (a) `J(T_top)` at five pressures, `T_c` = 6.7 kK, with the sweep's measured `F·L_TR` at 4000 s (triangles, `p_top` = 0.0103 Pa); grey = beyond the validated 100 kK;
+- (b) `J(p_top)/J(0.0103 Pa)` at five `T_top`;
+- (c) `J(T_c)/J(6.7 kK)` at 0.0103 and 1 Pa;
+- (d) the local exponent `∂lnJ/∂lnp_top`, with the one line the sweep validated and the dashed contour beyond which `J` depends on the TR-base marker by more than 20 %.
+
+Post-processing only; reads the accepted sweep runs and `outputs/model_column/twall_sweep/twall_relaxation_metrics.json` for the end-to-end check. The table goes to `outputs/model_column/analytic_J_table/` (`J_table.npz`, `J_table.csv`, `J_table_summary.json`). Runtime ~6 s.
+
+```bash
+.venv/bin/python util/analytic_evaporation_table.py
 ```

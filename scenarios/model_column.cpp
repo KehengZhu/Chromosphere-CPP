@@ -370,59 +370,103 @@ Vec model_column_ic(Grid& grid) {
     // rather than a centre point sample, so refinement represents the same
     // continuum upper thermal profile instead of shifting the top-cell datum.
     Vec  T_c(grid.ns), ni_c(grid.ns), nn_c(grid.ns);
-    double ln_p = 0.0, prev_h = h_base, prev_invH = 0.0;
+    // One hydrostatic integration from the base pressure exp(ln_p_base) with base
+    // ionization x_base: fills T_c/ni_c/nn_c and returns ln p of the top cell.
+    auto integrate_column = [&](double ln_p_base, double x_base) -> double {
+        double ln_p = ln_p_base, prev_h = h_base;
+        double prev_invH = grid.g*grid.m_i/((1.0+x_base)*grid.k_b*T_base);
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            const double h_c = 0.5 * (h_F(i) + h_F(i + 1));        // km
+            Real T, n_i, n_n;
+            c7_cell(static_cast<Real>(h_c), T, n_i, n_n);
+            if (gamma_mode) {
+                T = static_cast<Real>(c7_temperature_cell_average(h_F(i), h_F(i+1)));
+            }
+            const double dh_m = (h_c-prev_h)*1000.0;
+            double x = n_i/(n_i+n_n);
+            if (gamma_mode) {
+                const double previous_ln_p = ln_p;
+                double trial = ln_p-prev_invH*dh_m;
+                bool converged = false;
+                for (int it = 0; it < 60; ++it) {
+                    const double rho = gamma_density_from_pressure(grid, std::exp(trial), T);
+                    x = saha_ionization_fraction_n_h(rho/eos_constants::m_h, T);
+                    const double invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
+                    const double next = previous_ln_p-0.5*(prev_invH+invH)*dh_m;
+                    if (std::abs(next-trial) < 2.0e-13) {
+                        trial = next;
+                        converged = true;
+                        break;
+                    }
+                    trial = next;
+                }
+                if (!converged) {
+                    throw std::runtime_error(
+                        "gamma Saha-HSE iteration did not converge at cell "
+                        + std::to_string(i)+", h_km="+std::to_string(h_c)
+                        +", T="+std::to_string(T)+", p="+std::to_string(std::exp(trial)));
+                }
+                ln_p = trial;
+            } else {
+                const double invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
+                ln_p -= 0.5*(prev_invH+invH)*dh_m;
+            }
+            const double n_tot = std::exp(ln_p)/((1.0+x)*grid.k_b*T);
+            if (gamma_mode) x = saha_ionization_fraction_n_h(n_tot, T);
+            n_i = x * n_tot;
+            n_n = (1.0-x)*n_tot;
+            prev_h = h_c;
+            prev_invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
+            T_c(i)  = T;
+            ni_c(i) = n_i;
+            nn_c(i) = n_n;
+        }
+        return ln_p;
+    };
     {
         const double nbase = static_cast<double>(ni_b)+nn_b;
         const double xb = gamma_mode ? saha_ionization_fraction_n_h(nbase, T_base)
                                      : ni_b/nbase;
-        ln_p = std::log((1.0+xb)*nbase*grid.k_b*T_base);
-        prev_invH = grid.g*grid.m_i/((1.0+xb)*grid.k_b*T_base);
-    }
-    for (arma::uword i = 0; i < grid.ns; ++i) {
-        const double h_c = 0.5 * (h_F(i) + h_F(i + 1));        // km
-        Real T, n_i, n_n;
-        c7_cell(static_cast<Real>(h_c), T, n_i, n_n);
-        if (gamma_mode) {
-            T = static_cast<Real>(c7_temperature_cell_average(h_F(i), h_F(i+1)));
-        }
-        const double dh_m = (h_c-prev_h)*1000.0;
-        double x = n_i/(n_i+n_n);
-        if (gamma_mode) {
-            const double previous_ln_p = ln_p;
-            double trial = ln_p-prev_invH*dh_m;
-            bool converged = false;
-            for (int it = 0; it < 60; ++it) {
-                const double rho = gamma_density_from_pressure(grid, std::exp(trial), T);
-                x = saha_ionization_fraction_n_h(rho/eos_constants::m_h, T);
-                const double invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
-                const double next = previous_ln_p-0.5*(prev_invH+invH)*dh_m;
-                if (std::abs(next-trial) < 2.0e-13) {
-                    trial = next;
-                    converged = true;
-                    break;
-                }
-                trial = next;
+        const double ln_p_c7 = std::log((1.0+xb)*nbase*grid.k_b*T_base);
+        const double ln_p_top_c7 = integrate_column(ln_p_c7, xb);
+
+        // ISO_P_TOP > 0 [Pa]: rebuild the column with the SAME C7 T(h) but the base
+        // pressure chosen so the top cell sits at this pressure. The whole column
+        // moves consistently (both reservoirs are captured from the rebuilt IC), so
+        // the pressure is a controlled parameter rather than a one-cell mismatch.
+        // Saha makes p_top a nonlinear function of p_base (a denser column is less
+        // ionized and has a shorter scale height), hence the secant iteration.
+        if (const char* e = std::getenv("ISO_P_TOP")) {
+            double target = std::numeric_limits<double>::quiet_NaN();
+            try { target = std::stod(e); } catch (...) {}
+            if (!(std::isfinite(target) && target > 0.0))
+                throw std::runtime_error(std::string("model_column_ic: ISO_P_TOP must be a "
+                    "positive pressure in Pa, got '") + e + "'");
+            if (!gamma_mode)
+                throw std::runtime_error("model_column_ic: ISO_P_TOP is a release "
+                    "(Gamma1-table) option only");
+            const double ln_target = std::log(target);
+            auto base_x = [&](double ln_pb) {
+                const double rho_b = gamma_density_from_pressure(grid, std::exp(ln_pb), T_base);
+                return saha_ionization_fraction_n_h(rho_b/eos_constants::m_h, T_base);
+            };
+            double a0 = ln_p_c7, f0 = ln_p_top_c7-ln_target;
+            double a1 = a0-f0;
+            double f1 = integrate_column(a1, base_x(a1))-ln_target;
+            int it = 0;
+            for (; it < 40 && std::abs(f1) > 1.0e-12; ++it) {
+                const double a2 = a1-f1*(a1-a0)/(f1-f0);
+                a0 = a1; f0 = f1; a1 = a2;
+                f1 = integrate_column(a1, base_x(a1))-ln_target;
             }
-            if (!converged) {
-                throw std::runtime_error(
-                    "gamma Saha-HSE iteration did not converge at cell "
-                    + std::to_string(i)+", h_km="+std::to_string(h_c)
-                    +", T="+std::to_string(T)+", p="+std::to_string(std::exp(trial)));
-            }
-            ln_p = trial;
-        } else {
-            const double invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
-            ln_p -= 0.5*(prev_invH+invH)*dh_m;
+            if (std::abs(f1) > 1.0e-12)
+                throw std::runtime_error("model_column_ic: ISO_P_TOP secant iteration "
+                    "did not converge (target " + std::to_string(target) + " Pa)");
+            std::cerr << "[model_column] ISO_P_TOP: top-cell p=" << std::exp(f1+ln_target)
+                      << " Pa (target " << target << ", C7 " << std::exp(ln_p_top_c7)
+                      << ")  base p=" << std::exp(a1) << " Pa (C7 " << std::exp(ln_p_c7)
+                      << ")  secant iterations=" << it+1 << std::endl;
         }
-        const double n_tot = std::exp(ln_p)/((1.0+x)*grid.k_b*T);
-        if (gamma_mode) x = saha_ionization_fraction_n_h(n_tot, T);
-        n_i = x * n_tot;
-        n_n = (1.0-x)*n_tot;
-        prev_h = h_c;
-        prev_invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
-        T_c(i)  = T;
-        ni_c(i) = n_i;
-        nn_c(i) = n_n;
     }
 
     Vec xn = arma::zeros<Vec>(

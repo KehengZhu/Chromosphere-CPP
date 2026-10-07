@@ -1,5 +1,5 @@
 /*! Whole-grid CRASH zAv vs the actual Chromosphere2026 C++ Saha function. */
-#include "eos.hpp"
+#include "core/eos.hpp"
 
 #include <algorithm>
 #include <cmath>

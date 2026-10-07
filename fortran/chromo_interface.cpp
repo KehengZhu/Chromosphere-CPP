@@ -1,4 +1,4 @@
-#include "../chromosphere.hpp"
+#include "../src/core/chromosphere.hpp"
 #include "armadillo"
 
 //--------------------------------------------------------------------

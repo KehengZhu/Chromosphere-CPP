@@ -99,7 +99,7 @@
  */
 #pragma once
 
-#include "chromosphere.hpp"
+#include "core/chromosphere.hpp"
 
 #include <array>
 #include <cstdint>

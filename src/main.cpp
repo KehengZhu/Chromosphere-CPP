@@ -1,5 +1,5 @@
 /*!
- * @file chromo_main.cpp
+ * @file main.cpp
  * @brief Command-line driver: parse arguments and environment, build the
  *        scenario, run the timestep loop, and write snapshots and sidecars.
  * @ingroup driver
@@ -24,14 +24,14 @@
  * @ref configuration "Configuration reference" page; the file formats written
  * here are described on the @ref io_formats "Output formats" page.
  */
-#include "chromosphere.hpp"
+#include "core/chromosphere.hpp"
 #include "single_fluid/mixture.hpp"
 #include "two_temp/two_temp.hpp"
 #include "two_fluid/two_fluid.hpp"
-#include "physics.hpp"
-#include "profiling.hpp"
-#include "parallel.hpp"
-#include "run_control.hpp"
+#include "core/physics.hpp"
+#include "core/profiling.hpp"
+#include "core/parallel.hpp"
+#include "core/run_control.hpp"
 #include "scenarios/scenario.hpp"
 
 #include <armadillo>

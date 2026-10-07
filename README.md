@@ -130,11 +130,11 @@ scripts/release_validation.sh           # release-configuration acceptance check
 ## Repository layout
 
 ```
-chromosphere.hpp  eos.hpp  physics.hpp    shared: Grid, EOS closure, physics formulas
+src/core/                                 shared: Grid, EOS closure, physics formulas, OpenMP/profiling
 src/single_fluid/                         RELEASE solver, U = (rho, rho u, E)
 src/two_fluid/                            historical two-fluid research solver
 scenarios/                                initial + boundary conditions, meshes, geometry
-chromo_main.cpp                           CLI driver
+src/main.cpp                              CLI driver (builds chromo_main)
 tests/                                    test suite
 util/                                     Python plotting + PFSS extraction pipeline
 docs/doxygen/                             code reference (config + narrative pages)

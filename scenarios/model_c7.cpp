@@ -10,7 +10,7 @@
  * and c7_route_b_photoionization().
  */
 #include "model_c7.hpp"
-#include "physics.hpp"
+#include "core/physics.hpp"
 #include "scenario.hpp"
 
 #include <algorithm>

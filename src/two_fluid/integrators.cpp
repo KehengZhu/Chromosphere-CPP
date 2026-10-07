@@ -19,9 +19,9 @@
  * single_fluid/integrator.cpp.
  */
 #include "two_fluid/two_fluid.hpp"
-#include "physics.hpp"
-#include "profiling.hpp"
-#include "parallel.hpp"
+#include "core/physics.hpp"
+#include "core/profiling.hpp"
+#include "core/parallel.hpp"
 
 #include <cmath>
 #include <cstdlib>

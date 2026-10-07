@@ -80,7 +80,7 @@
  */
 
 #include "two_temp/two_temp.hpp"
-#include "profiling.hpp"
+#include "core/profiling.hpp"
 
 #include <algorithm>
 #include <cmath>

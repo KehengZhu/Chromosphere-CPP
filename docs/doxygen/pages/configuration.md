@@ -1,6 +1,6 @@
 # Configuration reference {#configuration}
 
-Everything a run is configured with lives in exactly two places: the seven positional command-line arguments of `chromo_main`, and the environment. There is no input deck, no configuration file, and no runtime parser. The authoritative sources for this page are `chromo_main.cpp`, `run_control.hpp`, `scenarios/scenario.cpp`, `scenarios/model_column.cpp`, `scenarios/mesh.cpp`, `scenarios/model_c7.cpp`, `scenarios/model_flare.cpp` and `scenarios/pfss_field_line.cpp`; no environment variable is read anywhere in `src/`.
+Everything a run is configured with lives in exactly two places: the seven positional command-line arguments of `chromo_main`, and the environment. There is no input deck, no configuration file, and no runtime parser. The authoritative sources for this page are `src/main.cpp`, `src/core/run_control.hpp`, `scenarios/scenario.cpp`, `scenarios/model_column.cpp`, `scenarios/mesh.cpp`, `scenarios/model_c7.cpp`, `scenarios/model_flare.cpp` and `scenarios/pfss_field_line.cpp`; no environment variable is read anywhere in `src/` outside the driver `src/main.cpp`.
 
 ## Command line
 
@@ -24,7 +24,7 @@ Note on argument 7 in release mode: `model_column_ic` recomputes `Grid::enable_r
 
 Two parsing conventions are used and they behave differently.
 
-- Driver booleans (`CHROMO_*` in `chromo_main.cpp`) use `env_enabled()`: unset takes the stated default; the values `0`, `false` and `off` disable; **every other value enables, including an empty string**.
+- Driver booleans (`CHROMO_*` in `src/main.cpp`) use `env_enabled()`: unset takes the stated default; the values `0`, `false` and `off` disable; **every other value enables, including an empty string**.
 - Scenario knobs (`ISO_*`, `FLARE_*`, `GENTLE_*`, `C7_*`, `PFSS_FLARE`) use a local `env_f()`: the value is parsed with `std::stof` and an unparseable value silently falls back to the default. A knob is "on" when its float value is non-zero.
 - The release rejection lists test **presence only** (`std::getenv(name) != nullptr`), so `ISO_COOLING=0` is just as fatal as `ISO_COOLING=1`.
 
@@ -235,7 +235,7 @@ Additionally, `CHROMO_FACE_FLUX_DIAG` and `CHROMO_OUTER_COND_DIAG` are rejected 
 
 `CHROMO_CFL=0.50` is the validated production runtime default for the **reduced `model_column` release configuration only**: coarse-equivalent N = 500, R4 outer refinement, 661 actual cells, a fixed 22,000 K outer ghost temperature, and physical conduction only. Evidence: `docs/studies/conduction/coarse_model_column_physical_conduction_recap.md`. That sweep ran with the previous decoupled outer temperature closure. It carries over because the step is limited by the top cell's sound speed and is unchanged (`dt = 5.63e-3 s` under both closures), and the 4000 s single-temperature run ends with `termination=end_time` and zero Godunov fallbacks.
 
-The hard-coded C++ solver default remains `CHROMO_CFL=0.25` (`chromo_main.cpp` and `Grid::CFL`), 0.25 stays the comparison reference, and **the C++ default must not be changed**. `scripts/run_chromo_realtime.sh` supplies 0.50 as an override-preserving default and only when the scenario argument is exactly `model_column`; every other scenario keeps 0.25 unless `CHROMO_CFL` is given explicitly. Rerun the CFL sweep before trusting 0.50 on different hardware or a materially different model shape.
+The hard-coded C++ solver default remains `CHROMO_CFL=0.25` (`src/main.cpp` and `Grid::CFL`), 0.25 stays the comparison reference, and **the C++ default must not be changed**. `scripts/run_chromo_realtime.sh` supplies 0.50 as an override-preserving default and only when the scenario argument is exactly `model_column`; every other scenario keeps 0.25 unless `CHROMO_CFL` is given explicitly. Rerun the CFL sweep before trusting 0.50 on different hardware or a materially different model shape.
 
 12 OpenMP threads is the workstation default (performance cores only, measured within about 1 % of the 16-thread maximum-throughput result). Do not assume it is optimal on other hardware, and do not hard-code a thread count in C++, CMake, or the numerical algorithm.
 

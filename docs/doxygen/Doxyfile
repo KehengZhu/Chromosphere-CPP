@@ -22,13 +22,6 @@ OUTPUT_LANGUAGE        = English
 
 # Paths are relative to the repository root, which is where doxygen must be run.
 INPUT                  = docs/doxygen/pages \
-                         chromosphere.hpp \
-                         eos.hpp \
-                         physics.hpp \
-                         parallel.hpp \
-                         profiling.hpp \
-                         run_control.hpp \
-                         chromo_main.cpp \
                          src \
                          scenarios
 

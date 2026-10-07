@@ -22,8 +22,8 @@
  */
 
 #include "single_fluid/mixture.hpp"
-#include "profiling.hpp"
-#include "parallel.hpp"
+#include "core/profiling.hpp"
+#include "core/parallel.hpp"
 
 #include <algorithm>
 #include <array>

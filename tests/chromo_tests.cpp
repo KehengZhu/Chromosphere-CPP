@@ -14,21 +14,21 @@
 //   - Mass exactly preserved by one explicit step on a uniform state (no source terms)
 //   - Uniform, motionless, gravity-free state is a fixed point of advance_Euler_state
 
-#include "../chromosphere.hpp"
-#include "../src/single_fluid/exact_rs.hpp"
-#include "../src/single_fluid/mixture.hpp"
-#include "../src/two_fluid/two_fluid.hpp"
-#include "../physics.hpp"
-#include "../profiling.hpp"
-#include "../parallel.hpp"
-#include "../run_control.hpp"
-#include "../scenarios/analytic_canopy.hpp"
-#include "../scenarios/data_file_parser.hpp"
-#include "../scenarios/mesh.hpp"
-#include "../scenarios/model_c7.hpp"
-#include "../scenarios/model_column.hpp"
-#include "../scenarios/pfss_field_line.hpp"
-#include "../scenarios/scenario.hpp"
+#include "core/chromosphere.hpp"
+#include "single_fluid/exact_rs.hpp"
+#include "single_fluid/mixture.hpp"
+#include "two_fluid/two_fluid.hpp"
+#include "core/physics.hpp"
+#include "core/profiling.hpp"
+#include "core/parallel.hpp"
+#include "core/run_control.hpp"
+#include "scenarios/analytic_canopy.hpp"
+#include "scenarios/data_file_parser.hpp"
+#include "scenarios/mesh.hpp"
+#include "scenarios/model_c7.hpp"
+#include "scenarios/model_column.hpp"
+#include "scenarios/pfss_field_line.hpp"
+#include "scenarios/scenario.hpp"
 
 #include <armadillo>
 #include <cmath>

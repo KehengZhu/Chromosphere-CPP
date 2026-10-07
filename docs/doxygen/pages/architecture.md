@@ -4,11 +4,11 @@ This page describes where code lives, what depends on what, who owns the state, 
 
 ## The dependency rule
 
-There are three solvers over one shared mesh. `chromosphere.hpp` (the Grid, the conserved-row index sets, the scratch and diagnostic-capture structures) and `eos.hpp` (the pure-hydrogen Saha closure and the CRASH `Gamma1` table) form the shared layer. Every solver directory depends on that layer and on nothing else of the others'.
+There are three solvers over one shared mesh. `src/core/chromosphere.hpp` (the Grid, the conserved-row index sets, the scratch and diagnostic-capture structures) and `src/core/eos.hpp` (the pure-hydrogen Saha closure and the CRASH `Gamma1` table) form the shared layer, `src/core/`. Every solver directory depends on that layer and on nothing else of the others'.
 
 @verbatim
-                       chromosphere.hpp  +  eos.hpp
-                          (Grid)            (closure)
+                 src/core/: chromosphere.hpp  +  eos.hpp
+                               (Grid)            (closure)
                         ^          ^          ^
                         |          |          |
             +-----------+     +----+----+     +-----------+
@@ -20,31 +20,26 @@ There are three solvers over one shared mesh. `chromosphere.hpp` (the Grid, the 
    one temperature       T_e != T_i               three temperatures
 @endverbatim
 
-`src/single_fluid/mixture.hpp` does not include `two_fluid/two_fluid.hpp`, and `two_fluid/two_fluid.hpp` does not include `single_fluid/mixture.hpp`. No two of the three share a conserved-state width, a packing convention, a timestep function, or a boundary-ghost buffer. The only translation unit that includes all three headers is `chromo_main.cpp`, which selects between them at run time. See @ref shared, @ref release_solver, @ref two_temp_solver and @ref two_fluid_solver.
+`src/single_fluid/mixture.hpp` does not include `two_fluid/two_fluid.hpp`, and `two_fluid/two_fluid.hpp` does not include `single_fluid/mixture.hpp`. No two of the three share a conserved-state width, a packing convention, a timestep function, or a boundary-ghost buffer. The only translation unit that includes all three headers is the driver `src/main.cpp`, which selects between them at run time. See @ref shared, @ref release_solver, @ref two_temp_solver and @ref two_fluid_solver.
 
 There is exactly one edge between solver directories, and it is deliberate: `src/two_temp/hydro.cpp` includes `single_fluid/exact_rs.hpp`. That header is the standalone port of the SWMF **ideal-gas** Riemann solver — a self-contained numerical routine, not release physics — and the two-temperature system's frozen-composition acoustics are identical to the release's (see @ref numerics), so re-porting it would have produced two copies of the same code to no benefit. Nothing else in `src/two_temp/` reaches into `src/single_fluid/`, and nothing in `src/single_fluid/` reaches into `src/two_temp/`, so the release path is unaffected by the experiment's presence.
 
 ## Annotated file tree
 
-### Shared headers (repository root)
+### Shared layer and driver, `src/core/` and `src/main.cpp`
 
 | Path | What it holds |
 | --- | --- |
-| `chromosphere.hpp` | chromosphere::Grid — the object that owns all solver state — plus the storage scalar `Real` and its vector `Vec` (see Storage precision below), `mix::` (3 release rows), `cons::`/`prim::` (7 two-fluid rows), MixtureField, MixtureFaceArrays, MixtureRhsScratch, MixtureConductionScratch, MixtureFaceFluxCapture, OuterConductionCapture. See @ref grid. |
-| `eos.hpp` | Pure-hydrogen Saha equilibrium closure, `EosGammaTable` loader, MixtureThermo / CaloricMixtureThermo, the caloric inversions and equilibrium face builders. See @ref eos. |
-| `physics.hpp` | Inline closed-form physics: collision frequencies, `physical_kappa_e` / `physical_kappa_n` / `physical_conductivity`, radiative losses, heating rates, TRAC, hydrogen ionization/recombination rate coefficients. |
-| `parallel.hpp` | Thin OpenMP abstraction: thread queries, per-thread exception collector, `parallel_for_cells`. Degrades to serial loops without `CHROMO_ENABLE_OPENMP`; rethrows the exception from the lowest physical cell index so a parallel failure matches a serial one. |
-| `profiling.hpp` | Opt-in region timers, EOS-inversion and conduction-iteration statistics, active timestep limiter. Inert unless `CHROMO_PROFILE=1`. |
-| `run_control.hpp` | Driver run-control helpers: `select_step_cap` (`CHROMO_STEP_CAP` / `CHROMO_T_END`), `OutputSchedule` (stride or `CHROMO_FRAME_DT`), `classify_termination`. Header-only, free of Armadillo and OpenMP, unit-testable without running a simulation. |
-| `chromo_main.cpp` | The command-line driver. Owns no physics. See @ref driver and @ref io_formats. |
-
-### Shared implementation, `src/*.cpp`
-
-| Path | What it holds |
-| --- | --- |
-| `src/grid.cpp` | `Grid::init`, `Grid::resize`, `Grid::broadcast` / `force_rebuild_metrics`, and the fingerprinted static-mesh metric cache (`ds_i`, `B_i`, `B_imh`, `B_iph`, `dinvB_ds_i`). |
-| `src/eos.cpp` | Saha closure, `Gamma1` table loader, caloric inversions and equilibrium face builders. Everything in double precision regardless of the storage type, log-domain where the state is known only through logarithms; safeguarded Newton with bisection fallback. |
-| `src/profiling.cpp` | Profile counters in cache-line-padded per-thread slots, summed only when the report prints. |
+| `src/core/chromosphere.hpp` | chromosphere::Grid — the object that owns all solver state — plus the storage scalar `Real` and its vector `Vec` (see Storage precision below), `mix::` (3 release rows), `cons::`/`prim::` (7 two-fluid rows), MixtureField, MixtureFaceArrays, MixtureRhsScratch, MixtureConductionScratch, MixtureFaceFluxCapture, OuterConductionCapture. See @ref grid. |
+| `src/core/eos.hpp` | Pure-hydrogen Saha equilibrium closure, `EosGammaTable` loader, MixtureThermo / CaloricMixtureThermo, the caloric inversions and equilibrium face builders. See @ref eos. |
+| `src/core/physics.hpp` | Inline closed-form physics: collision frequencies, `physical_kappa_e` / `physical_kappa_n` / `physical_conductivity`, radiative losses, heating rates, TRAC, hydrogen ionization/recombination rate coefficients. |
+| `src/core/parallel.hpp` | Thin OpenMP abstraction: thread queries, per-thread exception collector, `parallel_for_cells`. Degrades to serial loops without `CHROMO_ENABLE_OPENMP`; rethrows the exception from the lowest physical cell index so a parallel failure matches a serial one. |
+| `src/core/profiling.hpp` | Opt-in region timers, EOS-inversion and conduction-iteration statistics, active timestep limiter. Inert unless `CHROMO_PROFILE=1`. |
+| `src/core/run_control.hpp` | Driver run-control helpers: `select_step_cap` (`CHROMO_STEP_CAP` / `CHROMO_T_END`), `OutputSchedule` (stride or `CHROMO_FRAME_DT`), `classify_termination`. Header-only, free of Armadillo and OpenMP, unit-testable without running a simulation. |
+| `src/main.cpp` | The command-line driver (builds the `chromo_main` executable). Owns no physics. See @ref driver and @ref io_formats. |
+| `src/core/grid.cpp` | `Grid::init`, `Grid::resize`, `Grid::broadcast` / `force_rebuild_metrics`, and the fingerprinted static-mesh metric cache (`ds_i`, `B_i`, `B_imh`, `B_iph`, `dinvB_ds_i`). |
+| `src/core/eos.cpp` | Saha closure, `Gamma1` table loader, caloric inversions and equilibrium face builders. Everything in double precision regardless of the storage type, log-domain where the state is known only through logarithms; safeguarded Newton with bisection fallback. |
+| `src/core/profiling.cpp` | Profile counters in cache-line-padded per-thread slots, summed only when the report prints. |
 
 ### Release solver, `src/single_fluid/`
 
@@ -132,7 +127,7 @@ Selection is by **data**, not by a flag: a non-empty `Grid::eos_gamma_table` sel
 The chain is:
 
 1. `make_scenario("model_column", ...)` in `scenarios/scenario.cpp` calls `set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat")` unconditionally, and rejects `ISO_GAMMA` outright. `model_column_2t` does the same. `model_gentle` and the other two-fluid scenarios never set it.
-2. `chromo_main.cpp` reads `GAMMA_TABLE`, hashes the file and assigns `grid.eos_gamma_table = EosGammaTable::load(path)`. `gamma_mode` is then simply `!grid.eos_gamma_table.empty()`.
+2. The driver (`src/main.cpp`) reads `GAMMA_TABLE`, hashes the file and assigns `grid.eos_gamma_table = EosGammaTable::load(path)`. `gamma_mode` is then simply `!grid.eos_gamma_table.empty()`.
 3. `xn = sc.ic(grid)` runs. `model_column_2t_ic` sets `grid.two_temperature = true` and returns a four-row state; `model_column_ic` leaves the flag false and returns a three-row state. The driver then fixes `two_temp_mode = grid.two_temperature` and `release_mode = gamma_mode && !two_temp_mode`, and checks the returned state length against the width that choice implies (`grid.n_mixture_state` or `grid.ns*num_of_two_temp_eq`).
 4. Each solver guards its own entry points against the others' Grid, so a mismatch throws rather than silently computing nonsense:
 
@@ -155,9 +150,9 @@ The driver adds its own preconditions before the first step for either Saha solv
 @verbatim
   make_scenario(name, data_path)          scenarios/scenario.cpp
         |
-  Grid::init(sc.peek_ns(), cfl)           src/grid.cpp  -- allocate ns-sized fields
+  Grid::init(sc.peek_ns(), cfl)           src/core/grid.cpp -- allocate ns-sized fields
         |
-  [GAMMA_TABLE loaded?] -> gamma_mode     chromo_main.cpp
+  [GAMMA_TABLE loaded?] -> gamma_mode     src/main.cpp
         |
   xn = sc.ic(grid)                        scenario IC: geometry, B, gravity,
         |                                 ghost buffers, initial conserved state;
@@ -185,8 +180,8 @@ One static library, five executables, and a CTest suite.
 
 | Target | Sources | Purpose |
 | --- | --- | --- |
-| `chromosphere` (STATIC) | `src/*.cpp`, `src/single_fluid/*.cpp`, `src/two_temp/*.cpp`, `src/two_fluid/*.cpp`, `scenarios/*.cpp` | All three solvers, the shared layer, and all scenarios. `PUBLIC` include dirs: repository root, `src`, `include`. |
-| `chromo_main` | `chromo_main.cpp` | The simulation driver. |
+| `chromosphere` (STATIC) | `src/core/*.cpp`, `src/single_fluid/*.cpp`, `src/two_temp/*.cpp`, `src/two_fluid/*.cpp`, `scenarios/*.cpp` | All three solvers, the shared layer, and all scenarios. `PUBLIC` include dirs: repository root, `src`, `include`. |
+| `chromo_main` | `src/main.cpp` | The simulation driver. |
 | `chromo_tests` | `tests/chromo_tests.cpp` | The C++ test binary. |
 | `eos_validate_saha` | `util/eos/validate_saha.cpp` | Offline cross-check of every CRASH `zAv` row against the actual double/log-domain C++ Saha implementation. Built but not registered as a CTest. |
 | `eos_validate_production_table` | `util/eos/validate_production_table.cpp` | Validates the tracked production `Gamma1` table against the v1 loader contract. |
@@ -233,4 +228,4 @@ Both precisions pass the whole unit suite with no loosened tolerance. Evidence: 
 
 ### OpenMP
 
-`CHROMO_ENABLE_OPENMP` (option, default `OFF`) links OpenMP into the `chromosphere` library `PUBLIC`ly and defines `CHROMO_USE_OPENMP=1`. It first tries `find_package(OpenMP)`; on Apple Clang it falls back to locating `libomp` under `LIBOMP_ROOT`, `/opt/homebrew/opt/libomp` or `/usr/local/opt/libomp` and adds `-Xpreprocessor -fopenmp`. If neither path works the configure step fails hard rather than silently producing a serial build. With the option `OFF`, `parallel.hpp` compiles to plain serial loops and nothing else in the solver branches on it. The thread count is never hard-coded in C++ or CMake; it comes from `OMP_NUM_THREADS` at run time.
+`CHROMO_ENABLE_OPENMP` (option, default `OFF`) links OpenMP into the `chromosphere` library `PUBLIC`ly and defines `CHROMO_USE_OPENMP=1`. It first tries `find_package(OpenMP)`; on Apple Clang it falls back to locating `libomp` under `LIBOMP_ROOT`, `/opt/homebrew/opt/libomp` or `/usr/local/opt/libomp` and adds `-Xpreprocessor -fopenmp`. If neither path works the configure step fails hard rather than silently producing a serial build. With the option `OFF`, `src/core/parallel.hpp` compiles to plain serial loops and nothing else in the solver branches on it. The thread count is never hard-coded in C++ or CMake; it comes from `OMP_NUM_THREADS` at run time.

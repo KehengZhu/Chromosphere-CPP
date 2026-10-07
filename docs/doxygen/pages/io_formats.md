@@ -1,6 +1,6 @@
 # Output file formats {#io_formats}
 
-Everything `chromo_main` writes is line-oriented ASCII. This page is the on-disk layout of each file. The writer is `chromo_main.cpp`; it is the authority for every column name quoted here. See @ref driver for the driver's control flow and @ref architecture for where the pieces live.
+Everything `chromo_main` writes is line-oriented ASCII. This page is the on-disk layout of each file. The writer is the driver `src/main.cpp`; it is the authority for every column name quoted here. See @ref driver for the driver's control flow and @ref architecture for where the pieces live.
 
 A run writes at most six files: the main snapshot at the path given as `argv[1]` (default `outputs/output.txt`), four sidecars derived from that path by suffix, and one appended log.
 

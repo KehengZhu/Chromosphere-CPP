@@ -46,7 +46,7 @@ endif()
 add_compile_definitions(ARMA_DONT_USE_LAPACK ARMA_DONT_USE_BLAS)
 
 # Two solvers, two source directories, one shared infrastructure layer.
-#   src/*.cpp             shared: profiling, EOS, Grid geometry/broadcast
+#   src/core/             shared: Grid, EOS, profiling, OpenMP helpers, physics formulas
 #   src/single_fluid/     RELEASE: U = (rho, rho u, E) equilibrium mixture
 #   src/two_temp/         EXPERIMENTAL test study: U = (rho, rho u, E, E_e),
 #                         separate electron and heavy-particle temperatures.
@@ -55,9 +55,9 @@ add_compile_definitions(ARMA_DONT_USE_LAPACK ARMA_DONT_USE_BLAS)
 #   src/two_fluid/        HISTORICAL research: seven-row carrier state
 # No solver directory depends on another's solver code.
 add_library(chromosphere STATIC
-    src/profiling.cpp
-    src/eos.cpp
-    src/grid.cpp
+    src/core/profiling.cpp
+    src/core/eos.cpp
+    src/core/grid.cpp
     src/single_fluid/mixture.cpp
     src/single_fluid/exact_rs.cpp
     src/single_fluid/integrator.cpp
@@ -83,7 +83,7 @@ target_include_directories(chromosphere PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-add_executable(chromo_main chromo_main.cpp)
+add_executable(chromo_main src/main.cpp)
 target_link_libraries(chromo_main PRIVATE chromosphere)
 
 # Stage-1 offline cross-check: compare every CRASH zAv row with the actual

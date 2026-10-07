@@ -51,7 +51,7 @@ paraphrases them** — including that the "≈1 s AWSoM-R timestep" §3.3 asks t
 sources is in fact stated in the 2021 paper itself (p. 8). It is derived from this plan and is *not*
 authoritative.
 
-Companion documents: `writeup_standards.md`; `../studies/numerics/state_precision_release_cutover.md`;
+Companion documents: `../standards/writeup_standards.md`; `../studies/numerics/state_precision_release_cutover.md`;
 `../studies/eos-ionization/ionization_recombination_formulation.md`; `../studies/boundaries/`.
 Primary reference: `../supporting-papers/Sokolov_2021_ApJ_908_172.pdf`. Also in
 `../supporting-papers/`: `Al Shidi et al. - 2019 - Time-Dependent Two-Fluid ...pdf` (§2.6d),

@@ -460,7 +460,7 @@ ffmpeg -y -i visualization/events/event_20240801_o00_1040Mm_Te.mp4 -frames:v 1 -
 
 ## 9. Gentle conduction-driven evaporation (docs/studies/evaporation/gentle_evaporation_plan.md)
 
-> **Reconciliation note (2026-07-11, docs/design/scenario_reconciliation_plan.md):** the standalone
+> **Reconciliation note (2026-07-11, docs/plans/scenario_reconciliation_plan.md):** the standalone
 > `model_gentle` scenario was merged into **`model_column`**; `model_gentle` is now a backward-compat
 > alias that applies the documented stable resolved-corona full-physics preset
 > (`ISO_CORONA ISO_H_BASE=1003 ISO_HEAT_FLUX ISO_COOLING ISO_IONIZATION ISO_TWO_FLUID`). The former
@@ -612,7 +612,7 @@ No current script in `util/` or `visualization/` writes these names (verified by
 
 ## 11. Isentropic chromosphere → conduction-driven evaporation (`model_isentropic`, docs/studies/evaporation/gentle_evaporation_downflow.md)
 
-> **Reconciliation note (2026-07-11, docs/design/scenario_reconciliation_plan.md):** `model_isentropic`
+> **Reconciliation note (2026-07-11, docs/plans/scenario_reconciliation_plan.md):** `model_isentropic`
 > was renamed to **`model_column`** (the unified default scenario) with `model_isentropic` kept as a
 > backward-compat alias, so every command below still runs. The "bestwb" numeric toggles
 > (`ISO_LOG_RECON`, `ISO_MC3`/`ISO_MC3_BETA`, `ISO_EQ_WB`, `ISO_INNER_WB`, `ISO_INNER_WB_RHO`,

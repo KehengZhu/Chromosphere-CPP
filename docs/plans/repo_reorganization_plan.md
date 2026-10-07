@@ -1,6 +1,6 @@
 # Repository reorganization plan
 
-**Status: PLAN** — in progress, started 2026-10-07. Mark DONE, with the merge commit, when phase 5 is closed.
+**Status: DONE** — 2026-10-07; code relocation merged in `5fd87bc`. Follow-up: `main.tex` module table and legacy-build statements updated in the Overleaf repo (not committed there).
 
 ## Why
 
@@ -61,7 +61,7 @@ docs/
 | A | Code move + legacy split (`src/`, `scenarios/`, `legacy/`, CMake, tests, `fortran/` include paths, `util/eos` include paths, Doxyfile, `architecture.md`, `configuration.md` build options, `scenario_reference.md`, README build section) | done, `95c79d4`..`2ee92a7`, merged `5fd87bc` |
 | B | Docs + util: split `docs/design/` into `standards/` and `plans/`, Status lines on every study, `visualize_commands.md` → `docs/viz_catalog/` (current vs `_historical.md`), `util/` reorganization with every path reference updated (docs, catalog, `scripts/release_validation.sh`, presentations' READMEs), `docs/README.md` | done, `255650c`..`57734bf` |
 | C | Merge A and B; rewrite `CLAUDE.md` to rules + pointers, moving its release facts to `docs/standards/release_facts.md`; Doxygen build warning-free; publish; check the writeup for moved paths (report only, the Overleaf repo is not committed) | done (this commit) |
-| 5 | Local scratch: list `tmp/` (46 MB) and the largest `outputs/` runs (13 GB) for the user to decide. **Nothing is deleted without confirmation.** | main session |
+| 5 | Local scratch: list `tmp/` (46 MB) and the largest `outputs/` runs (13 GB) for the user to decide. **Nothing is deleted without confirmation.** | done: tmp/ untracked and its old repo copy deleted; outputs/ kept by decision |
 
 A and B run concurrently (at most two subagents). Their file sets are disjoint except `docs/doxygen/pages/*.md` and `README.md`, where A edits code paths and B edits util/doc paths; those are merged in phase C.
 

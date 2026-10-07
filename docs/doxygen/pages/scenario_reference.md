@@ -11,7 +11,7 @@ Which solver runs is decided by data, not by a flag: **a loaded `Gamma1` table s
 | `model_column` | **Release single fluid** (`src/single_fluid/`) | straight line, `B = 1`, gravity on; 1600 to 2153 km | Model C7 `T(h)` (PCHIP, cell-averaged) with the total density re-integrated hydrostatically through the Saha closure | **The release.** Conduction-driven chromosphere-to-corona evaporation, production runs. |
 | `model_column_2t` | **Experimental two temperature** (`src/two_temp/`) | identical to `model_column` | identical to `model_column`, with `T_e = T_i` at every cell and ghost | **Test study, not release.** How far do the electron and heavy-particle temperatures drift apart in the modelled column? |
 | `model_gentle` | Historical two fluid | straight line, `B = 1`, gravity on; 1003 km up into a resolved ~1 MK corona | same implementation as `model_column`, fixed adiabatic index instead of Saha/`Gamma1` | Historical full-physics research preset: two-fluid + finite-rate ionization + radiative sink + TRAC, gentle (Antiochos & Sturrock 1978) evaporation. |
-| `model_c7` | Historical two fluid | straight line, `B = 1`, gravity on; 1003 to 2153 km | Model C7 Table 26 `(n_e, n_HI, T)` taken *as tabulated*, spline-interpolated | Quiet-Sun chromosphere baseline and the shared C7 atmosphere library. |
+| `model_c7` | Historical two fluid | straight line, `B = 1`, gravity on; 1003 to 2153 km | Model C7 Table 26 `(n_e, n_HI, T)` taken *as tabulated*, spline-interpolated | Quiet-Sun chromosphere baseline. |
 | `model_flare` | Historical two fluid | inherited from `model_c7` | `model_c7_ic` | Explosive evaporation driven by a transient nonthermal electron beam (Fisher, Canfield & McClymont 1985). |
 | `analytic_canopy` | Historical two fluid | `model_c7` domain with an exponential canopy `B(z)` | `model_c7_ic` | Isolating the flux-tube expansion term: identical to `model_c7` except for `d(1/B)/ds`. |
 | `pfss_field_line` | Historical two fluid | traced PFSS field line read from a data file; `B(s)`, `ds`, `phi_g` all tabulated | the same data file | Running a real magnetogram's field-line topology and footpoint field strength; loop and event campaigns. |
@@ -32,7 +32,7 @@ The `model_isentropic` alias has been **retired** and no longer exists — `make
 
 **Active physics.** Hydro plus implicit backward-Euler **physical conduction only**. The release timestep is `U^n -> explicit MUSCL-Hancock/Godunov hydro -> U* -> implicit physical conduction -> U^{n+1}`, composed by first-order Lie splitting. TRAC, beam heating, volumetric coronal heating, radiative cooling and artificial/numerical conduction are **not release physics and are not present in that path**, not even behind default-off flags — `numerical_diffusivity_per_length` is set to `0` structurally, `enable_trac`, `enable_vacuum_floor`, `enable_ionization`, `enable_radiative_cooling`, `enable_beam_heating`, `enable_coronal_heating`, `impose_outer_heat_flux` and `enable_Te` are all false. The release is also **reference-free**: `Grid::eq_wb` is false on this path and no frozen global hydrostatic residual is subtracted. Numerics set by the scenario, with no environment variable required: `swmf_godunov_flux` (the SWMF exact-Riemann Godunov flux at frozen composition), `pressure_reconstruct`, `well_balanced`, `log_reconstruct`, `mc3_limiter` with `limiter_beta = 2`. `ISO_RIEMANN=roe-local` (the equilibrium-`Gamma1` mixture Roe linearization, the previous release flux) and `ISO_RIEMANN=rusanov`, together with `ISO_RECONSTRUCTION=lnrho-v-lnt`, exist only as reference overrides for regression and controlled comparison; never use them in production. See @ref numerics.
 
-**Source files.** `scenarios/model_column.hpp`, `scenarios/model_column.cpp`, `scenarios/mesh.hpp`, `scenarios/mesh.cpp`, the C7 table helpers in `scenarios/model_c7.cpp`, and `src/single_fluid/`.
+**Source files.** `scenarios/model_column.hpp`, `scenarios/model_column.cpp`, `scenarios/mesh.hpp`, `scenarios/mesh.cpp`, the C7 profile library `scenarios/c7_profile.hpp` / `scenarios/c7_profile.cpp`, and `src/single_fluid/`.
 
 ## `model_column_2t` — the experimental two-temperature test study {#scenario-model-column-2t}
 
@@ -66,9 +66,9 @@ The `model_isentropic` alias has been **retired** and no longer exists — `make
 
 **Source files.** `scenarios/model_column.hpp`, `scenarios/model_column.cpp`, and `src/two_fluid/`.
 
-## `model_c7` — quiet-Sun baseline and shared C7 library
+## `model_c7` — quiet-Sun baseline
 
-Runs the @ref two_fluid_solver. `model_c7.cpp` also hosts the shared C7 atmosphere library that `model_column`, `model_flare` and `analytic_canopy` draw on.
+Runs the @ref two_fluid_solver. The C7 table it reads (`MODEL_C7`) lives in the shared C7 profile library `scenarios/c7_profile.cpp`, which `model_column` also samples; `model_flare` and `analytic_canopy` reuse `model_c7_ic` itself.
 
 **Field-line geometry.** Straight line, `B_imh = B_i = B_iph = 1`, `d(1/B)/ds = 0`, gravity on with `phi_g` gauged to zero at the base. The domain is the Model C7 table from **1003 km to 2153 km** (`T = 6225` K to `2.31e4` K, the lower transition region) in the default non-extended form. `model_c7_ic(grid, extended=true)` instead runs the full Table 26 up to ~68 Mm unless `Grid::corona_top_km` truncates it earlier. Faces are uniformly spaced (`nF = ns + 5`); the default cell count is **100**.
 
@@ -83,7 +83,7 @@ Runs the @ref two_fluid_solver. `model_c7.cpp` also hosts the shared C7 atmosphe
 
 **Active physics.** Conduction is on (the `Grid` default; `model_c7_ic` never touches it). Ionization and radiative cooling come from the command line and are **on unless `no-ionization` / `no-cooling` is passed**. `model_c7_ic` sets the isotropic grid-scaled numerical diffusivity `numerical_diffusivity_per_length = 2e3` m/s, TRAC gated on radiative cooling with `trac_T_chrom = 2e4` K, and the vacuum/positivity floor. The adiabatic index is the `Grid` default `gamma_mono = 5/3`. **`model_c7` never loads a `Gamma1` table**; the driver throws if `GAMMA_TABLE` is set for any scenario other than `model_column` or `model_column_2t`.
 
-**Source files.** `scenarios/model_c7.hpp`, `scenarios/model_c7.cpp`, `scenarios/scenario.cpp` (the shared `apply_open_bcs`), and `src/two_fluid/`.
+**Source files.** `scenarios/model_c7.hpp`, `scenarios/model_c7.cpp`, `scenarios/c7_profile.cpp`, `scenarios/scenario.cpp` (the shared `apply_open_bcs`), and `src/two_fluid/`.
 
 ## `model_flare` — explosive evaporation
 

@@ -15,7 +15,8 @@
 #include "model_column.hpp"
 #include "single_fluid/mixture.hpp"
 #include "two_temp/two_temp.hpp"   // EXPERIMENTAL model_column_2t leg only
-#include "model_c7.hpp"   // c7_full_profile + c7_route_b_photoionization (C7 library)
+#include "c7_profile.hpp"  // c7_full_profile + c7_full_temperature_pchip (C7 table)
+#include "model_c7.hpp"     // c7_route_b_photoionization (two-fluid leg only)
 #include "mesh.hpp"       // shared static local-refinement mesh builder
 
 #include <cmath>

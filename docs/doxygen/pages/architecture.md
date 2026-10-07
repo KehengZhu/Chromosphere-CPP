@@ -81,8 +81,9 @@ Selected only by the `model_column_2t` scenario. See @ref two_temp_solver for th
 | `scenarios/mesh.cpp` | Face-grid construction and its `ISO_REFINE_*` / `GRID_REFINE_*` environment parsing. |
 | `scenarios/model_column.hpp` | `model_column` (RELEASE) and `model_gentle` (historical two-fluid): one IC/BC implementation, two scenarios that never cross solvers. |
 | `scenarios/model_column.cpp` | The column IC and boundary closures, including the rejection of every historical two-fluid knob on a release run. |
-| `scenarios/model_c7.hpp` | Model C7 quiet-Sun chromosphere scenario and the shared C7 atmosphere library. |
-| `scenarios/model_c7.cpp` | The C7 table, `c7_full_profile`, the IC and the `model_c7` boundary closures. |
+| `scenarios/c7_profile.hpp` / `.cpp` | The shared C7 atmosphere library: the Avrett & Loeser (2008) Table 26 rows (`MODEL_C7` plus the photospheric rows), `c7_full_profile` and the PCHIP temperature `c7_full_temperature_pchip`. No solver or physics-rate dependency. |
+| `scenarios/model_c7.hpp` | Model C7 quiet-Sun chromosphere scenario and the Route-B photoionization closure. |
+| `scenarios/model_c7.cpp` | The `model_c7` IC and boundary closures and `c7_route_b_photoionization`. |
 | `scenarios/model_flare.hpp` | Explosive chromospheric evaporation scenario (Fisher, Canfield & McClymont 1985). |
 | `scenarios/model_flare.cpp` | Reuses the C7 column and adds the transient nonthermal-electron beam and its `FLARE_*` controls. |
 | `scenarios/analytic_canopy.hpp` | Exponential magnetic-canopy `B(z)` overlay on the C7 thermodynamic profile. |

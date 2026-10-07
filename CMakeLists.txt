@@ -70,6 +70,7 @@ add_library(chromosphere STATIC
     src/two_fluid/integrators.cpp
     scenarios/scenario.cpp
     scenarios/mesh.cpp
+    scenarios/c7_profile.cpp
     scenarios/model_c7.cpp
     scenarios/model_column.cpp
     scenarios/model_flare.cpp

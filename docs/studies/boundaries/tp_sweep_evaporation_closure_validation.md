@@ -51,7 +51,7 @@ Evidence:
 - runs: `outputs/model_column/tp_sweep/` on the mac-mini (6.4 GB; `driver.log`, per-run console logs);
 - compact products, also copied locally: `tp_sweep_compare.json`, `tp_sweep_series.npz`, `compare.log`;
 - scripts: `util/run_tp_sweep.sh`, `util/tp_sweep_compare.py`, `util/plot_tp_sweep_vs_analytic.py`;
-- figures: `visualization/model_column/tp_sweep_sim_vs_analytic.png`, `tp_sweep_time_series.png`, `tp_sweep_flux_compare.png` (`visualize_commands.md` §21);
+- figures: `visualization/model_column/tp_sweep_sim_vs_analytic.png`, `tp_sweep_time_series.png`, `tp_sweep_flux_compare.png` (`docs/viz_catalog/model_column.md`);
 - corner follow-up: runs in `outputs/model_column/tp_sweep_corner/` on the mac-mini (`launch.sh`); `corner_test.json` copied locally; `util/tp_corner_test_compare.py`; `visualization/model_column/tp_corner_test.png`.
 
 ## Setup

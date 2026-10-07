@@ -10,4 +10,4 @@ The two `event_20240801_*_Te.mp4` movies are **deliberately not tracked** — th
 keeps movies out of Git (`visualization/` is gitignored for the same reason). They are only
 `\href{run:...}` launch targets, so the PDF builds fine without them; the links simply do
 nothing on a machine that lacks them. Regenerate them from the commands catalogued in
-`visualize_commands.md`.
+`docs/viz_catalog/presentations.md` and `docs/viz_catalog/_historical.md`.

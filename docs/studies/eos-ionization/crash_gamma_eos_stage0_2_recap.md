@@ -30,7 +30,7 @@ The generated C7 diagnostic walks the complete C7 profile from
 and both heat capacities. The chromosphere/TR is expanded and the extended
 corona compressed on a split height axis.
 
-Generated figures (gitignored, cataloged in `visualize_commands.md`):
+Generated figures (gitignored, cataloged in `docs/viz_catalog/eos.md`):
 
 - `visualization/eos_gamma/gamma_hydrogen.png`
 - `visualization/eos_gamma/gamma_hydrogen_2d.png`

@@ -269,9 +269,9 @@ New:
 - `visualization/model_column/resconv_mean_flux.png` — mean mass flux and normalised `R_eff` vs resolution
 - `visualization/model_column/resconv_time_compare.png` — 500 s vs 1000 s convergence side by side
 
-Modified: `visualize_commands.md` (new "Resolution convergence of the top-region ripple" section with the exact commands).
+Modified: the visualization catalog, now `docs/viz_catalog/_historical.md` (new "Resolution convergence of the top-region ripple" section with the exact commands).
 
-**No source file under `src/`, `scenarios/`, `chromo_main.cpp`, `chromosphere.hpp` or `tests/` was modified.** Exact commands: the new section of `visualize_commands.md`.
+**No source file under `src/`, `scenarios/`, `chromo_main.cpp`, `chromosphere.hpp` or `tests/` was modified.** Exact commands: the matching section of `docs/viz_catalog/_historical.md`.
 
 All figures use physical height as the x-axis; none uses cell index.
 

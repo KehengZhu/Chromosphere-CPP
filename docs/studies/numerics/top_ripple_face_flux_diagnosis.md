@@ -224,6 +224,6 @@ New:
 - `outputs/model_column/faceflux_{500,1000}s_report.txt`, `faceflux_{500,1000}s_metrics.json`, `faceflux_500s_{limiter,cfl}_metrics.json`
 - `visualization/model_column/faceflux_{500,1000}s_decomposition.png`, `faceflux_500s_limiter_compare.png`, `faceflux_500s_cfl_compare.png`
 
-Modified: [chromosphere.hpp](../../../chromosphere.hpp) (`GammaFaceFluxCapture`, `capture_face_flux`), [src/rhs.cpp](../../../src/two_fluid/rhs.cpp) (`capture_gamma_face_flux` + one guarded call), [chromo_main.cpp](../../../chromo_main.cpp) (`CHROMO_FACE_FLUX_*` sidecar), [scenarios/model_column.cpp](../../../scenarios/model_column.cpp) (`ISO_LIMITER` diagnostic override), [tests/chromo_tests.cpp](../../../tests/chromo_tests.cpp), [visualize_commands.md](../../../visualize_commands.md).
+Modified: [chromosphere.hpp](../../../chromosphere.hpp) (`GammaFaceFluxCapture`, `capture_face_flux`), [src/rhs.cpp](../../../src/two_fluid/rhs.cpp) (`capture_gamma_face_flux` + one guarded call), [chromo_main.cpp](../../../chromo_main.cpp) (`CHROMO_FACE_FLUX_*` sidecar), [scenarios/model_column.cpp](../../../scenarios/model_column.cpp) (`ISO_LIMITER` diagnostic override), [tests/chromo_tests.cpp](../../../tests/chromo_tests.cpp), [docs/viz_catalog/_historical.md](../../viz_catalog/_historical.md).
 
-Exact commands: see the "Top-region face mass-flux decomposition" section of [visualize_commands.md](../../../visualize_commands.md).
+Exact commands: see the "Top-region face mass-flux decomposition" section of [docs/viz_catalog/_historical.md](../../viz_catalog/_historical.md).

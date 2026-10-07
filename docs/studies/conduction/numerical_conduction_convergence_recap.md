@@ -127,7 +127,7 @@ Runs (`outputs/model_column/`, each with `.faceflux`, `.gamma_diag`, `.outercond
 - `ncond_ns1000_prod_1000s.txt`, `ncond_ns2000_prod_1000s.txt`
 - `ncond_ns1000_dnum0_1000s.txt`, `ncond_ns2000_dnum0_1000s.txt` *(ns=2000 ends at 921.5 s)*
 
-Results: `outputs/model_column/ncond_report.txt`, `outputs/model_column/ncond_metrics.json`, `visualization/model_column/ncond_numerical_conduction.png`. Commands: the new section of `visualize_commands.md`.
+Results: `outputs/model_column/ncond_report.txt`, `outputs/model_column/ncond_metrics.json`, `visualization/model_column/ncond_numerical_conduction.png`. Commands: the matching section of `docs/viz_catalog/_historical.md`.
 
 Nothing was changed in the Rusanov flux, the limiter, the EOS, the well-balanced subtraction, any boundary condition, the conduction stencil, the CFL, or the integration order. No production default changed — both new knobs are default-off/identity.
 

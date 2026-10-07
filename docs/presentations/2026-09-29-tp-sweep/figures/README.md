@@ -2,7 +2,7 @@
 
 Kept inside the talk's own folder so the deck stays buildable from a fresh clone.
 `visualization/` is gitignored, so a deck that reached across into it would not build for anyone else.
-The crop commands are recorded in `visualize_commands.md` section 22.
+The crop commands are recorded in `docs/viz_catalog/presentations.md` (2026-09-29 tp-sweep deck).
 
 | File | Provenance |
 | --- | --- |

@@ -17,7 +17,7 @@
 Evidence:
 - script: `util/analytic_evaporation_table.py`
 - table: `outputs/model_column/analytic_J_table/J_table.{npz,csv}`, `J_table_summary.json`
-- figure: `visualization/model_column/analytic_J_table.png` (`visualize_commands.md` §20)
+- figure: `visualization/model_column/analytic_J_table.png` (`docs/viz_catalog/model_column.md`)
 
 Post-processing only; no new run.
 

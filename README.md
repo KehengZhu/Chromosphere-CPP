@@ -118,7 +118,7 @@ Plotting scripts live in `util/` and default their output to `visualization/` (g
 .venv/bin/python util/animate_loop_flare.py    outputs/loops/run.txt
 ```
 
-`visualize_commands.md` in the project root is the catalog of the exact command behind every file in `visualization/` — add an entry whenever you generate a new figure or movie.
+[`docs/viz_catalog/`](docs/viz_catalog/README.md) is the catalog of the exact command behind every file in `visualization/` — add an entry whenever you generate a new figure or movie.
 
 ## 6. Validate
 

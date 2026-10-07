@@ -6,7 +6,7 @@
 
 **Answer.** Strongly nonlinear, with a flow reversal near $T_{\rm wall}\approx 10$ kK and **no saturation anywhere in the range tested**. On the upflow branch $V_{\rm top}$ follows an approximate power law $V\propto T_{\rm wall}^{3.1}$ whose *local* exponent falls monotonically from $\approx 12$ just above the reversal to $2.6$ at 100 kK. Over $10\to100$ kK the top-of-domain velocity spans $-0.10 \to +792$ m/s, i.e. **four decades of velocity for one decade of wall temperature**. The controlling quantity is the outer-face conductive flux $q_{\rm wall}$, and the response is quantitatively the Antiochos & Sturrock (1978) conduction-driven evaporation balance: the release has no radiative sink and no coronal heating, so a quasi-steady column must export $q_{\rm wall}$ as the enthalpy flux of the evaporating material.
 
-Evidence: `outputs/model_column/twall_sweep/`, metrics in `twall_sweep_metrics.json`, figures `visualization/model_column/twall_sweep_N500_4000s_{V_of_t,V_of_h,summary,support}.png`, and `visualization/model_column/twall_sweep_N500_4000s_overlay.mp4` — all 13 accepted walls overlaid on the same six panels as the release evolution movie (`util/animate_twall_sweep.py`; catalogued in `visualize_commands.md` §16).
+Evidence: `outputs/model_column/twall_sweep/`, metrics in `twall_sweep_metrics.json`, figures `visualization/model_column/twall_sweep_N500_4000s_{V_of_t,V_of_h,summary,support}.png`, and `visualization/model_column/twall_sweep_N500_4000s_overlay.mp4` — all 13 accepted walls overlaid on the same six panels as the release evolution movie (`util/animate_twall_sweep.py`; catalogued in `docs/viz_catalog/model_column.md`).
 
 ## What was varied, and what was not
 

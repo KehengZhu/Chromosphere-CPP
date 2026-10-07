@@ -136,7 +136,7 @@ Two by-products correct existing documentation:
 Evidence:
 - script: `util/twall_relaxation_diag.py`
 - metrics: `outputs/model_column/twall_sweep/twall_relaxation_metrics.json`
-- figures: `visualization/model_column/twall_relaxation_{phases,spacetime,timescales}.png` (commands in `visualize_commands.md` §16)
+- figures: `visualization/model_column/twall_relaxation_{phases,spacetime,timescales}.png` (commands in `docs/viz_catalog/model_column.md`)
 
 Post-processing only; no new run.
 
@@ -369,4 +369,4 @@ Recipe for the current C7 initial condition:
     --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt
 ```
 
-This needs the sweep dumps with their `.faceflux` sidecars (`visualize_commands.md` §16 prerequisites) and the release run `outputs/model_column/release_singleT_N500_4000s`. Runtime is about 10 s on 6 workers.
+This needs the sweep dumps with their `.faceflux` sidecars (prerequisites of the conduction-wall sweep in `docs/viz_catalog/model_column.md`) and the release run `outputs/model_column/release_singleT_N500_4000s`. Runtime is about 10 s on 6 workers.

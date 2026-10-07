@@ -203,7 +203,7 @@ smooth at initialization and remains smooth during the evolution.
   initialization; fixed-gamma behavior remains unchanged.
 - `chromo_main.cpp`: optional exact `CHROMO_T_END` and snapshot
   `CHROMO_FRAME_STRIDE` runtime controls.
-- `visualize_commands.md`: reproducible 1,000 s run and animation commands.
+- `docs/viz_catalog/_historical.md`: reproducible 1,000 s run and animation commands.
 
 ## Verification commands
 

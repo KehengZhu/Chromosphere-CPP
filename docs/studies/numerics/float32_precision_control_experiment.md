@@ -99,4 +99,4 @@ scripts/run_chromo_realtime.sh \
     outputs/model_column/lnp_godunov_N500_4000s_f64.txt
 ```
 
-The six-panel comparison figure and the animation of the double-precision run are catalogued in `visualize_commands.md` §14. The float32 mechanism panel alone is also produced by `util/plot_base_mass_flux_diagnosis.py`.
+The six-panel comparison figure and the animation of the double-precision run are catalogued (as WITHDRAWN) in `docs/viz_catalog/_historical.md`. The float32 mechanism panel alone is also produced by `util/plot_base_mass_flux_diagnosis.py`.

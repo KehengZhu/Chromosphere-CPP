@@ -40,7 +40,7 @@
 The corona is outside the box, so we **do not see the coronal EM rise** inside the domain (v1's headline signature). We instead measure the TR upflow speed/Mach, the TR burndown, the upper-domain density rise, and the **mass flux out the top**. The upflow + Doppler are the primary observables anyway.
 
 ### IMPLEMENTATION + RESULTS (2026-06-22)
-**Built & tested (5950 pass).** Phase A: `model_c7_ic(extended=true)` appends the real Table-26 rows to h ≈ 2.628 Mm and computes the C7-gradient `q₀ ≈ 130 W/m²`. The `q(T)` ramp (`outer_heat_flux_base/_t_on/_ramp/_enhance`, applied in `model_c7_update_bc`) + the new `model_gentle` scenario (`GENTLE_Q_ENHANCE/_T_ON/_RAMP`, env-driven) are the driver. `outer_mach_cap` Grid field added (default 0.05; `model_c7` tests pin 0.05, unaffected). Commands in `visualize_commands.md` §10.
+**Built & tested (5950 pass).** Phase A: `model_c7_ic(extended=true)` appends the real Table-26 rows to h ≈ 2.628 Mm and computes the C7-gradient `q₀ ≈ 130 W/m²`. The `q(T)` ramp (`outer_heat_flux_base/_t_on/_ramp/_enhance`, applied in `model_c7_update_bc`) + the new `model_gentle` scenario (`GENTLE_Q_ENHANCE/_T_ON/_RAMP`, env-driven) are the driver. `outer_mach_cap` Grid field added (default 0.05; `model_c7` tests pin 0.05, unaffected). Commands in `docs/viz_catalog/_historical.md`.
 
 **Phase B (relaxation) CONVERGED:** with the Mach-capped outflow (cap 0.05), the column relaxes to a quiet steady preflare state — ρ-weighted mean|V| = **48 m/s**, max|dlnT/dt| = **3×10⁻⁵/s**, top settled at a stable **0.45 MK** (`gentle_v2_relax_convergence.png`).
 
@@ -57,7 +57,7 @@ The minimal fix that keeps the corona-as-boundary philosophy: don't put the boun
 
 **Phase B (relaxation) — the corona HOLDS, does not drain.** Over ~3000 s the resolved C7 corona under the q(T) top BC settles to a stable T_top ≈ 1.14 MK, flat coronal EM, TR at 1.595 Mm. (It carries a steady ~8 km/s cap-throttled coronal downflow — a mild draining tendency the boundary throttles to a stable EM, since there's no volumetric heating to pin V=0. Steady, not drifting → usable preflare baseline.)
 
-**Phase C (q(T) ramp ×3 at t=3000 s) — EVAPORATION APPEARS.** Coronal (h>2.3 Mm) emission measure ∫n_e² ds **×2.0**, coronal mass ∫n_e ds ×1.42, T_top 1.14→1.50 MK, n_e(top) ×1.47, TR burns down 1.595→1.526 Mm, transient +1 km/s upflow during the ramp. The corona gains mass — the A&S 1978 signature, **absent in v2**. Comparable to v1 (EM ×2.6). Movie `gentle_v3_evolution.mp4`; commands `visualize_commands.md` §9c.
+**Phase C (q(T) ramp ×3 at t=3000 s) — EVAPORATION APPEARS.** Coronal (h>2.3 Mm) emission measure ∫n_e² ds **×2.0**, coronal mass ∫n_e ds ×1.42, T_top 1.14→1.50 MK, n_e(top) ×1.47, TR burns down 1.595→1.526 Mm, transient +1 km/s upflow during the ramp. The corona gains mass — the A&S 1978 signature, **absent in v2**. Comparable to v1 (EM ×2.6). Movie `gentle_v3_evolution.mp4`; commands `docs/viz_catalog/_historical.md` §9c.
 
 **Remaining limitation:** the steady baseline downflow means the *sustained* signature is the EM/density rise, not a fast bulk upflow; v1 (resolved corona + volumetric heating) gives the cleaner sustained upflow (15.6 km/s). Pinning V≈0 in the corona-as-boundary baseline would need a small volumetric coronal heating term (→ v1's H(s)), which is the deliberate tradeoff this branch avoids.
 
@@ -65,7 +65,7 @@ The minimal fix that keeps the corona-as-boundary philosophy: don't put the boun
 
 ## v1 (SUPERSEDED — resolved-corona + volumetric H(s); code retained, off)
 
-All four phases are built and verified; commands catalogued in `visualize_commands.md` §9.
+All four phases are built and verified; commands catalogued in `docs/viz_catalog/_historical.md` §9a–§9e.
 
 - **Phase 0 — heating term.** New `Grid` fields `enable_coronal_heating`, `coronal_heat_E0/_sH/_s0/_two_sided` and ramp fields `coronal_heat_t_on/_ramp/_enhance` ([chromosphere.hpp](../../../chromosphere.hpp)). `coronal_heating_rate(grid)` → W/m³ in [physics.hpp](../../../physics.hpp): `H(s)=E_H0·exp(−d(s)/s_H)·enhance(t)`, with `d(s)` the distance to the nearest footpoint (one-sided for open/half-loop, two-sided for a full loop). `apply_coronal_heating_stage()` ([src/integrators.cpp](../../../src/two_fluid/integrators.cpp)) mirrors the beam (electron pool when `enable_Te`, else heat-capacity-shared; TRAC-broadened; runs before cooling) plus a CFL guard. Default off ⇒ baseline byte-for-byte; **5950 tests pass** (added `test_coronal_heating_rate_profile`, `test_coronal_heating_partitions_by_heat_capacity`).
 - **Phase 1 — calibration.** `GENTLE=1` env overlay in [pfss_field_line.cpp](../../../scenarios/pfss_field_line.cpp) (alternative to `PFSS_FLARE`) inverts the RTV (1978) + Aschwanden & Schrijver (2002) scaling: `p₀=(T_max/1400)³/L_cm`, `E_unif=9.8e4·p₀^{7/6}·L_cm^{−5/6}`, `E_H0=E_unif·exp(½L/s_H)`, ×0.1→SI. Knobs `GENTLE_TMAX_MK` (2.0), `GENTLE_SH_FRAC` (0.4 — keep ≳ 0.3, the Serio/Martens static-existence limit), `GENTLE_E0/_S0_MM/_ENHANCE/_T_ON/_RAMP`. `data_file_parser` now reads `loop_half_length_m`. For L=25 Mm, T_max=2 MK ⇒ **E_H0≈6.0×10⁻⁴ W/m³, s_H=10 Mm**. `make_loop_dat.py` prints this auto-calibration.

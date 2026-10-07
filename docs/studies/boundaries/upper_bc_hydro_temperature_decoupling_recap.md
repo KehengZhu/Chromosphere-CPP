@@ -233,6 +233,6 @@ GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
 #   -> outputs/model_column/model_column_h1600_2153_ns1000_condoff_50s_hydroT{0,1}.txt
 ```
 
-Diagnostics and figure: see `visualize_commands.md`
+Diagnostics and figure: see `docs/viz_catalog/_historical.md`
 (`upper_bc_hydroT_decouple_500s_top90.png`, `upper_bc_hydroT_decouple_500s_metrics.json`,
 and the two evolution movies).

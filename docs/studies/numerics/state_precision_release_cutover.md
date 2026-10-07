@@ -196,7 +196,7 @@ The double leg takes 712,029 steps and 941,302,338 face solves — 0.04 % fewer.
   *Update 2026-09-27:* explained. The spread is the Eulerian mass-flux signature of the chromosphere's adiabatic contraction under sustained upflow, `f(z)/f_top = 1 − ρ(z) ∫_base^z δ(∇_ad − ∇)(g/p) dz`, predicted at 11.9 % against 12.1 % measured on the current release run. It is permanent while the column evaporates, independent of resolution, and not a duration effect that will relax away (`docs/studies/boundaries/twall_mass_flux_relaxation_timescales.md` §5a).
 - **Top-of-domain evaporation observables move by ~28 %, not ~3 %.** Top velocity 13.18 → 9.50 m/s and top `f_total` 3.753e-10 → 2.702e-10. The earlier experiment's conclusion that "the release evaporation numbers are therefore not badly wrong ... affected at the ~3 % level" was an artifact of its hybrid build and is **withdrawn**. The physical reading is coherent: with the lower chromosphere unable to drain, float32 sustained a mass supply the column does not actually have, so it over-predicted the evaporation flux. **Any previously quoted release evaporation number from a float32 run is high by of order 30 % and must be re-measured.**
 
-The comparison figure is `visualization/model_column/precision_cutover_N500_4000s.png` (catalogued in `visualize_commands.md` §14).
+The comparison figure is `visualization/model_column/precision_cutover_N500_4000s.png` (catalogued in `docs/viz_catalog/model_column.md`).
 
 ### 3e. A pre-existing open issue that the cutover closed
 
@@ -252,4 +252,4 @@ cmake --build build_omp_f32 -j 12
 (cd build_omp_f32 && OMP_NUM_THREADS=12 ./chromo_tests)
 ```
 
-The 4000 s comparison legs and the figure are catalogued in `visualize_commands.md` §14.
+The 4000 s comparison legs and the figure are catalogued in `docs/viz_catalog/model_column.md`.

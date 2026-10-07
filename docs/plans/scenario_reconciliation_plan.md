@@ -31,7 +31,7 @@ This plan:
 
 **Consequence:** the C7 atmosphere (table, spline, `c7_full_profile`, Route-B inversion) is load-bearing shared code and must survive. `model_flare` / `analytic_canopy` must keep compiling against `model_c7_*`.
 
-### What is actually run (from README / visualize_commands.md / docs)
+### What is actually run (from README / the visualization catalog, now `docs/viz_catalog/` / docs)
 
 - `model_c7` — quiet-Sun baseline & default; actively run.
 - `model_isentropic` — the main testbed; dozens of runs.
@@ -188,7 +188,7 @@ Each phase ends green (`chromo_main` + `chromo_tests` build; test suite passes) 
 ### Phase 5 — Flip the default + downstream docs
 - `chromo_main`: default scenario `model_c7` → `model_column`; update the usage comment.
 - Update `tests/chromo_tests.cpp`: rename `model_isentropic_*` calls → `model_column_*`; drop now-defaulted `setenv("ISO_C7_IC"/"ISO_EQ_WB"/"ISO_LOG_RECON")` where they are now unconditional (keep the determinism test meaningful). Re-run; fix any assertions.
-- Update `README.md` (CLI scenario list, examples), `visualize_commands.md` (migrate `model_isentropic`/`model_gentle` commands to `model_column`; the "bestwb" env soup collapses to a bare `model_column` run), and add the `GENTLE_*→ISO_*` migration table. Leave historical `docs/*_plan.md` as-is (they are a research record).
+- Update `README.md` (CLI scenario list, examples), the visualization catalog, now `docs/viz_catalog/` (migrate `model_isentropic`/`model_gentle` commands to `model_column`; the "bestwb" env soup collapses to a bare `model_column` run), and add the `GENTLE_*→ISO_*` migration table. Leave historical `docs/*_plan.md` as-is (they are a research record).
 - Update `util/` parser defaults/labels that hardcode "model_c7" naming (`plot_output.py`, `animate_output.py`) to be scenario-agnostic or default to `model_column`. Note (do not necessarily fix here) the `H_BASE_KM=1003` hardcodes in `verify_pfss_flare.py` / `animate_pfss_flare.py` / `visualize_canopy.py` — `model_column` sets `out_base_km=0`, so those parsers must read the height column from line 2 (as `plot_output.py` already does) rather than assume 1003 km.
 
 ### Phase 6 — Verify

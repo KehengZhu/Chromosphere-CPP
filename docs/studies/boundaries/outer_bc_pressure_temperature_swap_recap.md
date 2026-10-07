@@ -13,7 +13,7 @@
 
 The release closure is therefore retained. The value of the experiment is the mechanism: **the outer pressure closure has to be hydrostatically consistent first, and externally anchored second, and the two requirements fail differently.**
 
-Evidence: `outputs/model_column/outer_bc_swap/`, movie `visualization/model_column/outer_bc_closure_swap_4000s.mp4` (`util/animate_outer_bc_compare.py`, catalogued in `visualize_commands.md`).
+Evidence: `outputs/model_column/outer_bc_swap/`, movie `visualization/model_column/outer_bc_closure_swap_4000s.mp4` (`util/animate_outer_bc_compare.py`, catalogued in `docs/viz_catalog/model_column.md`).
 
 ## What was varied, and what was not
 

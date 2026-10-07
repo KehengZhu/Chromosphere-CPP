@@ -64,9 +64,9 @@ This is not an artefact of $T_c$ approaching the 7.5 kK marker. With $T_1 = 10$ 
 
 ## Limits
 
-- **Validated on one line only.** The simulation checks exist only at $p_\mathrm{top} = 0.0103$ Pa, $T_c \approx 6.7$ kK and 15–100 kK. Everything off that line is the integral alone: 100–200 kK, every other pressure, every other $T_c$. The next step is a small set of simulation checks at table corners with consistently rebuilt ICs, including the A/B construction cross-check.
+- **Validated on the sweep grid only.** The original simulation checks were at $p_\mathrm{top} = 0.0103$ Pa, $T_c \approx 6.7$ kK and 15–100 kK. `tp_sweep_evaporation_closure_validation.md` extends them to 18–70 kK × 0.003–0.08 Pa with consistently rebuilt ICs (`ISO_P_TOP`). There, where the column is quiet and relaxed, $F L/J$ with the nominal $T_c$ is 0.93–1.03 at $t_\mathrm{ready}$. By 5000 s it drifts to 0.84–0.92 at $p_\mathrm{top} \leq 0.0103$ Pa, because the run's $T_c$ falls (point 3 above, now measured). Everything outside that grid is still the integral alone: 100–200 kK, pressures below 0.003 or above 0.08 Pa, and any other $T_c$. In the corner $T_\mathrm{top} \geq 50$ kK with $p_\mathrm{top} \geq 0.02$–0.04 Pa, the N=500 flux carries grid-scale noise from the unresolved TR foot. It is valid there only as a ≳ 500 s mean; at N=1000 the ratio is 0.975. The A/B construction cross-check has not been done.
 - **Release physics only.** No radiation and no heating. Saha LTE sets $h_c$, so the $T_c$ sensitivity is a property of pure-hydrogen Saha at the chromosphere top. A real, non-LTE chromosphere would respond differently.
-- **Steady only.** Use it only when the boundary changes more slowly than $t_\mathrm{ready}$ (520–2300 s).
+- **Steady only.** Use it only when the boundary changes more slowly than $t_\mathrm{ready}$: 520–2300 s on the C7 line, and up to 4500 s at 0.04–0.08 Pa and 18–35 kK, where the TR is still relaxing at 5000 s.
 - **Not a flux.** Converting $J$ to $F$ needs an $L_\mathrm{TR}$ defined at the same isotherm $T_1$. In the release that length is geometric.
 - **Below 15 kK** (near the flow reversal) the table is not defined; the sweep reverses flow at ≈ 10.4 kK from IC drainage, which the steady integral does not describe.
 

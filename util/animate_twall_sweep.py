@@ -60,6 +60,14 @@ Usage:
     python util/animate_twall_sweep.py [--dir DIR] [--cfl 0.50]
         [--run T_WALL_K=path] [--out FILE.mp4] [--fps 20]
 
+    # one p_top slice of the (T_wall, p_top) sweep of util/run_tp_sweep.sh:
+    python util/animate_twall_sweep.py --dir outputs/model_column/tp_sweep \
+        --p-top 0.0103 [--ns 500] --out FILE.mp4
+
+With --p-top the runs are tp_T<kK>kK_p<p_top>_N<ns>.txt instead of
+twall_<kK>kK_cfl<cfl>.txt; --cfl is then ignored. That sweep has no 22 kK run, so
+use ANIM_P_PANEL=abs or =ic there (=rel falls back to abs).
+
 Defaults reproduce the catalogued figure. Set ANIM_MAX_FRAMES to cap the number of
 rendered frames (the run is subsampled uniformly in time).
 """
@@ -86,10 +94,20 @@ I_NHI = COLUMNS.index("n_HI")
 T_WALL_RELEASE = 22.0e3      # the release baseline, drawn thicker
 
 
-def collect_entries(sweep_dir, cfl, explicit):
-    """-> sorted [(T_wall_K, path)], the same discovery rule as twall_sweep_diag."""
+def collect_entries(sweep_dir, cfl, explicit, p_top=None, ns=500):
+    """-> sorted [(T_wall_K, path)], the same discovery rule as twall_sweep_diag.
+
+    With p_top, take the tp-sweep runs tp_T<kK>kK_p<p_top>_N<ns>.txt instead.
+    """
     entries = []
-    for path in sorted(glob.glob(os.path.join(sweep_dir, "twall_*kK_cfl*.txt"))):
+    if p_top is not None:
+        pat = re.compile(rf"tp_T(\d+)kK_p{re.escape(p_top)}_N{ns}\.txt$")
+        for path in sorted(glob.glob(os.path.join(sweep_dir, "tp_T*kK_p*_N*.txt"))):
+            mm = pat.search(os.path.basename(path))
+            if mm:
+                entries.append((float(mm.group(1)) * 1.0e3, path))
+    for path in ([] if p_top is not None else
+                 sorted(glob.glob(os.path.join(sweep_dir, "twall_*kK_cfl*.txt")))):
         mm = re.search(r"twall_(\d+)kK_cfl([0-9.]+)\.txt$", os.path.basename(path))
         if not mm:
             continue
@@ -244,9 +262,14 @@ def main():
                     default="visualization/model_column/"
                             "twall_sweep_N500_4000s_overlay.mp4")
     ap.add_argument("--fps", type=int, default=20)
+    ap.add_argument("--p-top", default=None,
+                    help="animate one p_top slice of the (T_wall, p_top) sweep; "
+                         "the value exactly as in the run names, e.g. 0.0103")
+    ap.add_argument("--ns", type=int, default=500,
+                    help="with --p-top: the ISO_NS tag of the runs")
     args = ap.parse_args()
 
-    entries = collect_entries(args.dir, args.cfl, args.run)
+    entries = collect_entries(args.dir, args.cfl, args.run, args.p_top, args.ns)
     if not entries:
         raise SystemExit(f"no runs matched in {args.dir} (cfl={args.cfl})")
     runs = [r for r in (load_run(tw, p) for tw, p in entries) if r is not None]
@@ -388,9 +411,14 @@ def main():
     col, _, _ = wall_colors(t_walls)
     colors = [col[tw] for tw in t_walls]
     widths = [2.4 if tw == T_WALL_RELEASE else 1.2 for tw in t_walls]
-    title =("model_column upper-boundary sweep — N=500/R4, 4000 s, double state — "
-             "one line per imposed $T_{\\rm wall}$ (22 kK release baseline drawn "
-             "thick)")
+    if args.p_top is None:
+        title = ("model_column upper-boundary sweep — N=500/R4, 4000 s, double state — "
+                 "one line per imposed $T_{\\rm wall}$ (22 kK release baseline drawn "
+                 "thick)")
+    else:
+        title = (f"model_column $(T_{{\\rm wall}}, p_{{\\rm top}})$ sweep — "
+                 f"$p_{{\\rm top}}$ = {args.p_top} Pa — N={args.ns}/R4, "
+                 f"{times[-1]:.0f} s — one line per imposed $T_{{\\rm wall}}$")
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     frame_args = []

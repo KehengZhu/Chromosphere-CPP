@@ -2660,3 +2660,130 @@ Post-processing only; reads the accepted sweep runs and `outputs/model_column/tw
 ```bash
 .venv/bin/python util/analytic_evaporation_table.py
 ```
+
+## 21. (T_wall, p_top) evaporation sweep against the analytic closures (`docs/studies/boundaries/tp_sweep_evaporation_closure_validation.md`)
+
+The runs come from `util/run_tp_sweep.sh`: 5 wall temperatures (18–70 kK) × 6 pressures (0.003–0.08 Pa), each 5000 s, plus an N=1000 control. They live on the mac-mini (6.4 GB).
+- `util/tp_sweep_compare.py` runs there. It reduces them to `outputs/model_column/tp_sweep/tp_sweep_compare.json`, `tp_sweep_series.npz` and `compare.log`. Those three files are copied back.
+- `util/plot_tp_sweep_vs_analytic.py` redraws its two figures from the compact files alone.
+
+### `tp_sweep_sim_vs_analytic.png`
+
+Simulated against analytic evaporation, as curves over `p_top`, one colour per `T_wall`. The six panels:
+- (a) `J = F·L_TR`: simulation as markers, the steady-TR integral with the nominal `T_c` = 6.7 kK as lines;
+- (b) parity of `F_sim` against `F_E = q_wall/(h_top − h_c)` and against `F_J = J/L_TR`, both with the nominal `T_c`;
+- (c) measured over nominal chromospheric enthalpy `h_c`;
+- (d)–(f) `F_sim/F_E` with the measured `h_c` (= ER), `F_sim/F_E` with the nominal `T_c`, and `F L_TR/J` with the nominal `T_c`.
+
+Circles are read over 300 s from `t_ready` and are open when the run was not ready before 5000 s. Crosses are read over 4700–5000 s. The star is the N=1000 control.
+
+### `tp_sweep_time_series.png`
+
+One column per `T_wall`, one colour per `p_top`. Three rows:
+- the energy ratio `ER(t)`, with a dot at `t_ready`;
+- the top-cell flux divided by its median after 1000 s;
+- `std_t F(z)/|mean_t F(z)|` over faces after 1000 s, which locates the upper-chromosphere unsteadiness of the hot, high-pressure corner.
+
+```bash
+.venv/bin/python util/plot_tp_sweep_vs_analytic.py --dir outputs/model_column/tp_sweep \
+    --out-dir visualization/model_column
+```
+
+### `tp_corner_test.png`
+
+Follow-up at the unsteady 70 kK, 0.08 Pa corner. Four runs, each over 0–1500 s:
+- the sweep run;
+- N=1000;
+- CFL 0.25;
+- the R4 grade moved to 1931–1949 km (`ISO_REFINE_S_LO_KM=350`).
+
+The panels:
+- (a) `std_t F(z)` over 500–1500 s, divided by the column flux scale `median_z |mean_t F|`, with each case's grade band shaded and its TR base dotted;
+- (b) the top-face flux divided by its median;
+- (c)–(f) the space-time maps `F(z,t)` over 1900–2153 km, in the same units.
+
+The runs are in `outputs/model_column/tp_sweep_corner/` on the mac-mini, launched by its `launch.sh`. The script reads the raw runs and also writes `corner_test.json`, so it is run there.
+
+```bash
+.venv/bin/python util/tp_corner_test_compare.py
+```
+
+### `tp_sweep_flux_compare.png`
+
+The same comparison as heat maps over the (T_wall, p_top) grid. Each run is read over 300 s starting at its `t_ready`; `*` marks a run that was not ready before the end. The six panels:
+- `F_sim`;
+- `F_E = q_wall/(h_top − h_c)` with the nominal 6.7 kK `T_c`;
+- `F_sim/F_E`, nominal `T_c`;
+- `F_sim/F_E`, measured `h_c`;
+- `F L_TR/J`, nominal `T_c`;
+- `t_ready`.
+
+This script also writes `<dir>/tp_sweep_compare.json`, `<dir>/tp_sweep_series.npz` and, redirected, `compare.log`. It needs the raw runs, so it is run on the mac-mini.
+
+```bash
+.venv/bin/python util/tp_sweep_compare.py --dir outputs/model_column/tp_sweep \
+    --out-dir visualization/model_column --workers 8 > outputs/model_column/tp_sweep/compare.log
+```
+
+## 22. Anatomy of the analytic J integral, and the 2026-09-29 tp-sweep deck crops
+
+### `analytic_J_integrand.png`
+
+What the steady-TR invariant `J = ∫_{T1}^{T_top} κ/(h − h_c) dT` is made of, at `T_top` = 70 kK, `T_c` = 6.7 kK, and `p_top` = 0.003, 0.0103 and 0.08 Pa. Same Saha EOS, conductivity and quadrature as `twall_relaxation_diag.j_theory`. Three panels:
+- (a) the Saha `x(T)` (solid) and the enthalpy jump `(h − h_c)/(h_top − h_c)` (dashed);
+- (b) the integrand `κ/(h − h_c)`, with its log divergence at `T_c` and its Spitzer `T^{3/2}` tail;
+- (c) the running integral `J(T)/J(T_top)`, which in a steady TR is `(s − s_1)/L_TR`, i.e. the steady TR profile.
+
+It also prints `J/J_Spitzer` and the share of `h_top − h_c` gained between 6.7 and 10 kK (0.13 / 0.21 / 0.32). No run needed; runtime ~2 s.
+
+```bash
+.venv/bin/python util/plot_J_integrand.py
+```
+
+### Presentation crops (`docs/presentations/2026-09-29-tp-sweep/figures/`)
+
+The deck keeps its own figures so it builds from a fresh clone. `analytic_J_integrand.png` is copied unchanged; the rest are single-panel crops (panel titles removed, captions are on the slides) of the section 20–21 figures:
+
+```bash
+cp visualization/model_column/analytic_J_integrand.png docs/presentations/2026-09-29-tp-sweep/figures/
+.venv/bin/python - <<'PY'
+from PIL import Image
+V = 'visualization/model_column/'; D = 'docs/presentations/2026-09-29-tp-sweep/figures/'
+crops = {
+    'tp_sweep_sim_vs_analytic.png': {
+        'sweep_J_vs_p.png': (0, 95, 745, 672), 'sweep_parity.png': (745, 95, 1495, 672),
+        'sweep_hc_ratio.png': (1495, 95, 2240, 672), 'sweep_ER.png': (0, 745, 745, 1330),
+        'sweep_FE_nom.png': (745, 745, 1495, 1330), 'sweep_FLJ_nom.png': (1495, 745, 2240, 1330)},
+    'tp_sweep_time_series.png': {
+        'series_ER.png': (0, 50, 2600, 496), 'series_unsteady.png': (0, 925, 2600, 1365)},
+    'tp_corner_test.png': {
+        'corner_std_profile.png': (180, 140, 1095, 610), 'corner_top_flux.png': (1095, 140, 2000, 610),
+        'corner_spacetime.png': (180, 600, 2060, 1150)},
+    'analytic_J_table.png': {
+        'Jtable_T.png': (0, 110, 805, 660), 'Jtable_p.png': (805, 110, 1650, 660),
+        'Jtable_Tc.png': (0, 670, 805, 1275), 'Jtable_exponent.png': (805, 670, 1650, 1275)},
+}
+for src, outs in crops.items():
+    im = Image.open(V + src)
+    for name, box in outs.items():
+        im.crop(box).save(D + name)
+PY
+```
+
+The pixel boxes assume the current figure sizes (2240×1330, 2600×1365, 2210×1235, 1650×1275); re-check them if a parent figure is redrawn at another size.
+
+## 23. (T_wall, p_top) sweep movies, one per p_top (`visualization/model_column/tp_sweep_movies/`)
+
+### `tp_sweep_p<P>_N500_5000s_overlay_p_abs.mp4`, P = 0.003, 0.005, 0.0103, 0.02, 0.04, 0.08
+
+One movie per top pressure of the section 21 sweep, in the layout of `twall_sweep_N500_4000s_overlay_p_abs.mp4`: `T`, `V`, `q_parallel` on top, `rho`, absolute log-Pa `p`, and the conservative face flux `f_total` below. Each movie overlays the five walls (18, 25, 35, 50, 70 kK) at that `p_top`, keyed by the same discrete rank-spaced colorbar. 251 frames at a 20 s cadence over 0–5000 s, 20 fps (12.6 s). The y limits are pooled over each movie's own five runs, so they differ between pressures; compare shapes across movies, and read magnitudes off the axes. The sweep has no 22 kK run, so no line is drawn thick, and the pressure panel is absolute (`ANIM_P_PANEL=abs`); the release pressure is the `0.0103` movie.
+
+The raw runs are on the mac-mini, so the movies are rendered there (six in parallel, 2 frame workers each) and copied back:
+
+```bash
+printf '%s\n' 0.003 0.005 0.0103 0.02 0.04 0.08 | xargs -P 6 -I{} env \
+    MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=abs ANIM_MAX_FRAMES=251 ANIM_WORKERS=2 \
+    .venv/bin/python util/animate_twall_sweep.py --dir outputs/model_column/tp_sweep \
+    --p-top {} --fps 20 \
+    --out visualization/model_column/tp_sweep_movies/tp_sweep_p{}_N500_5000s_overlay_p_abs.mp4
+```

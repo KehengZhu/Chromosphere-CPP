@@ -14,11 +14,21 @@ quantity. Two closures are compared with the simulated top-cell flux F_sim:
 
 each with h_c measured in the run ("meas") and with h_c = h_Saha(6.7 kK, p_top),
 the nominal C7 plateau a lookup table would use ("nom"). F_sim/F_E(meas) is the
-diag's energy ratio ER and F_sim/F_J(meas) is its F L/J.
+diag's energy ratio ER and F_sim/F_J(meas) is its F L/J. The same quantities over
+the last window of the run are stored with an "_end" suffix: the flux keeps
+drifting after t_ready, and a TR that relaxes on a timescale comparable to the run
+can pass the t_ready test while still relaxing.
+
+The per-run time series (t, F, L_TR, ER, F L/J, J, q_wall and the smoothed
+F_base/F_top - 1 on the face captures), and the time mean and standard deviation
+of the face flux F(z) from 1000 s to the end, go to <dir>/tp_sweep_series.npz, keyed
+"T<kK>_p<Pa>_N<ns>/<name>", so the figures of util/plot_tp_sweep_vs_analytic.py
+can be redrawn without the raw runs.
 
 Usage:
     python util/tp_sweep_compare.py [--dir outputs/model_column/tp_sweep]
         [--window 300] [--out-dir visualization/model_column] [--prefix tp_sweep]
+        [--workers 6]
 """
 import argparse
 import glob
@@ -37,12 +47,15 @@ from matplotlib.colors import LogNorm, TwoSlopeNorm
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from analytic_evaporation_table import enthalpy
+from animate_isentropic import load_face_flux
 from twall_relaxation_diag import analyse, j_theory
 from twall_sweep_diag import COLUMNS, load_gamma_diag
 
 ROOT = os.path.dirname(HERE)
 I_T, I_P = COLUMNS.index("T"), COLUMNS.index("p")
 T_C_NOM = 6.7e3
+PROFILE_T0 = 1000.0            # start of the face-flux profile statistics [s]
+SERIES = ("t", "F", "L", "ER", "FL_J", "J", "qw", "ft", "ratio_s")
 NAME = re.compile(r"tp_T(\d+)kK_p([0-9.eE+-]+)_N(\d+)\.txt$")
 
 
@@ -65,30 +78,45 @@ def one(path, window):
     t_end = float(t[-1])
     ready = bool(np.isfinite(t_ready) and t_ready + window <= t_end)
     t0 = min(t_ready, t_end - window) if np.isfinite(t_ready) else t_end - window
-    w = (t >= t0) & (t <= t0 + window) & np.isfinite(s["J"])
-    if not w.any():
+
+    def read(t0):
+        """Window means over [t0, t0 + window] and the closures built from them."""
+        w = (t >= t0) & (t <= t0 + window) & np.isfinite(s["J"])
+        if not w.any():
+            return None
+        mean = lambda y: float(np.nanmean(np.asarray(y)[w]))
+        Tt = float(np.interp(t0 + 0.5 * window, tg, T_top))
+        pt = float(np.interp(t0 + 0.5 * window, tg, p_top))
+        h_top = float(enthalpy(Tt, pt)[0])
+        hc_nom = float(enthalpy(T_C_NOM, pt)[0])
+        F, qw, L = mean(s["F"]), mean(s["qw"]), mean(s["L"])
+        ER, FLJ = mean(s["ER"]), mean(s["FL_J"])
+        J_nom = j_theory(Tt, pt, hc_nom)
+        return dict(
+            T_top_K=Tt, p_top_Pa=pt, F_sim=F, q_wall=qw, L_TR_km=L / 1e3, h_top=h_top,
+            h_c_meas=h_top - qw * ER / F if F > 0 else np.nan,   # ER = F (h_top - h_c)/q_wall
+            h_c_nom=hc_nom,
+            F_E_meas=F / ER, F_E_nom=qw / (h_top - hc_nom),
+            F_J_meas=F / FLJ, F_J_nom=J_nom / L,
+            ratio_E_meas=ER, ratio_E_nom=F * (h_top - hc_nom) / qw,
+            ratio_J_meas=FLJ, ratio_J_nom=F * L / J_nom)
+
+    at_ready, at_end = read(t0), read(t_end - window)
+    if at_ready is None:
         return dict(T_wall_K=T_w, p_set_Pa=p_set, N=ns, excluded="no h_c in window")
-    mean = lambda y: float(np.nanmean(np.asarray(y)[w]))
-    Tt = float(np.interp(t0 + 0.5 * window, tg, T_top))
-    pt = float(np.interp(t0 + 0.5 * window, tg, p_top))
-    h_top = float(enthalpy(Tt, pt)[0])
-    hc_nom = float(enthalpy(T_C_NOM, pt)[0])
-    F, qw, L = mean(s["F"]), mean(s["qw"]), mean(s["L"])
-    ER, FLJ = mean(s["ER"]), mean(s["FL_J"])
-    J_nom = j_theory(Tt, pt, hc_nom)
-    hc_meas = h_top - qw * ER / F if F > 0 else np.nan      # ER = F (h_top - h_c)/q_wall
+    # Face-flux profile statistics after the wave phase: where in height F is unsteady.
+    fh, ft, ff = load_face_flux(path + ".faceflux")
+    ff = np.asarray(ff)[np.asarray(ft) >= PROFILE_T0]
+    prof = dict(face_km=np.asarray(fh), F_mean=ff.mean(0), F_std=ff.std(0))
     return dict(
-        T_wall_K=T_w, p_set_Pa=p_set, N=ns, T_top_K=Tt, p_top_Pa=pt,
+        T_wall_K=T_w, p_set_Pa=p_set, N=ns,
         t_wave_s=t_wave, t_TR_s=t_tr, t_ready_s=float(t_ready) if np.isfinite(t_ready) else None,
         read_window_s=[float(t0), float(t0 + window)], ready=ready, t_end_s=t_end,
-        F_sim=F, q_wall=qw, L_TR_km=L / 1e3, h_top=h_top, h_c_meas=hc_meas, h_c_nom=hc_nom,
-        F_E_meas=F / ER, F_E_nom=qw / (h_top - hc_nom),
-        F_J_meas=F / FLJ, F_J_nom=J_nom / L,
-        ratio_E_meas=ER, ratio_E_nom=F * (h_top - hc_nom) / qw,
-        ratio_J_meas=FLJ, ratio_J_nom=F * L / J_nom,
+        **at_ready, **{f"{k}_end": v for k, v in (at_end or {}).items()},
         F_drift_per_500s=float(-met["decay_rate_measured_per_s"] * 500.0)
         if np.isfinite(met["decay_rate_measured_per_s"]) else None,
-        godunov_fallbacks=r["godunov_fallbacks"])
+        godunov_fallbacks=r["godunov_fallbacks"],
+        series={**{k: np.asarray(s[k]) for k in SERIES}, **prof})
 
 
 def grid_of(rows, key, Ts, Ps):
@@ -132,11 +160,17 @@ def main():
     with ProcessPoolExecutor(a.workers) as ex:
         rows = list(ex.map(one, paths, [a.window] * len(paths)))
     rows.sort(key=lambda r: (r["N"], r["T_wall_K"], r["p_set_Pa"]))
+    series = {}
+    for r in rows:
+        tag = f"T{r['T_wall_K']/1e3:.0f}_p{r['p_set_Pa']:g}_N{r['N']}"
+        for k, v in r.pop("series", {}).items():
+            series[f"{tag}/{k}"] = v
+    np.savez_compressed(os.path.join(a.dir, "tp_sweep_series.npz"), **series)
     json.dump(dict(dir=a.dir, window_s=a.window, T_c_nominal_K=T_C_NOM, runs=rows),
               open(os.path.join(a.dir, "tp_sweep_compare.json"), "w"), indent=1)
 
     print(f"{'T':>4} {'p':>7} {'N':>5} {'t_ready':>7} {'F_sim':>9} {'E_meas':>6} {'E_nom':>6}"
-          f" {'J_meas':>6} {'J_nom':>6} {'L_km':>6} {'drift':>6}")
+          f" {'J_meas':>6} {'J_nom':>6} {'L_km':>6} {'drift':>6} {'E_mEnd':>6} {'J_nEnd':>6}")
     for r in rows:
         if r.get("excluded"):
             print(f"{r['T_wall_K']/1e3:4.0f} {r['p_set_Pa']:7.4g} {r['N']:5d}  EXCLUDED: {r['excluded']}")
@@ -145,7 +179,8 @@ def main():
         dr = f"{r['F_drift_per_500s']:.3f}" if r["F_drift_per_500s"] is not None else "?"
         print(f"{r['T_wall_K']/1e3:4.0f} {r['p_set_Pa']:7.4g} {r['N']:5d} {tr:>7}{'' if r['ready'] else '*'}"
               f" {r['F_sim']:9.3e} {r['ratio_E_meas']:6.3f} {r['ratio_E_nom']:6.3f}"
-              f" {r['ratio_J_meas']:6.3f} {r['ratio_J_nom']:6.3f} {r['L_TR_km']:6.1f} {dr:>6}")
+              f" {r['ratio_J_meas']:6.3f} {r['ratio_J_nom']:6.3f} {r['L_TR_km']:6.1f} {dr:>6}"
+              f" {r.get('ratio_E_meas_end', np.nan):6.3f} {r.get('ratio_J_nom_end', np.nan):6.3f}")
 
     good = [r for r in rows if not r.get("excluded") and r["N"] == 500]
     if not good:

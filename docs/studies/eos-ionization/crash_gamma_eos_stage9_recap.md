@@ -1,5 +1,7 @@
 # CRASH gamma-only EOS: Stage 9 validation recap
 
+**Status: HISTORICAL** — signed off the seven-row projected gamma-table configuration, since replaced by the three-row single-fluid mixture solver (`src/single_fluid/`).
+
 Date: 2026-07-20
 
 ## Result

@@ -1,8 +1,6 @@
 # Outer (upper-TR) static local refinement: does it reduce the numerical ripple with less artificial conduction?
 
-> Historical pre-local-scaling result. Its globally coarse-scaled R4 and R4
-> multiplier-0.25 runs remain the comparison baselines. The follow-up implementation
-> and validation are in `docs/studies/conduction/local_mesh_scaled_numerical_conduction_recap.md`.
+**Status: HISTORICAL** — pre-local-scaling result in a retired configuration; its evaporation numbers predate `q_num = 0` and must not be quoted. Its globally coarse-scaled R4 and R4 multiplier-0.25 runs remain the comparison baselines; the follow-up is [local_mesh_scaled_numerical_conduction_recap.md](../conduction/local_mesh_scaled_numerical_conduction_recap.md).
 
 Follow-up to `docs/studies/validation/resolution_convergence_scan_recap.md` (the `rho V` ripple in 2130–2150 km is spatial truncation error and converges at ~first order under *global* refinement) and `docs/studies/conduction/numerical_conduction_convergence_recap.md` (`numerical_diffusivity = 2000 Δh` supplies 58 % of the outer conductive drive at `ns=1000`). This stage adds a **static local** refinement profile that puts the fine cells only where the ripple lives — the upper TR against the outer boundary — and measures the same metrics.
 

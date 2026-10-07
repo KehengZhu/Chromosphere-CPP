@@ -1,5 +1,7 @@
 # CRASH gamma-only EOS: Stage 4 implementation recap
 
+**Status: HISTORICAL** — the equilibrium projection and seven-row energy mapping were replaced by the three-row single-fluid mixture solver (`src/single_fluid/`), which has no projection stage.
+
 Date: 2026-07-19
 
 Scope implemented: the conservative equilibrium projection and explicit

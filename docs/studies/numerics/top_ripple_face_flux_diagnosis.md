@@ -1,5 +1,7 @@
 # Top-region ripple: finite-volume face mass-flux diagnosis
 
+**Status: HISTORICAL** — measured in the retired `eq_wb` / numerical-conduction configuration; followed up by [resolution_convergence_scan_recap.md](../validation/resolution_convergence_scan_recap.md).
+
 > **Partly superseded (see `docs/studies/numerics/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
 
 

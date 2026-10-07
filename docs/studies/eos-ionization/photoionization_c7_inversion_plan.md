@@ -1,5 +1,7 @@
 # Plan: close the C7 over-ionization gap with Chae (2021)'s own method
 
+**Status: HISTORICAL** — plan for the two-fluid finite-rate ionization path, not the release.
+
 ## What Chae (2021) actually does (verified from the paper, §2, Eqs. 11–29)
 
 **Notation.** The photoionization rate we implement is $P_\mathrm{phot}$ (physics.hpp; formulation §2.2). Chae writes the same quantity as $R_{ik}$, so $P_\mathrm{phot}\equiv R_{ik}$ — we use $P_\mathrm{phot}$ from here on, and keep Chae's $R_{ki}, C_{ik}, C_{ki}$ as his symbols for the recombination/collisional rates (which we map to $\alpha_r, S_i, \alpha_c$ below).

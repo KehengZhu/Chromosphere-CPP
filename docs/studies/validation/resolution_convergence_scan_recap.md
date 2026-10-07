@@ -1,5 +1,7 @@
 # Resolution convergence scan: does the top-region `rho V` ripple vanish as `Delta h -> 0`?
 
+**Status: HISTORICAL** — retired configuration (uniform-`ns` scan with `eq_wb` and numerical conduction); its finding that no uniform resolution gave a grid-independent evaporation rate is still cited.
+
 > **Partly superseded (see `docs/studies/numerics/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
 
 

@@ -1,5 +1,7 @@
 # OpenMP Parallelization Recap
 
+**Status: CURRENT**
+
 ## Final status
 
 ```text

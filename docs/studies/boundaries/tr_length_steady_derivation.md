@@ -1,5 +1,7 @@
 # Steady transition-region length $L_\mathrm{TR}(T)$ with the release closures
 
+**Status: CURRENT**
+
 **Question.** In a steady state ($\partial_t = 0$), what is the length of the transition region as a function of temperature? The starting point is the field-aligned energy equation with radiative loss $Q(T)$. The model is the release closure set: pure-hydrogen Saha EOS with the ionization energy included, plus the Spitzer-plus-neutral conductivity. Gravity is dropped. The kinetic term $u^2/2$ is kept, even though it is small.
 
 **Notation.** Only the fluid variables are used: $\rho$, $u$, $p$, $T$, the conductive flux $q=-\kappa\,\partial_sT$ and the loss $Q$. The three shorthands are $F=\rho u$, $h=(e_\mathrm{int}+p)/\rho$ and $H=h+\tfrac12u^2$. In the TR $q<0$ (heat flows down), so $-q=|q|$ is the positive downward flux.

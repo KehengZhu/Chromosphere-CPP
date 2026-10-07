@@ -1,6 +1,6 @@
 # Scenario Reconciliation & Toggle Cleanup Plan
 
-Status: **EXECUTED (2026-07-11).** All 7 phases implemented and verified: `chromo_tests` passes 6351/6351 (unchanged from baseline); a bare `model_column` run with the bestwb physical knobs is **bit-identical** to the old `model_isentropic` bestwb command; `model_isentropic`/`model_gentle` aliases resolve (the latter reproduces the stable resolved-corona full-physics preset with no NaN); the default `./chromo_main` now runs `model_column`. ~460 lines of diagnostic/dead code removed from `src/integrators.cpp`; `model_gentle.{cpp,hpp}` and `model_isentropic.{cpp,hpp}` deleted; `model_column.{cpp,hpp}` added.
+**Status: HISTORICAL** — executed 2026-07-11; the `model_isentropic` alias it kept has since been retired, and `model_gentle` is now the historical two-fluid column. All 7 phases implemented and verified: `chromo_tests` passes 6351/6351 (unchanged from baseline); a bare `model_column` run with the bestwb physical knobs is **bit-identical** to the old `model_isentropic` bestwb command; `model_isentropic`/`model_gentle` aliases resolve (the latter reproduces the stable resolved-corona full-physics preset with no NaN); the default `./chromo_main` now runs `model_column`. ~460 lines of diagnostic/dead code removed from `src/integrators.cpp`; `model_gentle.{cpp,hpp}` and `model_isentropic.{cpp,hpp}` deleted; `model_column.{cpp,hpp}` added.
 
 ## Goal
 

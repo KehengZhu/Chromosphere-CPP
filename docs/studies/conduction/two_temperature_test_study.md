@@ -1,6 +1,6 @@
 # Two-temperature (T_e != T_i) test study on the release column
 
-**Status: complete. EXPERIMENTAL, non-release.** This records a test study, not a release
+**Status: CURRENT** — complete. EXPERIMENTAL, non-release. This records a test study, not a release
 capability. The release single-fluid solver is untouched and byte-identical with or without
 `src/two_temp/` compiled in.
 

@@ -1,5 +1,7 @@
 # Gamma-table solver speedup: Phases 1--3 recap
 
+**Status: HISTORICAL** — timings measured on the July 2026 pre-Godunov, float32 release; do not quote them for the current build.
+
 Date: 2026-07-21
 
 ## Result

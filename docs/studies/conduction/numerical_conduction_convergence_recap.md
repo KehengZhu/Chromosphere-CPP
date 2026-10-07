@@ -1,10 +1,6 @@
 # Is `numerical_diffusivity = 2000 Δh` why the evaporation flux does not converge?
 
-> Historical global-scaling study. The production implementation now stores
-> `C_num = 2000 m/s` (before scenario/diagnostic multipliers) and evaluates
-> `chi_num,f = C_num*ds_face` locally. See
-> `docs/studies/conduction/local_mesh_scaled_numerical_conduction_recap.md` for the implementation and
-> targeted validation.
+**Status: HISTORICAL** — global-scaling study. The implementation then moved to face-local `chi_num,f = C_num*ds_face` ([local_mesh_scaled_numerical_conduction_recap.md](local_mesh_scaled_numerical_conduction_recap.md)), and the release has since dropped numerical conduction altogether.
 
 Targeted follow-up to Result D of `docs/studies/validation/resolution_convergence_scan_recap.md`. Only the boxed question was tested; nothing was extended.
 

@@ -1,5 +1,7 @@
 # How the evaporation mass flux relaxes and decays in the $T_\mathrm{wall}$ sweep
 
+**Status: CURRENT**
+
 ## Notation
 
 **Abbreviations.**

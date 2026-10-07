@@ -1,5 +1,7 @@
 # Plan: physically-grounded boundary conditions (photospheric base + lower-TR top)
 
+**Status: HISTORICAL** — plan for the two-fluid `model_c7` / `model_isentropic` boundaries; the release boundaries are in [reference_free_release_recap.md](../numerics/reference_free_release_recap.md) and [outer_temperature_bc_single_t_recap.md](outer_temperature_bc_single_t_recap.md).
+
 ## Scope and geometry
 
 The field-aligned 1-D chromosphere code needs two boundaries replaced with physically-grounded closures, replacing the current ad-hoc ghost-cell prescriptions in `scenarios/model_c7.cpp` (`model_c7_update_bc`, line 234).

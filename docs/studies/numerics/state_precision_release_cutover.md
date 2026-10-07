@@ -1,6 +1,6 @@
 # Release cutover: the conserved state is double precision
 
-**Status: current. This changed a release default.** 2026-08-17. The `model_column` release stores the conserved state — and every other stored physical scalar — in `double`. `float` storage is retained only as a default-off diagnostic build. `CHROMO_STATE_FLOAT64` is retired.
+**Status: CURRENT** — this changed a release default. 2026-08-17. The `model_column` release stores the conserved state — and every other stored physical scalar — in `double`. `float` storage is retained only as a default-off diagnostic build. `CHROMO_STATE_FLOAT64` is retired.
 
 Companion documents: `float32_precision_control_experiment.md` is the controlled diagnostic that established the mechanism; this document is the production cutover, the SWMF audit that justified making it the release rather than a rescue of float32, and the post-cutover validation.
 

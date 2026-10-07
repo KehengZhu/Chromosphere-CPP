@@ -1,5 +1,7 @@
 # Plan: Incorporating Ionization and Recombination
 
+**Status: HISTORICAL** — finite-rate ionization plan for the two-fluid solver; the release uses Saha equilibrium.
+
 This plan adds hydrogen ionization/recombination to the existing 1.5D
 field-aligned two-fluid chromosphere model (Al Shidi et al. 2019 base
 formulation; current writeup in `docs/writeup-overleaf/main.tex`).

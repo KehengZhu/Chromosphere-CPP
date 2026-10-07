@@ -1,5 +1,7 @@
 # CRASH gamma-only EOS: Stage 5–6 implementation recap
 
+**Status: HISTORICAL** — the projected seven-row Euler integrator was replaced by the three-row single-fluid mixture solver (`src/single_fluid/`).
+
 ## Outcome
 
 Stages 5, 5.5, 5.6, and 6 are implemented for the isolated gamma-table hydro

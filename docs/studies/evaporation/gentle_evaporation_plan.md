@@ -1,6 +1,6 @@
 # Gentle (conduction-driven) chromospheric evaporation — plan
 
-**Status:** IMPLEMENTED (all four phases). **Date:** 2026-06-22. **Purpose:** "add heating, then relax" workflow for a steady chromosphere→TR→corona initial condition, then drive gentle evaporation. **Owner:** Keheng Zhu (advisor-directed).
+**Status: HISTORICAL** — two-fluid `model_gentle` / `model_c7` plan, implemented (all four phases); not the release. **Date:** 2026-06-22. **Purpose:** "add heating, then relax" workflow for a steady chromosphere→TR→corona initial condition, then drive gentle evaporation. **Owner:** Keheng Zhu (advisor-directed).
 
 ---
 

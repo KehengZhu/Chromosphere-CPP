@@ -1,5 +1,7 @@
 # Serial performance optimization of the gamma-table solver
 
+**Status: HISTORICAL** — pre-OpenMP timings on the July 2026 float32 release; do not quote them for the current build.
+
 Pre-OpenMP single-thread optimization of the active `GAMMA_TABLE` solver path. Scope was limited to removing redundant work: the physics, the numerical scheme, the boundary conditions and the fail-closed behaviour are unchanged, and **every production output of the reference run is byte-for-byte identical to the baseline**. No parallel code was introduced.
 
 ## Result

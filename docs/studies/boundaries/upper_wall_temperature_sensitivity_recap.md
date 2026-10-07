@@ -1,5 +1,7 @@
 # Upper-boundary conduction-wall temperature sensitivity of `model_column`
 
+**Status: CURRENT** — measured under the previous decoupled outer-temperature closure (`ISO_HYDRO_T_DECOUPLE=1`), which differs from the release by < 1 % in `V_top`.
+
 **Question.** With the C7 initial condition and every other piece of release physics and numerics held fixed, how does the field-aligned velocity respond to the imposed conduction-wall temperature $T_{\rm wall}$ at the 2153 km outer face?
 
 **Answer.** Strongly nonlinear, with a flow reversal near $T_{\rm wall}\approx 10$ kK and **no saturation anywhere in the range tested**. On the upflow branch $V_{\rm top}$ follows an approximate power law $V\propto T_{\rm wall}^{3.1}$ whose *local* exponent falls monotonically from $\approx 12$ just above the reversal to $2.6$ at 100 kK. Over $10\to100$ kK the top-of-domain velocity spans $-0.10 \to +792$ m/s, i.e. **four decades of velocity for one decade of wall temperature**. The controlling quantity is the outer-face conductive flux $q_{\rm wall}$, and the response is quantitatively the Antiochos & Sturrock (1978) conduction-driven evaporation balance: the release has no radiative sink and no coronal heating, so a quasi-steady column must export $q_{\rm wall}$ as the enthalpy flux of the evaporating material.

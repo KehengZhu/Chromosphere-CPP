@@ -1,6 +1,6 @@
 # Reference-free `model_column` release: MUSCL-Hancock source term, lower truncation, retirement of `eq_wb`
 
-**Status: GO — reference-free release.** "Reference-free" means precisely: *the interior hydrodynamic operator needs no frozen global hydrostatic reference state.* The boundary closures still capture fixed reservoir data once from the IC (`kOuterPRef`, `kInnerTRef`/`kInnerPRes0/1`), as any truncated-domain problem must. Supersedes the well-balancing sections of `docs/studies/numerics/model_column_release_numerics_recap.md`, `docs/studies/evaporation/gentle_evaporation_downflow.md` and `docs/studies/boundaries/boundary_conditions_plan.md` for current release behaviour.
+**Status: CURRENT** — GO, reference-free release. "Reference-free" means precisely: *the interior hydrodynamic operator needs no frozen global hydrostatic reference state.* The boundary closures still capture fixed reservoir data once from the IC (`kOuterPRef`, `kInnerTRef`/`kInnerPRes0/1`), as any truncated-domain problem must. Supersedes the well-balancing sections of `docs/studies/numerics/model_column_release_numerics_recap.md`, `docs/studies/evaporation/gentle_evaporation_downflow.md` and `docs/studies/boundaries/boundary_conditions_plan.md` for current release behaviour.
 
 ## What changed
 

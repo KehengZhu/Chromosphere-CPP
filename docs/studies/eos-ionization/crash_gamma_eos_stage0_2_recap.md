@@ -1,5 +1,7 @@
 # CRASH gamma-only EOS: Stage 0-2 implementation recap
 
+**Status: CURRENT**
+
 Date: 2026-07-19
 
 Scope implemented: the approved offline diagnostic (Stage 0), stripped

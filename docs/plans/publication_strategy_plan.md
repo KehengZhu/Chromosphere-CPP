@@ -1,5 +1,7 @@
 # Publication strategy — terminating the AWSoM-R thread
 
+**Status: PLAN**
+
 **Written 2026-09-06. Rewritten the same day** around the correct axis: this work exists to serve
 Igor Sokolov's AWSoM-R, and the gap it fills is stated in AWSoM-R's own paper. The first draft
 organized the field into four literature families and treated the coupling target as one of three

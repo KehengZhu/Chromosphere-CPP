@@ -1,5 +1,7 @@
 # The coronal conductive-flux boundary condition $q(T)$
 
+**Status: HISTORICAL** — the upper-boundary closure of the two-fluid `model_c7` / `model_gentle` scenarios, not the release.
+
 This note explains the upper-boundary closure $q(T)$ used by `model_c7` / `model_gentle`, and in particular what "imposed Neumann flux" means. All symbols are those of the writeup (`paper.tex`, §Boundary and initial conditions).
 
 ## The term it sets

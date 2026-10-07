@@ -1,5 +1,7 @@
 # Explosive chromospheric evaporation — scenario plan
 
+**Status: HISTORICAL** — beam-driven `model_flare` plan for the two-fluid solver, not the release.
+
 ## Goal
 
 Test whether a physically-plausible flare energy-deposition driver, added to the existing C7 chromosphere column, can reproduce **explosive chromospheric evaporation** in the sense of Fisher, Canfield & McClymont (1985, ApJ 289, 425): a short, intense burst of energy deposited in the upper chromosphere that the gas cannot radiate away, so it is heated to coronal temperatures and blasts upward into the corona at ~100s of km/s, with a matching downward condensation recoil.

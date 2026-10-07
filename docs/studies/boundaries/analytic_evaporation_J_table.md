@@ -1,5 +1,7 @@
 # Analytic steady-evaporation lookup table $J(T_\mathrm{top}, p_\mathrm{top}, T_c)$
 
+**Status: CURRENT**
+
 **Question.** Can the steady evaporation response of the release column to a boundary state $(T, p)$ be tabulated without a simulation per table point? This is the first step toward a steady lookup table for an AWSoM-R lower boundary. Physical placement of the interface is set aside here.
 
 **Answer.**

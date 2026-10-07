@@ -1,6 +1,6 @@
 # Repository reorganization plan
 
-**Status: IN PROGRESS (started 2026-10-07).** Mark DONE, with the merge commit, when phase 5 is closed.
+**Status: PLAN** — in progress, started 2026-10-07. Mark DONE, with the merge commit, when phase 5 is closed.
 
 ## Why
 

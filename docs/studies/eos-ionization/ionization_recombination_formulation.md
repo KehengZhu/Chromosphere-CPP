@@ -1,5 +1,7 @@
 # Hydrogen Ionization & Recombination — Formulation
 
+**Status: HISTORICAL** — the two-fluid solver's finite-rate ionization block, not release physics; its rate coefficients remain the reference for the instantaneous-Saha justification in [publication_strategy_plan.md](../../plans/publication_strategy_plan.md).
+
 **Scope.** The physically complete formulation of the hydrogen ionization/recombination block for the 1.5D field-aligned two-fluid chromosphere model. It supersedes §3.1–§3.5 of [`ionization_plan.md`](ionization_plan.md), which used an optically-thin / coronal approximation (collisional ionization + radiative recombination only).
 
 **Bottom line.** The one structural addition is **three-body (collisional) recombination** $e+e+\mathrm{H^+}\to\mathrm H+e$, scaling as $n_e^2 n_i$. It makes the equilibrium interpolate between the coronal/kinetic balance at low density and **Saha/LTE at the dense base** — a limit a radiative-only model can never reach.

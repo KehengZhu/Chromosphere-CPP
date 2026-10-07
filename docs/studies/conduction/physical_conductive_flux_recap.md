@@ -1,5 +1,7 @@
 # Physical conductive-flux diagnostic recap
 
+**Status: CURRENT** — the diagnostic definition is current; its numbers are historical.
+
 ## Outcome
 
 Fixed-gamma and gamma-table plots now use the same cell-centred diagnostic,

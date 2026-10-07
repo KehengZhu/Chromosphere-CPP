@@ -1,11 +1,13 @@
 # `model_column` release numerics
 
+**Status: CURRENT** — for the reconstruction and the N500 limitation; its flux and well-balancing rows are historical (notes below).
+
 > **Partly superseded — the numerical flux row is now historical.** The release face Riemann solver is the SWMF-style exact-Riemann Godunov flux at frozen composition (`docs/studies/numerics/swmf_godunov_flux_experiment.md` section 8); the mixture Roe characteristic flux described below is now the reference/comparison solver, reachable with `ISO_RIEMANN=roe-local`. Everything this document says about the Roe flux itself remains accurate — it is no longer the *release* flux. The reconstruction, conduction, mesh, boundary and limitation content is unaffected.
 >
 > **Also partly superseded (see `docs/studies/numerics/reference_free_release_recap.md`).** The release hydrodynamic operator has since gained the MUSCL-Hancock predictor momentum source and a trapezoidal EOS-closed lower ghost ladder, and **equilibrium-reference well balancing (`eq_wb` / `ISO_EQ_WB`) has been retired from the release** — it survives only in the two-fluid research solver. Statements below that describe `eq_wb` as active release method, or that quantify the discrete hydrostatic defect, are historical. Everything else in this document still stands.
 
 
-**Status: released.** This document describes the numerical method a normal `model_column`
+**Released.** This document describes the numerical method a normal `model_column`
 run uses *today*. It is the reference for the active release configuration; the studies that
 produced the decision are listed under "Evidence".
 

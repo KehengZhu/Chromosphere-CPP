@@ -1,5 +1,7 @@
 # CRASH gamma-only EOS: Stage 3 implementation recap
 
+**Status: CURRENT**
+
 Date: 2026-07-19
 
 Scope implemented: the narrow analytic pure-hydrogen mixture closure,

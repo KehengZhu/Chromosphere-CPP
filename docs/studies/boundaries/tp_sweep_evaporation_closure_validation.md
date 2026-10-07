@@ -1,5 +1,7 @@
 # Simulated against analytic evaporation flux over the $(T_\mathrm{wall}, p_\mathrm{top})$ sweep
 
+**Status: CURRENT**
+
 **Question.** The steady-TR closures of `twall_mass_flux_relaxation_timescales.md` and `analytic_evaporation_J_table.md` had been checked against the simulation on one pressure line only, the C7 column at $p_\mathrm{top} = 0.0103$ Pa. Do they still hold when the top pressure changes, over the 0.003–0.08 Pa that an AWSoM-R transition-region top can take?
 
 The closures are:

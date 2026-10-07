@@ -1,5 +1,7 @@
 # Face-local mesh-scaled numerical conduction
 
+**Status: HISTORICAL** — artificial numerical conduction has since been removed from the release, which uses physical conduction only ([coarse_model_column_physical_conduction_recap.md](coarse_model_column_physical_conduction_recap.md)).
+
 ## Decision
 
 Implemented and validated. Artificial conduction now follows the actual local

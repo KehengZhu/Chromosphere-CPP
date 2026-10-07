@@ -1,5 +1,7 @@
 # CRASH gamma-only EOS: Stage 7-8 implementation recap
 
+**Status: HISTORICAL** — activated the projected seven-row gamma-table path, since replaced by the three-row single-fluid mixture solver (`src/single_fluid/`).
+
 Revised: 2026-07-20
 
 ## Result

@@ -1,6 +1,6 @@
 # Separate Electron Temperature (T_e ≠ T_i) — Implementation Plan
 
-**Status:** ✅ implemented (runtime toggle `ENABLE_TE=1`; default off reproduces the single-temperature baseline bit-for-bit). See **§7 Implementation notes** below for the as-built design, which differs from the original §2 sketch in one structural choice (total-energy + electron-energy split rather than proton-only `E_I`). The ν_ei coefficient is the NRL/Spitzer energy-equilibration rate (`physics.hpp::nu_ei`).
+**Status: HISTORICAL** — implemented in the two-fluid solver only, which is not the release; the release `T_e != T_i` question is measured in [two_temperature_test_study.md](../studies/conduction/two_temperature_test_study.md) (runtime toggle `ENABLE_TE=1`; default off reproduces the single-temperature baseline bit-for-bit). See **§7 Implementation notes** below for the as-built design, which differs from the original §2 sketch in one structural choice (total-energy + electron-energy split rather than proton-only `E_I`). The ν_ei coefficient is the NRL/Spitzer energy-equilibration rate (`physics.hpp::nu_ei`).
 
 ## 1. Motivation
 

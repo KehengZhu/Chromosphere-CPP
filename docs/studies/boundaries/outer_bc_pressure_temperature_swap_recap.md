@@ -1,5 +1,7 @@
 # Outer face: swapping which variable carries the one imposed condition
 
+**Status: CURRENT**
+
 **Question.** The release outer face at 2153 km imposes a **fixed reservoir back-pressure** `kOuterPRef` and lets the hydro ghost temperature free-float with the live top cell (`ISO_HYDRO_T_DECOUPLE=1`), with the 22 kK conduction wall a separate physical-face datum. Subsonic outflow admits exactly one incoming characteristic, so exactly one condition may come from outside. What happens if the *other* variable carries it — fixed `T_hydro = T_cond = 22` kK and a **Neumann (loose) pressure**?
 
 **Answer.** It depends entirely on *which* Neumann pressure, and neither variant is usable.

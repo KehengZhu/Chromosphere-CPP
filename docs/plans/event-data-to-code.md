@@ -1,5 +1,7 @@
 # From observations to model inputs — the 2024‑08‑01 flare
 
+**Status: HISTORICAL** — inputs for the two-fluid 2024-08-01 event campaign (`pfss_field_line`), which is not the release.
+
 This note explains the four observables you asked about — the **STIX hard‑X‑ray spectrum**, the **active‑region (AR) location**, the **AIA 1600/1700 Å ribbon mask**, and **ribbon arrival timing** — what each one physically *is*, and exactly how we turn it into a number our 1.5‑D field‑aligned model consumes. It is written around the concrete event we are running: the **M8.2 flare of 2024‑08‑01 ~07:09 UT in NOAA AR 13768**.
 
 Supporting papers are in [`docs/supporting-papers/`](supporting-papers/): Krucker 2020 (STIX instrument), Kontar 2011 & 2018 (HXR → electron spectrum), Brown 1971 / Emslie 1978 (thick‑target), Kazachenko 2017 (ribbon reconnection flux), Liu & Qiu 2013 and Qiu 2025 (ribbon photometry → per‑loop heating), Fisher, Canfield & McClymont 1985 (explosive evaporation).

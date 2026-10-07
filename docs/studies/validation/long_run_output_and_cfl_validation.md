@@ -1,5 +1,7 @@
 # Long-Run Output Fixes and CFL Acceptance Sweep
 
+**Status: CURRENT** — conclusions current; the sweep configuration is retired and its velocity noise-floor finding was measured in the pre-cutover float32 build.
+
 Two tasks: (1) make `CHROMO_T_END` runs terminate and emit output correctly, and (2) determine the largest scientifically acceptable CFL for the production-shaped `model_column` case, then measure whether 1000 physical seconds fit in 1000 wall seconds.
 
 ## Final status

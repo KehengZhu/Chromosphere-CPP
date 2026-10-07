@@ -1,6 +1,8 @@
 # CRASH γ-only closure for Chromosphere2026 — implementation plan
 
-Status: Stage 0 (offline diagnostic), Stage 1 (stripped pure-H CRASH table + `zAv` check + raw-table validation), the standalone Saha utility, and the Stage-2 γ-table loader (data structure / parser / interpolation tests) are approved to implement; this document is approved. Six advisor review rounds are incorporated (see "Approval gating" for the resolved lists); the plan is judged implementation-ready. The hydro-solver stages (Stage 3+ touching `state.cpp` / `rhs.cpp` / flux reconstruction) are gated on Stage 0 confirming the Saha/γ consistency, on the equilibrium-mixture MUSCL path (Stage 5.5), and on the review-4 fixes below — all now in the plan.
+**Status: DONE → [crash_gamma_eos_stage9_recap.md](crash_gamma_eos_stage9_recap.md)**
+
+Approval record: Stage 0 (offline diagnostic), Stage 1 (stripped pure-H CRASH table + `zAv` check + raw-table validation), the standalone Saha utility, and the Stage-2 γ-table loader (data structure / parser / interpolation tests) are approved to implement; this document is approved. Six advisor review rounds are incorporated (see "Approval gating" for the resolved lists); the plan is judged implementation-ready. The hydro-solver stages (Stage 3+ touching `state.cpp` / `rhs.cpp` / flux reconstruction) are gated on Stage 0 confirming the Saha/γ consistency, on the equilibrium-mixture MUSCL path (Stage 5.5), and on the review-4 fixes below — all now in the plan.
 
 ## Goal and non-goals
 

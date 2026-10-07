@@ -1,5 +1,7 @@
 # Outer temperature BC: one fixed ghost-cell temperature (release as of 2026-09-22)
 
+**Status: CURRENT**
+
 **Decision.** The `model_column` release now imposes a single fixed outer temperature, `T_c = ISO_T_TOP = 22 000 K`, in the upper hydro ghost cells, and conduction reads the same ghost cell as its Dirichlet datum (`ISO_HYDRO_T_DECOUPLE=0`). This replaces the decoupled closure (`=1`), in which the hydro ghost temperature was extrapolated from the top cell and the conduction datum sat at the physical outer face. The outer back-pressure `kOuterPRef`, the Mach-capped velocity and the EOS-closed ghost density are unchanged. The only code change is the preset default in `scenarios/scenario.cpp`. `model_column_2t` keeps `=1`, because its closed two-temperature study was run that way.
 
 **Why.** The single-T boundary is one sentence in the paper: the ghost cells hold a coronal reservoir at `(p_c, T_c)`, and T is treated like the other variables. On the release mesh it gives the same solution as the decoupled closure to within 1 %. The decoupled closure needed a paragraph about two temperatures that contributed nothing to the physics the paper is about.

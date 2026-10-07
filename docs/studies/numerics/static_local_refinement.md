@@ -1,5 +1,7 @@
 # Static local-refinement support
 
+**Status: CURRENT**
+
 A metric-aware, **static** non-uniform finite-volume mesh. This is static local
 refinement, **not** AMR: the mesh is generated once at IC time and never
 regridded, conservatively remapped, or adapted at runtime. Uniform meshes remain

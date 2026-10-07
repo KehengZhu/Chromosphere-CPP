@@ -4,13 +4,13 @@
 
 This note explains the four observables you asked about — the **STIX hard‑X‑ray spectrum**, the **active‑region (AR) location**, the **AIA 1600/1700 Å ribbon mask**, and **ribbon arrival timing** — what each one physically *is*, and exactly how we turn it into a number our 1.5‑D field‑aligned model consumes. It is written around the concrete event we are running: the **M8.2 flare of 2024‑08‑01 ~07:09 UT in NOAA AR 13768**.
 
-Supporting papers are in [`docs/supporting-papers/`](supporting-papers/): Krucker 2020 (STIX instrument), Kontar 2011 & 2018 (HXR → electron spectrum), Brown 1971 / Emslie 1978 (thick‑target), Kazachenko 2017 (ribbon reconnection flux), Liu & Qiu 2013 and Qiu 2025 (ribbon photometry → per‑loop heating), Fisher, Canfield & McClymont 1985 (explosive evaporation).
+Supporting papers are in [`docs/supporting-papers/`](../supporting-papers/): Krucker 2020 (STIX instrument), Kontar 2011 & 2018 (HXR → electron spectrum), Brown 1971 / Emslie 1978 (thick‑target), Kazachenko 2017 (ribbon reconnection flux), Liu & Qiu 2013 and Qiu 2025 (ribbon photometry → per‑loop heating), Fisher, Canfield & McClymont 1985 (explosive evaporation).
 
 ---
 
 ## 0. The mapping at a glance
 
-Our code does **not** read the atmosphere off the magnetogram. The event supplies *geometry* (which loop) and *forcing* (the beam); the pre‑flare stratification is the standard C7 model atmosphere that [`util/legacy/make_loop_dat.py`](../../util/make_loop_dat.py) lays down. So every observable below feeds one of two things: **where/what loop** or **how it is hit**.
+Our code does **not** read the atmosphere off the magnetogram. The event supplies *geometry* (which loop) and *forcing* (the beam); the pre‑flare stratification is the standard C7 model atmosphere that [`util/legacy/make_loop_dat.py`](../../util/legacy/make_loop_dat.py) lays down. So every observable below feeds one of two things: **where/what loop** or **how it is hit**.
 
 | Code input (knob) | Physical meaning | Observable it comes from | Instrument |
 |---|---|---|---|
@@ -22,7 +22,7 @@ Our code does **not** read the atmosphere off the magnetogram. The event supplie
 | `FLARE_T_ON` per line | ignition time | **AIA 1600 Å ribbon arrival** at that footpoint | SDO/AIA |
 | `FLARE_DUR` per line | injection duration | **AIA 1600 Å brightening duration** | SDO/AIA |
 
-The code knobs are read in [`scenarios/pfss_field_line.cpp`](../../scenarios/pfss_field_line.cpp) (the `PFSS_FLARE` block) and applied by the thick‑target beam in [`physics.hpp`](../../physics.hpp) (`beam_heating_rate`).
+The code knobs are read in [`scenarios/pfss_field_line.cpp`](../../legacy/scenarios/pfss_field_line.cpp) (the `PFSS_FLARE` block) and applied by the thick‑target beam in [`physics.hpp`](../../src/core/physics.hpp) (`beam_heating_rate`).
 
 ---
 
@@ -54,7 +54,7 @@ confirmed explicitly in Kontar 2018. The fit returns three things we need:
 | STIX product | Code knob | Relation |
 |---|---|---|
 | photon index γ | `FLARE_DELTA` = δ | δ = γ + 1 |
-| low‑energy cutoff E_c | `FLARE_E_CUT` | direct; sets the stopping column `N_c = 2×10²¹·E_c²` m⁻² in [`physics.hpp`](../../physics.hpp) |
+| low‑energy cutoff E_c | `FLARE_E_CUT` | direct; sets the stopping column `N_c = 2×10²¹·E_c²` m⁻² in [`physics.hpp`](../../src/core/physics.hpp) |
 | nonthermal power P, footpoint area A | `FLARE_BEAM_FLUX` = F_e | **F_e = P / A** [W m⁻²]; in the code `∫Q ds = F_e·g(t)` (thick target = all absorbed) |
 
 E_c enters through the **stopping column** `N_c`: a higher cutoff means more energetic electrons, which punch deeper before stopping, so the deposition layer sits lower. In the code the beam weight is `Q ∝ n_tot·(1 + N/N_c)^(−δ/2)` where `N(s)` is the column from the apex — so δ and E_c together set *where* on the loop the energy lands, and F_e sets *how much*.
@@ -102,7 +102,7 @@ PFSS reconstructs the potential coronal field from the photospheric magnetogram.
 - **footpoint `|B|`** (field strength at the photospheric end),
 - the **3‑D path** (for the eventual 3‑D movie).
 
-That is what [`util/legacy/extract_event_loop.py`](../../util/extract_event_loop.py) does: it loads the ADAPT‑GONG map, reprojects it to the sine‑latitude (CEA) grid PFSS expects, converts the AR Stonyhurst position to Carrington, solves PFSS, traces a small cluster of seeds around the AR, and picks a representative **closed** loop. For this event it found **128.7 Mm total length (64.3 Mm half), footpoint |B| = 643 G**. Those two numbers feed straight into the loop builder:
+That is what [`util/legacy/extract_event_loop.py`](../../util/legacy/extract_event_loop.py) does: it loads the ADAPT‑GONG map, reprojects it to the sine‑latitude (CEA) grid PFSS expects, converts the AR Stonyhurst position to Carrington, solves PFSS, traces a small cluster of seeds around the AR, and picks a representative **closed** loop. For this event it found **128.7 Mm total length (64.3 Mm half), footpoint |B| = 643 G**. Those two numbers feed straight into the loop builder:
 
 ```bash
 python util/legacy/make_loop_dat.py --topology full \

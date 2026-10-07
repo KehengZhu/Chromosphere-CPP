@@ -155,7 +155,7 @@ inline Vec coulomb_log_ei(const Vec& n_e, const Vec& T_e) {
 ///   ν_ei = (8√(2π)/3) · m_e^{1/2} e⁴ /(m_p (4πε₀)²) · n_e lnΛ /(k_B T_e)^{3/2}
 ///        ≈ 2.030×10⁻⁴³ · n_e lnΛ /(k_B T_e)^{3/2}   (SI; the bracket evaluated
 /// for hydrogen Z=1). This is the load-bearing decoupling parameter
-/// (docs/design/electron_temperature_plan.md): ν_ei ∝ n_e T_e^{-3/2} is fast (T_e≈T_i)
+/// (docs/plans/electron_temperature_plan.md): ν_ei ∝ n_e T_e^{-3/2} is fast (T_e≈T_i)
 /// in the dense cool chromosphere (~4×10³ s⁻¹) and slow (decoupling) at the hot
 /// tenuous loop-top / flare onset (~4×10⁻² s⁻¹ at n_e=10¹⁵, T_e=10⁶ K), matching
 /// Bradshaw (2006) and Manchester (2012).

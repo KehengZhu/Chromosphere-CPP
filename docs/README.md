@@ -73,6 +73,8 @@ The authoritative index of which study is current and which is superseded is the
 | File | What it is |
 | --- | --- |
 | `writeup_standards.md` | **Authoritative.** How to catch the write-ups up after a code change. Referenced by the root `CLAUDE.md`. |
+| `release_facts.md` | **Authoritative.** What is true about the `model_column` release and how to state it: numerical method, frozen-composition flux, storage precision, validated CFL and run controls, known limitations. Read before writing about the release. |
+| `engineering_discipline.md` | Priority order, validation-by-risk, staged validation, protecting existing work, and the reporting standard. |
 
 ## `plans/` — forward-looking and in-progress plans
 
@@ -100,3 +102,17 @@ A stable collection of reference PDFs. Check here before downloading a paper. Le
 ## Build directories
 
 `latex-build/`, `presentation-build/` and `doxygen/html/` are gitignored build output. Nothing source-controlled should ever point into them.
+
+## Paths in older documents
+
+Studies and plans are historical records, so their plain-text file citations describe the tree as it was when they were written; only their Markdown links were rewritten after the 2026-10-07 reorganization (`plans/repo_reorganization_plan.md`). To follow an old citation:
+
+| Old path | Now |
+| --- | --- |
+| `chromo_main.cpp` | `src/main.cpp` |
+| `chromosphere.hpp`, `eos.hpp`, `physics.hpp`, `parallel.hpp`, `profiling.hpp`, `run_control.hpp`, `src/{grid,eos,profiling}.cpp` | `src/core/` |
+| `src/two_fluid/`, and the older `src/{rhs,flux,state,integrators}.cpp` | `legacy/two_fluid/` |
+| `scenarios/{model_c7,model_flare,analytic_canopy,pfss_field_line}.*`, the `model_gentle` leg of `model_column` | `legacy/scenarios/` (C7 table: `scenarios/c7_profile.*`) |
+| `util/<script>` | `util/{release,two_temp,legacy,run,lib}/<script>` |
+| `visualize_commands.md` | `viz_catalog/` |
+| `design/` | `standards/` and `plans/` |

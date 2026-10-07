@@ -160,7 +160,7 @@ The fixed-reference temperature jump ($a\cdot T_\text{ref}$, self-limiting — a
 
 ## Carrying the well-balanced fix to the corona loop scenario — GENTLE (2026-06-25)
 
-The well-balanced reconstruction (`Grid::well_balanced`) was applied to the **corona loop scenario** — the resolved chromosphere→TR→corona loop run via `pfss_field_line` with the `GENTLE=1` overlay (conduction-driven gentle evaporation, **no beam**; docs/studies/evaporation/gentle_evaporation_plan.md §9a/v1). The overlay now sets `grid.well_balanced = true` ([scenarios/pfss_field_line.cpp](../../../scenarios/pfss_field_line.cpp), env `GENTLE_WELL_BALANCED`, default on). It is scoped to the opt-in GENTLE branch, so the plain `pfss_field_line` scenario, the `PFSS_FLARE` (explosive-beam) overlay, and the 5958-test baseline are byte-for-byte unchanged. Unlike `model_c7`, no boundary closure is changed — the loop heats the corona *inside* the domain with `H(s)` and keeps its open/reflecting BC; only the φ_g reconstruction fix is added.
+The well-balanced reconstruction (`Grid::well_balanced`) was applied to the **corona loop scenario** — the resolved chromosphere→TR→corona loop run via `pfss_field_line` with the `GENTLE=1` overlay (conduction-driven gentle evaporation, **no beam**; docs/studies/evaporation/gentle_evaporation_plan.md §9a/v1). The overlay now sets `grid.well_balanced = true` ([scenarios/pfss_field_line.cpp](../../../legacy/scenarios/pfss_field_line.cpp), env `GENTLE_WELL_BALANCED`, default on). It is scoped to the opt-in GENTLE branch, so the plain `pfss_field_line` scenario, the `PFSS_FLARE` (explosive-beam) overlay, and the 5958-test baseline are byte-for-byte unchanged. Unlike `model_c7`, no boundary closure is changed — the loop heats the corona *inside* the domain with `H(s)` and keeps its open/reflecting BC; only the φ_g reconstruction fix is added.
 
 **Result — the relaxed preflare baseline is quieter; the gentle signature is preserved.** Re-running the L = 25 Mm closed half-loop (`loop_closed_gentle.dat`, ns = 241) with the fix on:
 
@@ -236,7 +236,7 @@ The clean testbed was rerun with the three pieces it deliberately omitted, behin
 
 ### Why the corona must be ionized for it to conduct (the frozen ionization profile, in plain terms)
 
-Heat conduction here is **electron** thermal conduction — the electrons carry the heat. The code uses the Spitzer form ([physics.hpp:45](../physics.hpp#L45))
+Heat conduction here is **electron** thermal conduction — the electrons carry the heat. The code uses the Spitzer form ([physics.hpp:45](../../../src/core/physics.hpp#L45))
 
 $$\kappa_e = \frac{9.2048\times10^{-12}\,n_e\,T^{5/2}}{n_e \;+\; 2.836\times10^{-11}\,n_n\,T^{2}}.$$
 

@@ -4,7 +4,7 @@
  * @ingroup scenarios
  *
  * Parser for the tabulated scenario data-file format produced by
- * util/extract_field_line.py. Used by any scenario that initialises the grid
+ * util/legacy/extract_field_line.py. Used by any scenario that initialises the grid
  * from an external file (pfss_field_line for now; Bifrost traces later).
  *
  * Format (ASCII, line-oriented):

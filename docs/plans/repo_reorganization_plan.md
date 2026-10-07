@@ -58,9 +58,9 @@ docs/
 | Phase | Content | Owner |
 |---|---|---|
 | 0 | Commit the pending T,p sweep work so the reorganization starts clean | done, `425e37c` |
-| A | Code move + legacy split (`src/`, `scenarios/`, `legacy/`, CMake, tests, `fortran/` include paths, `util/eos` include paths, Doxyfile, `architecture.md`, `configuration.md` build options, `scenario_reference.md`, README build section) | subagent, worktree |
-| B | Docs + util: split `docs/design/` into `standards/` and `plans/`, Status lines on every study, `visualize_commands.md` → `docs/viz_catalog/` (current vs `_historical.md`), `util/` reorganization with every path reference updated (docs, catalog, `scripts/release_validation.sh`, presentations' READMEs), `docs/README.md` | subagent, worktree |
-| C | Merge A and B; rewrite `CLAUDE.md` to rules + pointers, moving its release facts to `docs/standards/release_facts.md`; Doxygen build warning-free; publish; check the writeup for moved paths (report only, the Overleaf repo is not committed) | main session |
+| A | Code move + legacy split (`src/`, `scenarios/`, `legacy/`, CMake, tests, `fortran/` include paths, `util/eos` include paths, Doxyfile, `architecture.md`, `configuration.md` build options, `scenario_reference.md`, README build section) | done, `95c79d4`..`2ee92a7`, merged `5fd87bc` |
+| B | Docs + util: split `docs/design/` into `standards/` and `plans/`, Status lines on every study, `visualize_commands.md` → `docs/viz_catalog/` (current vs `_historical.md`), `util/` reorganization with every path reference updated (docs, catalog, `scripts/release_validation.sh`, presentations' READMEs), `docs/README.md` | done, `255650c`..`57734bf` |
+| C | Merge A and B; rewrite `CLAUDE.md` to rules + pointers, moving its release facts to `docs/standards/release_facts.md`; Doxygen build warning-free; publish; check the writeup for moved paths (report only, the Overleaf repo is not committed) | done (this commit) |
 | 5 | Local scratch: list `tmp/` (46 MB) and the largest `outputs/` runs (13 GB) for the user to decide. **Nothing is deleted without confirmation.** | main session |
 
 A and B run concurrently (at most two subagents). Their file sets are disjoint except `docs/doxygen/pages/*.md` and `README.md`, where A edits code paths and B edits util/doc paths; those are merged in phase C.

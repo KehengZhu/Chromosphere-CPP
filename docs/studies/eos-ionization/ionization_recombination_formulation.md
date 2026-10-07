@@ -78,7 +78,7 @@ Ionization channels first (§2.1–§2.2), then recombination channels (§2.3–
 
 Two distinct collisional ionization rates matter, and conflating them is the ionization-side counterpart of the three-body error (§1.2): the ground-state rate is negligible, but the *level-summed* rate is the process that pulls the dense base to Saha.
 
-**(a) Direct ground-state ionization** $\mathrm{H}(1) + e \to \mathrm{H^+} + 2e$, with $\Gamma_\mathrm{ion}^{\,\mathrm{col,1}} = n_e\, n_n\, S_i(T_e)$ and the Voronov (1997) fit currently in [`physics.hpp`](../../../physics.hpp):
+**(a) Direct ground-state ionization** $\mathrm{H}(1) + e \to \mathrm{H^+} + 2e$, with $\Gamma_\mathrm{ion}^{\,\mathrm{col,1}} = n_e\, n_n\, S_i(T_e)$ and the Voronov (1997) fit currently in [`physics.hpp`](../../../src/core/physics.hpp):
 
 $$
 S_i(T_e) = 2.91\times10^{-14}\;\frac{U^{0.39}\,e^{-U}}{0.232 + U}\ \ [\mathrm{m^3\,s^{-1}}],
@@ -125,7 +125,7 @@ $$
 \Gamma_\mathrm{rec}^{\,\mathrm{rad}} = n_e^2\, \alpha_r(T_e).
 $$
 
-Hummer (1994) Case-B fit, the closure in [`physics.hpp`](../../../physics.hpp) — a *total* (level-summed) coefficient accurate ~10% over $10^3$–$10^5$ K:
+Hummer (1994) Case-B fit, the closure in [`physics.hpp`](../../../src/core/physics.hpp) — a *total* (level-summed) coefficient accurate ~10% over $10^3$–$10^5$ K:
 
 $$
 \alpha_r(T_e) = 2.7\times10^{-19}\left(\frac{T_e}{10^4\ \mathrm{K}}\right)^{-0.75}\ [\mathrm{m^3\,s^{-1}}].

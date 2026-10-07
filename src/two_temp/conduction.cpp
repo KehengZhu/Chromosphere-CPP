@@ -26,7 +26,7 @@
  *
  * The measured electron-heavy equilibration time in this column is 0.092 ms at
  * the 1600 km base, 0.163 ms mid-domain and 3.92 ms at the 2153 km top
- * (`util/tau_ei_equilibration.py`), against a MEASURED CFL-0.50 step of
+ * (`util/release/tau_ei_equilibration.py`), against a MEASURED CFL-0.50 step of
  * 5.53-5.62 ms on this configuration. So tau_eq/dt is about 0.016 at the base,
  * 0.029 mid-domain and 0.70 in the fully ionized top cells: the exchange is
  * stiff by one to two orders of magnitude through the bulk, and in the top cells

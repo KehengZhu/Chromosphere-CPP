@@ -6,7 +6,7 @@
  * PFSS field-line scenario.
  *
  * Initializes the grid from a tabulated data file produced by
- * util/extract_field_line.py (PFSS extrapolation of a synoptic magnetogram,
+ * util/legacy/extract_field_line.py (PFSS extrapolation of a synoptic magnetogram,
  * traced from a chosen footpoint to the top of the chromospheric domain).
  *
  * File format: see scenarios/data_file_parser.hpp.

@@ -58,7 +58,7 @@ The cap came from the positional `time_mult` argument even when `CHROMO_T_END` o
 
 ### New behavior
 
-`select_step_cap()` in [run_control.hpp](../../../run_control.hpp) is a pure function of the two environment strings and `time_mult`:
+`select_step_cap()` in [run_control.hpp](../../../src/core/run_control.hpp) is a pure function of the two environment strings and `time_mult`:
 
 | condition | effective cap | source label |
 |---|---|---|
@@ -118,7 +118,7 @@ main file ~3.6 GB  +  gamma_diag ~4.8 GB  =  ~8.3 GB
 
 ### New behavior
 
-`CHROMO_FRAME_DT` sets the cadence in **physical seconds**. `OutputSchedule` in [run_control.hpp](../../../run_control.hpp) schedules against `frame_index * frame_dt` recomputed from an integer index, so the cadence cannot drift; after a write the index advances past every scheduled time the new state already covers, so a step crossing several nominal output times writes once. The initial state is always written, the final state is written if the cadence did not already cover it, and no step is ever written twice. Non-positive or non-finite values are rejected with exit status 1.
+`CHROMO_FRAME_DT` sets the cadence in **physical seconds**. `OutputSchedule` in [run_control.hpp](../../../src/core/run_control.hpp) schedules against `frame_index * frame_dt` recomputed from an integer index, so the cadence cannot drift; after a write the index advances past every scheduled time the new state already covers, so a step crossing several nominal output times writes once. The initial state is always written, the final state is written if the cadence did not already cover it, and no step is ever written twice. Non-positive or non-finite values are rejected with exit status 1.
 
 The gamma diagnostic is written inside the same `write_frame` path and therefore follows the same cadence automatically. The `.faceflux` / `.outercond` sidecars keep their existing step-stride behavior and stay default-off.
 

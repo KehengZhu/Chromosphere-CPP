@@ -76,7 +76,7 @@ elif [[ -x "$ROOT/.venv/bin/python" ]]; then
 else
     PYTHON_BIN=python3
 fi
-"$PYTHON_BIN" util/plot_eos_gamma.py --validate-only
+"$PYTHON_BIN" util/release/plot_eos_gamma.py --validate-only
 
 echo "output:"
 ls -l outputs/eos_gamma/gamma_hydrogen.dat data/eos/gamma1_hydrogen_v1.dat \

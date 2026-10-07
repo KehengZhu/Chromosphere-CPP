@@ -138,7 +138,7 @@ const arma::uword num_of_eq = 7;
 
 /// Conserved-variable indices (writeup eq 61).
 ///
-/// Three-temperature extension (docs/design/electron_temperature_plan.md): a 7th
+/// Three-temperature extension (docs/plans/electron_temperature_plan.md): a 7th
 /// variable E_E carries the electron internal energy. To keep the change a
 /// clean, energy-conserving generalization, E_I retains its original meaning —
 /// the TOTAL charged-fluid energy (protons + electrons + bulk KE + gravity) —
@@ -607,7 +607,7 @@ struct Grid {
     bool single_fluid = false;
 
     /// LEGACY TWO-FLUID ONLY. Separate electron temperature T_e ≠ T_i
-    /// (docs/design/electron_temperature_plan.md). The release solver is a common-temperature
+    /// (docs/plans/electron_temperature_plan.md). The release solver is a common-temperature
     /// equilibrium mixture and never evolves a separate electron energy.
     /// The 7th conserved variable E_E (electron internal energy) is ALWAYS carried;
     /// this flag only decides whether the electrons evolve independently:

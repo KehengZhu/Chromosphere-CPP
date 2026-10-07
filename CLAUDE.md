@@ -1,258 +1,72 @@
 # Chromosphere2026 — Agent Instructions
 
-## Writeup maintenance
+This file holds rules and pointers only. Measurements, arguments and study conclusions live in `docs/`; link them from one line here. Keep this file under ~120 lines: when adding a rule, merge or drop one.
 
-`docs/writeup-overleaf/` is a separate Overleaf-linked Git repository, not part of the main repository's Git history. Before auditing, catching up, cleaning, or substantially editing `paper.tex` or `main.tex`, read the authoritative main-repository standard in `docs/design/writeup_standards.md` and inspect the two Git worktrees separately.
+## Where things go (binding)
 
-Changes to release physics, governing equations, thermodynamics, numerics, boundary conditions, active update paths, canonical defaults/configuration, validation, limitations, or scientific interpretation trigger a writeup catch-up review. Current production code is the source of truth for active implementation behavior; existing TeX and older recaps are not.
+| What | Where |
+|---|---|
+| Core shared code (Grid, EOS, run control, OpenMP, profiling) | `src/core/` |
+| Release solver / experimental two-temperature solver | `src/single_fluid/` / `src/two_temp/` |
+| Release + experimental scenarios (`model_column`, `model_column_2t`); scenario input data | `scenarios/`; `scenarios/data/` |
+| Frozen two-fluid solver and its scenarios (`model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line`, `model_gentle`) | `legacy/` — built only with `-DCHROMO_ENABLE_LEGACY=ON` |
+| Python/shell tools | `util/release/`, `util/two_temp/`, `util/legacy/`, `util/run/`, shared helpers `util/lib/`, EOS validators `util/eos/` |
+| Project scripts (build docs, run, validate, publish) | `scripts/` |
+| Measured evidence | `docs/studies/<subject>/` |
+| Forward-looking / in-progress plans | `docs/plans/` |
+| Authoritative standards | `docs/standards/` |
+| Command for every file in `visualization/` | `docs/viz_catalog/` |
+| Run outputs / figures (both gitignored) | `outputs/<scenario>/` / `visualization/<scenario>/`; retired material in `_archive/` |
 
-Keep `paper.tex` concise and current-release-only. Use `main.tex` for the deeper engineering record and clearly label inactive, experimental, historical, retired, and planned material. Update only the document or documents whose role is affected, avoid configuration mixing, and do not commit or push either repository unless explicitly requested.
+- **Nothing new in the repository root.** Throwaway work goes in the session scratchpad, never in the tree.
+- **No orphan scripts.** A diagnostic script is either kept (right `util/` subdir, its figures catalogued) or deleted before commit.
+- **Legacy is frozen.** No features in `legacy/` or `util/legacy/`; fix only what breaks its build. Retiring something moves its code, scripts and catalog entries to the legacy locations and marks its studies in the same change.
+- **Every study and plan starts with a Status line**: `CURRENT`, `SUPERSEDED by <file>`, `HISTORICAL`, `PLAN`, or `DONE → <recap>`. Whoever supersedes a document updates the old header and the Evidence table in `docs/doxygen/pages/validation.md`.
+- **Every generated figure or movie** gets an entry (filename, exact command from the project root, one-line description) in the matching `docs/viz_catalog/` file, in the same change.
 
-The compiled PDFs are mirrored into the main repository automatically: `main.pdf` → `docs/chromosphere_writeup.pdf` and `paper.pdf` → `docs/chromosphere_paper.pdf`. `docs/writeup-overleaf/latex-build/` is gitignored in both repositories, so those two copies are the only tracked PDFs of the writeup, and they are the ones to link from `README.md` and the Doxygen pages. The sync is a `$success_cmd` hook in `docs/writeup-overleaf/.latexmkrc` that calls `scripts/sync_writeup_pdf.sh`, so every successful `latexmk` run — VS Code LaTeX Workshop recipe or command line — refreshes them; the hook no-ops where the main repository is absent, e.g. when Overleaf compiles the same sources. Do not delete the hook when editing `.latexmkrc`, and run `scripts/sync_writeup_pdf.sh` by hand if a PDF was produced some other way.
+## Release invariants
 
-## Code documentation
+Full statements, numbers and evidence: **`docs/standards/release_facts.md` — read it before writing about the release anywhere.**
 
-The API reference is Doxygen: config in `docs/doxygen/Doxyfile`, narrative pages in `docs/doxygen/pages/`, built with `scripts/build_docs.sh`. `README.md` is deliberately a quick start only — configure, build, choose parameters, run, visualize — and technical detail belongs in the Doxygen pages, not in the README. When you change public behavior, update the relevant page (`configuration.md`, `numerics.md`, `physics_model.md`, `scenario_reference.md`, `io_formats.md`, `validation.md`, `architecture.md`) in the same change.
+- `model_column` means exactly one thing: the release single-fluid equilibrium-mixture solver, state `U = (rho, rho u, E)`; ionization and carrier densities are derived, never stored. One step = explicit MUSCL-Hancock/Godunov hydro, then implicit physical conduction (Lie splitting). No TRAC, beam heating, coronal heating, radiative cooling or artificial conduction in the release path, not even behind flags.
+- Face flux: SWMF exact-Riemann Godunov at **frozen composition** (`gamma = 5/3`, ionization energy in `E0`), face-local Rusanov fallback counted in `godunov.*`. `Gamma1` is the *other* (equilibrium) limit, not "wrong". Saha re-equilibration after each step is an open modelling question — do not redesign ionization without asking.
+- Release configuration: `(ln rho, u, ln p)` MC3/Koren reconstruction, N=500/R4 mesh (661 cells), CFL 0.50, fixed outer reservoir with one 22 kK ghost temperature. The C++ default CFL stays 0.25.
+- The 1600 km lower boundary is a **mid-chromospheric truncation, never "photospheric"**.
+- The release is reference-free but **not** well-balanced; `eq_wb` is legacy-only and never set on a release Grid.
+- Storage is **double**; nothing in the release path names `float`/`double` (use `Real`/`Vec`). `CHROMO_STATE_FLOAT32=ON` is diagnostic only. Any float32-era evaporation number is ~30 % high.
+- Do not overclaim double: the first-interior-face artifact and a ~13 % lower-chromosphere flux spread remain. N500 long-run evaporation flux is not established < 10 % grid-converged — a resolution limit, separate from precision.
+- `ISO_RIEMANN`, `ISO_RECONSTRUCTION` are reference-only overrides; never production. Rejected (need new evidence to revisit): the `ModTransitionRegion` momentum split, a characteristic lower boundary, selective mixed precision.
 
-**`docs/doxygen/html/` is a gitignored build artifact, not tracked.** The browsable copy is published **publicly, with no authentication** to `https://kehengphysics.site/docs/chromosphere/` by `scripts/publish_docs.sh` (rsync over ssh into `/srv/www/kehengphysics.site/docs/chromosphere/`, served by `/etc/nginx/snippets/kehengphysics-docs.conf`, documented by a `README.md` at `/srv/www/kehengphysics.site/`). That is the only published copy and the one `README.md` links, so **a stale site is a stale reference for everyone** — nothing in the repository compensates for forgetting to publish. `publish_docs.sh` builds first if the artifact is missing, so it works from a fresh clone.
+## Running
 
-### Refresh the reference whenever you change what it documents
+- OpenMP build, 12 threads (`OMP_DYNAMIC=FALSE OMP_MAX_ACTIVE_LEVELS=1 OMP_NUM_THREADS=12`) via `scripts/run_chromo_omp.sh`; long production runs via `scripts/run_chromo_realtime.sh`. Exceptions: 1 thread for serial-equivalence checks, 16 only for max-throughput measurement, `CHROMO_ENABLE_OPENMP=OFF` for a true serial baseline. Never hard-code a thread count; rerun scaling on new hardware.
+- Long runs: set `CHROMO_T_END` (physical s) and, with output on, `CHROMO_FRAME_DT`; confirm the run ended `termination=end_time`. Release checks: `scripts/release_validation.sh`.
 
-This is a required step of the change, not a follow-up. Any change to code, public behavior, configuration, numerics, physics, scenarios, I/O formats, validation, or the writeup triggers all three of:
+```bash
+CHROMO_T_END=1000 scripts/run_chromo_realtime.sh out.txt full no-ionization model_column - 20.0 no-cooling
+```
 
-1. **Update the hand-written narrative pages** in `docs/doxygen/pages/` — `configuration.md`, `numerics.md`, `physics_model.md`, `scenario_reference.md`, `io_formats.md`, `validation.md`, `architecture.md`. Doxygen regenerates the API listings from the sources automatically, but it cannot update prose, so **this is the step that actually goes stale.** Rebuilding alone is not enough. If a change alters the writeup (`paper.tex` / `main.tex`), check whether the same fact is asserted in a narrative page and in the two mirrored PDFs (`docs/chromosphere_paper.pdf`, `docs/chromosphere_writeup.pdf`) that the pages link.
-2. **Rebuild** with `scripts/build_docs.sh`, warning-free.
-3. **Publish** with `scripts/publish_docs.sh`.
+## Documentation duties (part of every change, not a follow-up)
 
-`.githooks/pre-commit` rebuilds and fails the commit on any Doxygen warning, but it deliberately does **not** publish — pushing to a public website is not something a commit should do silently — and it cannot tell whether the prose is current. Publishing and prose are on you. The hook also only exists in clones that have run `scripts/install_hooks.sh` once, so never assume it is active.
-
-**That public site is only safe because the Doxyfile sets `SOURCE_BROWSER = NO` and `VERBATIM_HEADERS = NO`.** This repository is private; those two settings are what keep the generated tree free of verbatim source. Do not turn either on — and do not add any other setting that emits code (`INLINE_SOURCES`, `REFERENCES_LINK_SOURCE`) — without first deciding that publishing the entire source tree to the open internet is acceptable. `scripts/build_docs.sh` wipes `docs/doxygen/html/` before each run for the same reason: Doxygen overwrites but never deletes, so output it no longer generates would otherwise linger and still be published.
-
-Keep the build warning-free. `EXTRACT_ALL` is off and `WARN_IF_UNDOCUMENTED` is on, so a new public entity with no documentation is a warning in `docs/doxygen/doxygen-warnings.log` and the pre-commit hook rejects the commit. Every public entity gets a real statement of what it is, with physical units in square brackets where it has them — not a restatement of its name.
-
-`scripts/build_docs.sh` wipes `docs/doxygen/html/` before every run. This matters: Doxygen overwrites files but never deletes them, so output it no longer generates would otherwise linger and still be published. That is exactly how disabling `SOURCE_BROWSER` once left 34 stale source listings in place, ready to ship.
-
-## Output directories
-
-- **Code outputs** (simulation results, data dumps, logs from `chromo_main` / scenarios): save under `outputs/`.
-- **Visualizations** (plots, animations, figures generated from outputs): save under `visualization/` (project root). This directory is gitignored. Plotting scripts live in `util/` and already default their output here — keep new/edited scripts defaulting to `visualization/` too. Never write figures or movies to the repo root, into `util/`, or alongside source code.
-- **Both `outputs/` and `visualization/` are organized into per-scenario subdirs** mirroring `scenarios/`: `model_c7/`, `model_column/` (the unified column, which absorbed the old `iso_*`/`gentle_*` runs), `model_flare/`, `analytic_canopy/`, `loops/`, `pfss/`, `events/` (real-event campaigns — 2024-08-01 AR13768, SOL2014, ensembles; keeps `event_ensemble/`, `event_te/`, `sol2014/` nested inside), and `two_fluid/`. `visualization/` additionally has `reference/` (physics-reference plots + their scripts). `_archive/` holds dumps/figures from now-deleted diagnostic code and retired analytic-isentrope stages. **Place new runs/figures in the matching scenario subdir** — never loose in `outputs/` or `visualization/` root.
-
-Do not scatter output files in the repo root or alongside source code.
-
-## visualize_commands.md
-
-`visualize_commands.md` (project root) is the catalog of the exact command used to generate every file in `visualization/`. **Whenever you generate a visualization, add or update its entry** in `visualize_commands.md`: the output filename, the exact command run (assume the project root as the working directory), and a one-line description. Keep it in sync — if you change a script's invocation or add a new figure/movie, update the catalog in the same change.
+- **API reference** (Doxygen; config `docs/doxygen/Doxyfile`, prose in `docs/doxygen/pages/`). Any change to code, behaviour, configuration, numerics, physics, scenarios, I/O, validation or the writeup requires: (1) update the affected narrative pages — rebuilding does not update prose; (2) `scripts/build_docs.sh`, warning-free; (3) `scripts/publish_docs.sh`. The pre-commit hook checks (2) only, and only where `scripts/install_hooks.sh` was run.
+- The site `https://kehengphysics.site/docs/chromosphere/` is **public** and this repository is private: never enable `SOURCE_BROWSER`, `VERBATIM_HEADERS`, `INLINE_SOURCES` or `REFERENCES_LINK_SOURCE`. Every public entity gets a real description with units in `[...]`.
+- `README.md` is a quick start only; technical detail belongs in the Doxygen pages.
+- **Writeup** (`docs/writeup-overleaf/`, a separate Overleaf-linked repo): physics, numerics, BC, defaults, validation or interpretation changes trigger a catch-up per `docs/standards/writeup_standards.md`. Code is the source of truth. `paper.tex` = current release only, concise; `main.tex` = engineering record with inactive/historical material labelled. Never commit or push either repo unless asked. Successful `latexmk` runs mirror the PDFs to `docs/chromosphere_writeup.pdf` / `docs/chromosphere_paper.pdf` via the `.latexmkrc` hook — keep the hook; run `scripts/sync_writeup_pdf.sh` by hand otherwise.
 
 ## Visualization
-When asked to generate a movie, generate frames in parallel if possible.
 
-When plotting field-aligned profiles that span the chromosphere through the corona (e.g. loop flare runs), use a **split x-axis**: zoom in on the thin chromosphere+TR (sub-Mm) and compress the extended corona (tens of Mm) using different x-scales (a continuous piecewise transform via matplotlib's `set_xscale("function", ...)` works well — see `util/animate_loop_flare.py`). Mark the chromosphere/TR/corona region boundaries with translucent vertical dashed lines.
+- Generate movie frames in parallel.
+- Chromosphere-to-corona profiles: split x-axis (zoom chromosphere+TR, compress corona; `set_xscale("function", ...)`), region boundaries as translucent dashed lines. Full closed loops: plot vs arc length with both footpoints zoomed and the apex dotted. Reference implementation: `util/legacy/animate_loop_flare.py`.
 
-For a **full closed loop** (footpoint A → apex → footpoint B, `topology=full`), plot vs **arc length** `s`, not height — on a closed loop height folds the two legs onto each other. Apply the split symmetrically: zoom **both** footpoints and compress the coronal middle, laying the loop out flat `[footpoint A | apex | footpoint B]`, with the apex marked by a dotted line and region boundaries on both legs. `util/animate_loop_flare.py` auto-detects topology from the `.dat` and switches between height (half loop) and arc-length (full loop) accordingly.
+## Engineering discipline
 
-## Default OpenMP runtime
+Full text: `docs/standards/engineering_discipline.md`. Priority: correct → scientifically accurate → reproducible evidence → simple → fast.
 
-For production-shaped simulations on the current Apple Silicon workstation, use the OpenMP build and default to 12 threads:
+- Smallest change that solves the problem; no frameworks or speculative generality; no unrelated refactors.
+- Validate according to risk; byte identity only where identity itself matters; staged funnel for expensive runs.
+- Protect existing work: inspect status/diffs first, preserve unrelated changes, keep patches narrow, keep build products out.
+- Stop when the decision is supported; recaps are compact and decision-oriented (what changed, why, validation, results, risks, status).
 
-```bash
-export OMP_DYNAMIC=FALSE
-export OMP_MAX_ACTIVE_LEVELS=1
-export OMP_NUM_THREADS=12
-```
+## Reference papers
 
-Prefer `scripts/run_chromo_omp.sh` for agent-run simulations. It applies these defaults while allowing explicit environment overrides. The 12-thread default uses the performance cores and was measured within about 1% of the 16-thread maximum-throughput result while leaving the efficiency cores available for the operating system, compilation, Python analysis, and other agent work.
-
-Exceptions:
-
-- Use `OMP_NUM_THREADS=1` for serial/OpenMP numerical-equivalence checks.
-- Use `OMP_NUM_THREADS=16` only when measuring maximum throughput on this workstation.
-- Use a build configured with `CHROMO_ENABLE_OPENMP=OFF` for a true serial baseline.
-- Do not assume 12 threads is optimal on different hardware; rerun thread scaling after changing machines.
-- Do not hard-code the thread count in C++, CMake, or the numerical algorithm.
-
-## `model_column` release architecture and numerical method
-
-The release is a **single-fluid field-aligned equilibrium-mixture solver** whose conserved state is exactly `U = (rho, rho u, E)` (`mix::RHO/MOM/ENERGY`, `src/single_fluid/`). The ionization fraction `x`, the carrier densities `x*rho` / `(1-x)*rho`, `n_e`, `n_HI` and `p_e` are **derived** EOS diagnostics, never stored or advanced, so the release has no carrier-row storage and no equilibrium-projection stage. One step is
-`U^n -> explicit MUSCL-Hancock/Godunov hydro -> U* -> implicit backward-Euler physical conduction -> U^{n+1}` — those two stages are the whole `mixture_advance`, composed by first-order Lie splitting (not Strang). TRAC, beam heating, volumetric coronal heating, radiative cooling and artificial/numerical conduction are **not** release physics and are not present in that path, not even behind default-off flags; they live only in the two-fluid solver.
-
-A normal `model_column` run uses Gamma/Saha equilibrium thermodynamics (ionization energy included, production `Gamma1` table), MUSCL reconstruction of **`(ln rho, u, ln p)`** with the MC3/Koren limiter (β = 2), a **MUSCL-Hancock** half-step predictor that applies the same momentum source (flux-tube pressure term + gravity) as the corrector, the **SWMF-style exact-Riemann Godunov numerical flux** (face-local Rusanov fallback) evaluated on the time-centred face states, physical conduction only, and an upper boundary that is a fixed coronal reservoir in the ghost cells — back-pressure `kOuterPRef` and one fixed 22,000 K temperature (`ISO_HYDRO_T_DECOUPLE=0`), which conduction also reads as its Dirichlet datum at the ghost centre — on the coarse-equivalent N = 500 / R4 mesh (661 actual cells) at CFL 0.50.
-
-**The single outer temperature is inert as a hydro condition only because conduction thermostats the top cell** (relaxation time ~0.08 s against a 7–29 s top-cell advection time). On the release mesh the previous decoupled closure (`=1`: hydro ghost T from the top cell, conduction datum at the physical face) differs by −0.86 % in `V_top`, nearly all of it the first-order half-cell datum offset. With conduction **off** the equivalence fails — the 22 kK ghost is inconsistent with the 22.67 kK initial top cell — so conduction-off hydrostatic checks must use an IC-consistent ghost temperature. Evidence: `docs/studies/boundaries/outer_temperature_bc_single_t_recap.md`.
-
-**The release is reference-free: the interior hydrodynamic operator needs no frozen global hydrostatic reference state.** (The boundary closures still capture fixed reservoir data once from the IC — `kOuterPRef`, `kInnerTRef`/`kInnerPRes` — as any truncated-domain problem must. The release is *not* a well-balanced scheme in the constructive sense; it removes the dominant discretization inconsistencies and leaves a small, resolution-dependent residual.) `Grid::eq_wb` / `eq_state` / `eq_residual` and `ISO_EQ_WB` were retired from `model_column` once the predictor source term and a second-order (trapezoidal, EOS-closed) lower ghost ladder cut the raw discrete hydrostatic face mass-flux defect by ~560x. `eq_wb` still exists in `chromosphere.hpp` for the **two-fluid research solver only** — never set it on a release Grid. Evidence: `docs/studies/numerics/reference_free_release_recap.md`.
-
-Since the double-precision cutover the hydrostatic fixed point is **second-order convergent**, which it was not measurably before (conduction off, outer ghost temperature consistent with the IC — with the release's fixed 22 kK ghost and conduction off the outer face adds a first-order IC/BC-mismatch defect): N=500 t=0 `max|F^rho|` is `1.78e-13` (vs `1.08e-12` in float32), it sits ~10^8x above the double round-off floor so it has no representation component, and N=500 -> N=1000 reduces it 4.55x (order 2.19), with order 1.95 at the base face and 1.90 in the 20 s `max|V|`. **The old sentence "no clean truncation-error trend survives between N=500 and N=1000" was a statement about float32 storage, not about the scheme — do not repeat it.** In float32 refinement made the defect *worse* (apparent order −1.0), the signature of per-face ULP noise. What survives in double is real: the base face is still dominated by `f_diff` (`1.29e-13` of a `1.25e-13` total), i.e. Godunov dissipation acting on a genuinely nonzero reconstructed jump — the same open inner-ghost/first-face defect, not bit noise.
-
-The **lower boundary at 1600 km is a mid-chromospheric truncation of the modeled domain, not the photosphere.** It is the height below which the Saha/LTE closure is not intended to be trusted; the atmosphere below it is outside the model, and the two inner ghosts are a numerical closure for the MUSCL stencil, not a claim that LTE extends downward. Its physical content is a quasi-static stratified reservoir at the truncation temperature with `v = 0`. Never describe it as photospheric.
-
-The historical **two-fluid / three-temperature / finite-rate-ionization** solver is a genuinely separate non-release path (`src/two_fluid/`: `two_fluid.hpp`, `state.cpp`, `flux.cpp`, `rhs.cpp`, `integrators.cpp`) that keeps its own seven-row state and source stages. The source tree mirrors this: `src/single_fluid/` and `src/two_fluid/` share only `chromosphere.hpp` (the Grid) and `eos.hpp`, and neither includes the other. Loading a `Gamma1` table selects the release solver; each solver rejects the other's `Grid`. A release run also rejects `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID` and `ISO_IONIZATION` outright — a release user never needs them. Scenarios `model_gentle`, `model_c7`, `model_flare`, `analytic_canopy` and `pfss_field_line` use the two-fluid solver.
-
-**`model_column` means exactly one thing: the release solver.** The scenario supplies the production `Gamma1` table unconditionally and rejects `ISO_GAMMA`; `model_column_ic` rejects every historical two-fluid knob (`ISO_GAMMA`, `ISO_TWO_FLUID`, `ISO_IONIZATION`, `ISO_COOLING`, `ISO_TRAC`, `ISO_CORONA`, `ISO_CHEAT`, `ISO_QFLUX`, `ISO_TBOOST`, `ISO_NUMERICAL_DIFFUSIVITY_MULT`). The `model_isentropic` alias has been retired; the historical two-fluid column is `model_gentle`.
-
-Rejected and **not** to be reintroduced without new evidence: the full SWMF `ModTransitionRegion` momentum pressure/gravity split (measurably no better than the predictor source fix alone on this constant-area column, and not generally conservative for variable-area flux-tube geometry), and a gravity-aware characteristic (non-reflecting) lower boundary (changed the hydrostatic residual not at all and the evaporation velocity by <= 0.4 %; the 1600 km face is not an important acoustic reflector for this model).
-
-**The release face Riemann solver is the SWMF-style exact-Riemann Godunov flux at FROZEN COMPOSITION.** It solves the local Riemann problem exactly as an ideal gas at a fixed `gamma = 5/3`, carrying the Saha ionization energy (and this model's gravitational potential) in SWMF's passive specific-energy offset `E0`, and samples the self-similar solution at `x/t = 0`. The physical basis is that the equilibrium Saha internal energy splits exactly as `e_int = p/(5/3-1) + e_ion`, so the translational gas is monatomic and the ionization reservoir is inert *across the wave interaction* — the right limit when the ionization/recombination relaxation time is long compared with the dynamical time, which is the chromospheric case for hydrogen. Every face that cannot be solved exactly falls back to face-local Rusanov and is counted in `Grid::godunov_stats`; the driver prints a `godunov.*` tally at the end of every release run and `scripts/release_validation.sh` fails on a nonzero fallback count.
-
-**The equilibrium acoustic index `Gamma1` is NOT "wrong" — it is the other limit.** `Gamma1` (median 1.090 in this column) is the correct acoustic response if Saha equilibrium is re-established instantaneously *within* the wave; frozen `5/3` is the correct response when ionization cannot relax on the wave timescale. The release takes the frozen limit, on that physical argument and on the SWMF methodology. Never write that `Gamma1` is universally wrong. `Gamma1` remains the closure's equilibrium derivative and is still used by the `.gamma_diag` diagnostics, the outer-boundary Mach cap, and the Roe reference flux.
-
-**The timestep follows the flux.** `mixture_timestep` sizes the step from `|u| + sqrt(max(Gamma1, 5/3) p/rho)` when the Godunov flux is in force and from `|u| + sqrt(Gamma1 p/rho)` under the Roe/Rusanov reference fluxes, so `CHROMO_CFL` always means the CFL of the scheme actually running. On the canonical N=500/R4 column this is a measured no-op — the CFL-limiting cell is the fully ionized top cell where `Gamma1 = 5/3` — so `dt`, the step count and the end time are unchanged. A previously documented "effective CFL 0.62" for this flux was wrong; the measured value is 0.500.
-
-**Open modelling question, not to be quietly dropped:** the Riemann solve freezes composition, but the EOS decode re-imposes instantaneous Saha equilibrium after every timestep. Those are separate choices; the algorithm is effectively `Saha-equilibrated state -> frozen-composition hydro step -> Saha-equilibrated state`, an operator-split *instantaneous-relaxation* approximation that is not justified when the physical relaxation time is long. Documented in `main.tex`; do not redesign the ionization model without asking.
-
-**No environment variable is required to select the release solver, its flux, or its reconstruction.** `ISO_RIEMANN=roe-local` (the previous release flux, the equilibrium-`Gamma1` mixture Roe linearization), `ISO_RIEMANN=rusanov` and `ISO_RECONSTRUCTION=lnrho-v-lnt` are reference-only overrides kept for regression and controlled numerical comparison; never use them in production. Full description and evidence: `docs/studies/numerics/swmf_godunov_flux_experiment.md` (flux and CFL) and `docs/studies/numerics/model_column_release_numerics_recap.md` (reconstruction). Release checks: `scripts/release_validation.sh`.
-
-Known limitation to preserve in any writeup: **N500 long-duration evaporation mass flux is not established as < 10 % grid-converged.** Distinguish the release numerical method from the resolution required for a particular quantitative scientific claim. This is a *resolution* limitation and is entirely separate from the storage-precision question below — do not let the two merge in any recap.
-
-## Storage precision: double is the release, and precision is one knob
-
-**The release stores the conserved state in `double`.** `chromosphere::Real` is the solver's scalar storage type and `Vec` is `arma::Col<Real>`; every stored physical scalar is declared in terms of them — the conserved state, the mesh metric arrays, the `Grid` physical constants (`m_i`, `m_n`, `m_e`, `k_b`, `q_e`, `chi_H_J`, `g`, `mu_0`), `CFL`, `limiter_beta`, the run controls and `sim_time`. **Nothing in the release path may name `float` or `double` directly.** A single narrowing cast anywhere in the update chain reimposes the coarser representation on the whole chain no matter what `Vec` holds: the retired `CHROMO_STATE_FLOAT64` experiment promoted only `Vec` while `mixture_pack_ghost`, the Hancock predictor row, the RHS row, the timestep row, the packed-energy round in `integrator.cpp` and all the `Grid` constants still cast through `float`, which is why that build looked promoted and was not. Keep the knob coherent.
-
-`CHROMO_STATE_FLOAT32=ON` reverts to the pre-cutover `float` storage. It is **diagnostic only** — kept so the round-off sensitivity stays reproducible — is not exercised by `scripts/release_validation.sh`, and no release number may be quoted from it. Build it into `build_omp_f32/`. `CHROMO_STATE_FLOAT64` is retired and CMake hard-errors on it rather than silently producing a build that looks configured and is not.
-
-Two independent reasons, and both belong in any writeup:
-
-1. **Measured necessity.** In the 4000 s N=500 run the per-step continuity increment `dt*(-dF/ds)` is about `2.6e-17 kg m^-3 s^-1` while one float32 ULP of `rho ~ 9e-10` is about `5.6e-17`, so **619 of 660 cells sat below half a ULP** and the slow density adjustment could not accumulate at all — permanent stagnation, since there is no compensated summation. The controlling dimensionless number is the stratified layer's mass-loading timescale over the CFL step, `tau/dt ~ 3.5e7`, against `1/u = 1.7e7` for `float` and `9.0e15` for `double`: float fails by 2x, double has about eight orders of magnitude of margin. A *resolved* chromosphere is what manufactures that timescale separation — fine mesh and a ~7 km/s sound speed give a tiny `dt` while mass loading of a dense stratified layer gives a long `tau`.
-2. **Consistency with the coupling target.** Every shipped SWMF/BATS-R-US build sets `PRECISION = ${DOUBLEPREC}` (verified across all 23 `share/build/Makefile.<OS>.<compiler>` templates, including the nvfortran/GPU ones); `Config.pl` defaults to double and `-single` appears nowhere in the regression suite. BATS-R-US declares `State_VGB`, `StateOld_VGB`, `Source_VC` and the fluxes as default `real`, so `U^{n+1} = U^n + dt*R` (`ModUpdateState.f90:728-731`) is a float64 accumulation, with **no** compensated summation, no mixed-precision accumulator and no deviation formulation for `rho`/`p`. SWMF's answer to this failure mode is simply "the conservative state has enough precision". **Our float32 state was the SWMF-inconsistent one.** Frame this as correcting the standalone prototype to the precision SWMF production already uses — not as importing an unusual high-precision requirement into SWMF.
-
-Evidence: `docs/studies/numerics/state_precision_release_cutover.md` (the cutover and the SWMF audit) and `docs/studies/numerics/float32_precision_control_experiment.md` (the original controlled diagnostic).
-
-**Two long-standing open issues closed with it, both with matched float32 controls so the attribution is causal:**
-
-- **The residual velocity field now converges in time.** `docs/studies/validation/long_run_output_and_cfl_validation.md` §7.4 recorded that it did not converge as `dt -> 0` — refining the step made the level-to-level difference *larger* and every CFL sat at the same `L1 ~ 1.0-1.2 m/s`. That was float32 cancellation. In double the same ladder converges at observed order ~2.0 (L1) and the floor drops to ~7e-3 m/s at CFL 0.50, while a float32 control still shows apparent order −1.2 to −1.3. Retired **in mechanism only**: the CFL acceptance matrix has not been re-run in double, so CFL 0.50 still stands on its original evidence, and **no positive noise floor has been established for m/s-scale chromospheric velocities** — quantitative claims at that scale still need their own measurement.
-- **The 5-step mesh-refinement residual-velocity ladder is clean order ~2 across `ISO_NS` = 48…2000** (`8.11e-1, 7.62e-2, 1.88e-2, 4.99e-3, 1.32e-3, 3.32e-4 m/s`), with no flattening over a 41x refinement. float32 tracks it only to `ISO_NS = 250`, degrades to order 0.79 at 1000 and *reverses* at 2000. The old reading "the bound is resolution dependent, and that is the cost of retiring `eq_wb`" was measuring a round-off floor; it is ordinary second-order truncation.
-
-**Do not overclaim what double fixed.** It removes the broad, spurious 1600–1850 km `f_total` height gradient (base/top 2.811 -> 1.003 at 4000 s; column mass budget predicted/observed −214.9 -> 0.994; 619/660 -> 0/660 cells frozen). It does **not** make the column uniform: a ~13 % monotone spread remains over 1600–1850 km, relaxing only slowly (14.3 % at 500 s to 13.0 % at 4000 s), which is a duration/resolution question. The **localized first-interior-face artifact is precision independent and remains open** (`|f_diff|/f_total ~ 16 %` at face 0, cell-0 `rho V` overshoot ~1.28) — a ghost/reconstruction/boundary-adjacent scheme issue to be diagnosed on its own. Never describe double as solving all lower-boundary mass-flux problems.
-
-**Release evaporation numbers moved, and any float32-era number is wrong.** Top-of-domain observables shift by ~28 % *downward* at 4000 s (top velocity 13.18 -> 9.50 m/s, top `f_total` 3.753e-10 -> 2.702e-10, both under the previous decoupled outer-T closure; the single-T release gives 9.42 m/s and 2.683e-10) — a lower chromosphere that cannot drain sustains a mass supply the column does not have, so float32 over-predicted evaporation. **Any evaporation number quoted from a float32 run is high by of order 30 % and must be re-measured.** The earlier experiment's "~3 %" figure came from an incoherent hybrid build and is withdrawn.
-
-Selective mixed precision (double persistent state + float scratch/geometry) is **not** the design. The arrays are small at N ~ 500–2000, SWMF is uniformly double, and a split knob is exactly the failure mode described above. Revisit only if profiling on many field-line threads demonstrates a real cost, and then as a performance optimization with its own evidence.
-
-## Validated production CFL and long-run controls
-
-`CHROMO_CFL=0.50` is the **validated production runtime default for the reduced `model_column` release configuration: coarse-equivalent N=500, R4 outer refinement, 661 actual cells, fixed 22,000 K outer ghost temperature, and physical conduction only**. Evidence: `docs/studies/conduction/coarse_model_column_physical_conduction_recap.md`. That sweep was run under the Roe flux and the equilibrium signal speed; it carries over to the release Godunov flux because the flux-consistent CFL rule leaves `dt` and the step count unchanged on this exact configuration (measured, `docs/studies/numerics/swmf_godunov_flux_experiment.md`). It does not carry over automatically to a different mesh or model shape, where a partial-ionization cell could become CFL-limiting and the step would then be up to 1.24x shorter.
-
-The conservative hard-coded solver default remains `CHROMO_CFL=0.25`, and 0.25 stays the comparison reference. Do not change the C++ default. Rerun the sweep before trusting 0.50 on different hardware or a materially different model shape.
-
-The `model_column` scenario itself supplies the override-preserving defaults for the validated Gamma/Saha N=500/R4 physical-conduction-only release model, including the production Gamma table and model/grid `ISO_*` settings. Use `scripts/run_chromo_realtime.sh` for long production runs; it adds CFL 0.50, the 12-thread OpenMP runtime, and low-I/O runtime defaults but does not independently define the physical model. Explicit environment assignments still win. `scripts/run_chromo_omp.sh` remains the generic OpenMP launcher.
-
-Two run-control variables matter for long runs:
-
-- `CHROMO_T_END` — absolute stop time in physical seconds. When it is set, the legacy `time_mult`-derived step cap no longer applies, so a long run cannot be silently truncated.
-- `CHROMO_FRAME_DT` — snapshot cadence in **physical seconds** instead of the legacy `time_mult`-derived step stride. Required whenever output is enabled on a long run; without it a 1000 s run emits tens of thousands of ASCII snapshots and the wall time is dominated by formatting.
-
-`CHROMO_STEP_CAP` sets an explicit step cap and overrides both rules; invalid or non-positive values are rejected rather than silently replaced. Every run prints `termination=end_time|step_cap|other` together with the requested end time, final time, final step, and effective cap — always check that a long run ended with `termination=end_time`.
-
-Low-I/O production run:
-
-```bash
-CHROMO_T_END=1000 scripts/run_chromo_realtime.sh out.txt \
-    full no-ionization model_column - 20.0 no-cooling
-```
-
-Same run with snapshots at one frame per physical second:
-
-```bash
-CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=1 \
-scripts/run_chromo_realtime.sh out.txt \
-    full no-ionization model_column - 20.0 no-cooling
-```
-
-## Repository-wide engineering discipline
-
-Treat every task as a production-quality engineering task. The default priority order is:
-
-1. Correct and reliable behavior.
-2. Scientifically and numerically accurate results.
-3. Reproducible evidence that supports the decision being made.
-4. Simple, maintainable implementation.
-5. Performance and convenience improvements.
-
-Do not trade correctness for speed, but also do not confuse more code, more abstraction, or more validation with higher quality.
-
-### Avoid overengineering
-
-- Prefer the smallest change that clearly solves the actual problem.
-- Use focused helper functions instead of introducing a framework, class hierarchy, policy system, or generalized subsystem without a demonstrated need.
-- Do not refactor unrelated code while implementing a narrow task.
-- Do not design for hypothetical future requirements unless the current task explicitly depends on them.
-- Do not add layers of wrappers, configuration objects, templates, or indirection when a direct implementation is easier to review and equally safe.
-- Preserve existing interfaces and behavior unless changing them is necessary for correctness or explicitly requested.
-
-### Validate according to risk
-
-Verification should answer material questions about correctness, reliability, numerical behavior, or performance. Do enough to establish trustworthy evidence, then stop.
-
-- Prioritize tests that exercise the changed behavior and realistic production paths.
-- Re-run broad test suites after changes that could affect them, but do not repeatedly rerun unchanged checks without a concrete reason.
-- Use hashes and byte comparisons only when exact identity is itself important, such as regression preservation, deterministic output, or legacy compatibility.
-- Do not generate or compare hashes for every intermediate artifact when the result cannot affect the decision.
-- Do not require byte identity where numerical or physical equivalence is the correct standard.
-- Use absolute errors, relative errors with defensible denominator floors, and physically meaningful observables where appropriate.
-- Treat small timing variation, harmless formatting changes, and differences far below discretization or physical uncertainty as non-blocking unless they indicate a real bug.
-
-### Focus on material issues
-
-Investigate a discrepancy when it is scientifically meaningful, numerically suspicious, persistent, or large enough to change the production decision. Do not spend substantial effort on cosmetic details or artificial edge cases that cannot affect real use.
-
-A newly discovered issue is a blocker only if it can materially affect one or more of:
-
-- correctness;
-- scientific interpretation;
-- numerical stability or convergence;
-- data integrity;
-- requested output or termination behavior;
-- production performance;
-- reproducibility;
-- the final GO/NO_GO decision.
-
-Record unrelated minor issues briefly and leave them for a separate task.
-
-### Use staged validation
-
-For expensive experiments, simulations, or parameter sweeps, use a funnel:
-
-1. Run inexpensive smoke and stability checks.
-2. Reject clearly invalid candidates early.
-3. Perform detailed comparisons only for plausible candidates.
-4. Run long or expensive acceptance cases only for the selected candidate or the smallest set needed to resolve uncertainty.
-
-Do not run several costly production-scale cases when one controlled run is sufficient.
-
-### Protect existing work
-
-- Inspect repository status and existing diffs before editing.
-- Preserve unrelated uncommitted changes.
-- Do not reset, revert, overwrite, or broadly reformat work outside the task scope.
-- Keep patches narrow, reviewable, and attributable to the requested task.
-- Keep generated outputs and build products out of source patches unless they are explicitly required deliverables.
-
-### Stop when the decision is supported
-
-Once the requested behavior is correct, the important tests pass, the evidence supports the conclusion, and material risks are documented, stop. Do not continue polishing, benchmarking, or redesigning merely because additional work is possible.
-
-If a target is not achieved, report the measured gap and the most important remaining blocker. Do not silently expand into a new optimization or redesign phase.
-
-### Reporting standard
-
-Final recaps should be compact and decision-oriented. Emphasize:
-
-- what changed;
-- why it was necessary;
-- what was validated;
-- the material results;
-- remaining production risks;
-- the final status.
-
-Avoid exhaustive command transcripts, repeated hashes, low-value implementation trivia, and long lists of insignificant differences.
-
-The governing principle is:
-
-```text
-Reliable and accurate production behavior is mandatory.
-Simple and sufficient evidence is preferred.
-More validation is not automatically better validation.
-```
-
-## Reference Papers
-Reference Papers that you may need to understand a physical process or code implementation are in docs/supporting-papers. Check them first before you prompt the user to download the papers.
+Check `docs/supporting-papers/` before asking the user to download a paper.

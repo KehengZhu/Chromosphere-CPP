@@ -69,7 +69,7 @@ cd SWMF/util/CRASH/src && make LIB && cd -
 bash util/eos/build_and_run.sh
 
 # validate again and generate Stage-0 figures
-python util/plot_eos_gamma.py
+python util/release/plot_eos_gamma.py
 ```
 
 The raw validation columns are:

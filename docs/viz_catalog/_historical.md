@@ -11,41 +11,41 @@ Entries for retired scenarios and configurations: the two-fluid C7 column, open-
 ```bash
 # regenerate the 1.5x run dump first:
 build/chromo_main outputs/model_c7/model_c7_movie.txt full ionization model_c7 "" 1.5
-.venv/bin/python util/animate_output.py outputs/model_c7/model_c7_movie.txt visualization/model_c7/model_c7_evolution.mp4 45
+.venv/bin/python util/legacy/animate_output.py outputs/model_c7/model_c7_movie.txt visualization/model_c7/model_c7_evolution.mp4 45
 ```
 Positional: `[input.txt] [out.mp4] [fps]` — defaults `build/output.txt`, `visualization/model_c7/model_c7_evolution.mp4`, `15`.
 
 ### `model_c7_explicit_evolution.mp4`
 Same 9-panel animation, for the explicit-scheme (R_I = 0) run.
 ```bash
-.venv/bin/python util/animate_output.py outputs/model_c7/output_explicit.txt visualization/model_c7/model_c7_explicit_evolution.mp4
+.venv/bin/python util/legacy/animate_output.py outputs/model_c7/output_explicit.txt visualization/model_c7/model_c7_explicit_evolution.mp4
 ```
 
 ### `model_c7_snapshot.png`
 Single 8-panel snapshot of the last frame of a run.
 ```bash
-.venv/bin/python util/plot_output.py outputs/model_c7/model_c7_movie.txt visualization/model_c7/model_c7_snapshot.png
+.venv/bin/python util/legacy/plot_output.py outputs/model_c7/model_c7_movie.txt visualization/model_c7/model_c7_snapshot.png
 ```
 Positional: `[input.txt] [out.png]` — defaults `build/output.txt`, `visualization/model_c7/model_c7_snapshot.png`.
 
 ### `model_c7_compare.mp4`
 8-panel animation overlaying two runs: semi-implicit (full) vs explicit (R_I = 0).
 ```bash
-.venv/bin/python util/animate_compare.py outputs/model_c7/output_full.txt outputs/model_c7/output_explicit.txt visualization/model_c7/model_c7_compare.mp4
+.venv/bin/python util/legacy/animate_compare.py outputs/model_c7/output_full.txt outputs/model_c7/output_explicit.txt visualization/model_c7/model_c7_compare.mp4
 ```
 Positional: `[full.txt] [explicit.txt] [out.mp4] [fps]` — defaults `build/output_full.txt`, `build/output_explicit.txt`, `visualization/model_c7/model_c7_compare.mp4`, `15`.
 
 ### `model_c7_cooling_compare.mp4`
 8-panel animation overlaying optically-thick cooling ON (Stage R) vs OFF. Defaults already point at the real files, so no args needed.
 ```bash
-.venv/bin/python util/animate_cooling_compare.py outputs/model_c7/out_c7_cool_on.txt outputs/model_c7/out_c7_cool_off.txt visualization/model_c7/model_c7_cooling_compare.mp4
+.venv/bin/python util/legacy/animate_cooling_compare.py outputs/model_c7/out_c7_cool_on.txt outputs/model_c7/out_c7_cool_off.txt visualization/model_c7/model_c7_cooling_compare.mp4
 ```
 Positional: `[cool_on.txt] [cool_off.txt] [out.mp4] [fps]` — defaults `outputs/model_c7/out_c7_cool_on.txt`, `outputs/model_c7/out_c7_cool_off.txt`, `visualization/model_c7/model_c7_cooling_compare.mp4`, `6`.
 
 ### `model_c7_ionization_compare.mp4`
 8-panel animation overlaying ionization ON (Stage E) vs OFF.
 ```bash
-.venv/bin/python util/animate_ionization_compare.py outputs/model_c7/out_ioniz_on.txt outputs/model_c7/out_ioniz_off.txt visualization/model_c7/model_c7_ionization_compare.mp4
+.venv/bin/python util/legacy/animate_ionization_compare.py outputs/model_c7/out_ioniz_on.txt outputs/model_c7/out_ioniz_off.txt visualization/model_c7/model_c7_ionization_compare.mp4
 ```
 Positional: `[ionz_on.txt] [ionz_off.txt] [out.mp4] [fps]` — script defaults point at repo root (`../out_ioniz_on.txt`); pass the real `outputs/` files explicitly as above. (README has a worked example of this script.)
 
@@ -56,48 +56,48 @@ Positional: `[ionz_on.txt] [ionz_off.txt] [out.mp4] [fps]` — script defaults p
 ### `c7_openbc_rho_total.png`, `c7_openbc_rho_total.mp4`
 Single-run ρ_tot = ρ_i + ρ_n evolution (space-time map + snapshots + column mass) for the open-BC C7 run.
 ```bash
-.venv/bin/python util/visualize_rho_total.py outputs/model_c7/out_c7_openbc.txt --png visualization/model_c7/c7_openbc_rho_total.png --mp4 visualization/model_c7/c7_openbc_rho_total.mp4
+.venv/bin/python util/legacy/visualize_rho_total.py outputs/model_c7/out_c7_openbc.txt --png visualization/model_c7/c7_openbc_rho_total.png --mp4 visualization/model_c7/c7_openbc_rho_total.mp4
 ```
 Positional `input` (default `out_pfss_10x.txt`); flags `--png`, `--mp4`, `--fps` (24). One invocation emits both files.
 
 ### `out_c7_10x_on_rho_total.png`, `out_c7_10x_on_rho_total.mp4`
 ρ_tot evolution for the C7 10× run; output names derive from the input stem (`out_c7_10x_on` → `<stem>_rho_total.{png,mp4}`).
 ```bash
-.venv/bin/python util/visualize_rho_total.py outputs/model_c7/out_c7_10x_on.txt
+.venv/bin/python util/legacy/visualize_rho_total.py outputs/model_c7/out_c7_10x_on.txt
 ```
 (default output)
 
 ### `out_pfss_10x_rho_total.png`, `out_pfss_10x_rho_total.mp4`
 ρ_tot evolution for the PFSS 10× run — the script's default input/output.
 ```bash
-.venv/bin/python util/visualize_rho_total.py outputs/pfss/out_pfss_10x.txt
+.venv/bin/python util/legacy/visualize_rho_total.py outputs/pfss/out_pfss_10x.txt
 ```
 (default output)
 
 ### `pfss_10x_rho_total_compare.png`, `pfss_10x_rho_total_compare.mp4`
 ρ_tot ionization on/off comparison for the PFSS 10× runs — the compare script's default invocation.
 ```bash
-.venv/bin/python util/visualize_rho_total_compare.py outputs/pfss/out_pfss_10x.txt outputs/pfss/out_pfss_10x_noioniz.txt
+.venv/bin/python util/legacy/visualize_rho_total_compare.py outputs/pfss/out_pfss_10x.txt outputs/pfss/out_pfss_10x_noioniz.txt
 ```
 Positional `runA runB`; `--labelA`/`--labelB` (default "ionization ON"/"OFF"), `--out-png`/`--out-mp4` (default `visualization/pfss_10x_rho_total_compare.{png,mp4}`), `--fps` (24). (default output)
 
 ### `c7_openbc_ioniz_compare.png`, `c7_openbc_ioniz_compare.mp4`
 ρ_tot ionization on/off comparison for the open-BC C7 case.
 ```bash
-.venv/bin/python util/visualize_rho_total_compare.py outputs/model_c7/out_c7_openbc.txt outputs/model_c7/out_c7_openbc_noioniz.txt --out-png visualization/model_c7/c7_openbc_ioniz_compare.png --out-mp4 visualization/model_c7/c7_openbc_ioniz_compare.mp4
+.venv/bin/python util/legacy/visualize_rho_total_compare.py outputs/model_c7/out_c7_openbc.txt outputs/model_c7/out_c7_openbc_noioniz.txt --out-png visualization/model_c7/c7_openbc_ioniz_compare.png --out-mp4 visualization/model_c7/c7_openbc_ioniz_compare.mp4
 ```
 
 ### `pfss_openbc_ioniz_compare.png`, `pfss_openbc_ioniz_compare.mp4`
 ρ_tot ionization on/off comparison for the open-BC PFSS case.
 ```bash
-.venv/bin/python util/visualize_rho_total_compare.py outputs/pfss/out_pfss_openbc.txt outputs/pfss/out_pfss_openbc_noioniz.txt --out-png visualization/pfss/pfss_openbc_ioniz_compare.png --out-mp4 visualization/pfss/pfss_openbc_ioniz_compare.mp4
+.venv/bin/python util/legacy/visualize_rho_total_compare.py outputs/pfss/out_pfss_openbc.txt outputs/pfss/out_pfss_openbc_noioniz.txt --out-png visualization/pfss/pfss_openbc_ioniz_compare.png --out-mp4 visualization/pfss/pfss_openbc_ioniz_compare.mp4
 ```
 
 ### `c7_openbc_8panel_compare.mp4`, `pfss_openbc_8panel_compare.mp4`
 8-panel run comparison (`animate_compare.py`) for the open-BC C7 / PFSS cases, with overridden output paths.
 ```bash
-.venv/bin/python util/animate_compare.py outputs/model_c7/out_c7_openbc.txt outputs/model_c7/out_c7_oldlike_openbc.txt visualization/model_c7/c7_openbc_8panel_compare.mp4
-.venv/bin/python util/animate_compare.py outputs/pfss/out_pfss_openbc.txt outputs/pfss/out_pfss_openbc_noioniz.txt visualization/pfss/pfss_openbc_8panel_compare.mp4
+.venv/bin/python util/legacy/animate_compare.py outputs/model_c7/out_c7_openbc.txt outputs/model_c7/out_c7_oldlike_openbc.txt visualization/model_c7/c7_openbc_8panel_compare.mp4
+.venv/bin/python util/legacy/animate_compare.py outputs/pfss/out_pfss_openbc.txt outputs/pfss/out_pfss_openbc_noioniz.txt visualization/pfss/pfss_openbc_8panel_compare.mp4
 ```
 
 ---
@@ -107,14 +107,14 @@ Positional `runA runB`; `--labelA`/`--labelB` (default "ionization ON"/"OFF"), `
 ### `flare_height_time.png`, `flare_compare_snapshot.png`, `flare_timeseries.png`
 Explosive vs gentle chromospheric-evaporation diagnostics (height–time maps, peak-phase profile comparison, time series). All three from one invocation (fixed output names).
 ```bash
-.venv/bin/python util/visualize_flare.py outputs/model_flare/flare_explosive.txt outputs/model_flare/flare_gentle.txt 25.0
+.venv/bin/python util/legacy/visualize_flare.py outputs/model_flare/flare_explosive.txt outputs/model_flare/flare_gentle.txt 25.0
 ```
 Positional (defaults): `explosive.txt`=`outputs/model_flare/flare_explosive.txt`, `gentle.txt`=`outputs/model_flare/flare_gentle.txt`, `t_max_s`=`25.0`.
 
 ### `flare_evolution_frames.png`, `flare_height_time_500.png`
 Refined 500-cell explosive-evaporation frame strip + continuous height–time map. Both from one invocation (fixed output names).
 ```bash
-.venv/bin/python util/visualize_flare_frames.py outputs/model_flare/flare_explosive_500.txt outputs/model_flare/flare_gentle.txt
+.venv/bin/python util/legacy/visualize_flare_frames.py outputs/model_flare/flare_explosive_500.txt outputs/model_flare/flare_gentle.txt
 ```
 
 ### `loop_flare_evolution.mp4` (half loop) / `loop_full_flare_evolution.mp4` (full loop)
@@ -122,43 +122,43 @@ Topology-aware field-aligned flare movie with split x-axis (auto-detected from t
 ```bash
 # Full loop (default output)
 FLARE_DELTA=5 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 \
-  .venv/bin/python util/animate_loop_flare.py scenarios/data/loop_full_fine.dat outputs/loops/loop_full_flare.txt visualization/loops/loop_full_flare_evolution.mp4
+  .venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/loop_full_fine.dat outputs/loops/loop_full_flare.txt visualization/loops/loop_full_flare_evolution.mp4
 # Half (closed) loop
-.venv/bin/python util/animate_loop_flare.py scenarios/data/loop_closed_fine.dat outputs/loops/loop_half_flare.txt visualization/loops/loop_flare_evolution.mp4
+.venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/loop_closed_fine.dat outputs/loops/loop_half_flare.txt visualization/loops/loop_flare_evolution.mp4
 ```
 Positional: `[loop.dat] [flare.txt] [out.mp4] [t_max_s]` — defaults `scenarios/data/loop_full_fine.dat`, `outputs/loops/loop_full_flare.txt`, `visualization/loops/loop_full_flare_evolution.mp4`.
 
 ### `loop_flare_verify.png`
 Full/closed-loop flare run vs control: T_i and V vs true height, coronal-mass loading, final velocity profile (output path hardcoded).
 ```bash
-.venv/bin/python util/verify_loop_flare.py scenarios/data/loop_closed_fine.dat outputs/loops/loop_closed_quiet.txt outputs/loops/loop_closed_flare.txt
+.venv/bin/python util/legacy/verify_loop_flare.py scenarios/data/loop_closed_fine.dat outputs/loops/loop_closed_quiet.txt outputs/loops/loop_closed_flare.txt
 ```
 Positional (defaults): `<loop.dat>`=`scenarios/data/loop_closed_test.dat`, `<control.txt>`=`outputs/loops/loop_closed_quiet.txt`, `<flare.txt>`=`outputs/loops/loop_closed_flare.txt`.
 
 ### `loop_cooling_full.png`, `loop_cooling_half.png`
 Post-beam cooldown analysis (apex/EM-weighted coronal T & n vs time, e-folding cooling times, apex (n,T) trajectory). Default output `visualization/loops/loop_cooling.png`; pass an explicit name for the full/half variants.
 ```bash
-.venv/bin/python util/loop_cooling.py scenarios/data/loop_full_fine.dat   outputs/loops/loop_full_flare.txt visualization/loops/loop_cooling_full.png
-.venv/bin/python util/loop_cooling.py scenarios/data/loop_closed_fine.dat outputs/loops/loop_half_flare.txt visualization/loops/loop_cooling_half.png
+.venv/bin/python util/legacy/loop_cooling.py scenarios/data/loop_full_fine.dat   outputs/loops/loop_full_flare.txt visualization/loops/loop_cooling_full.png
+.venv/bin/python util/legacy/loop_cooling.py scenarios/data/loop_closed_fine.dat outputs/loops/loop_half_flare.txt visualization/loops/loop_cooling_half.png
 ```
 
 ### `loop_bc_compare.png`
 Half-loop (reflecting apex) vs full-loop (interior apex) apex-BC comparison for one-sided beam heating. All paths hardcoded — no args.
 ```bash
-.venv/bin/python util/compare_loop_bc.py
+.venv/bin/python util/legacy/compare_loop_bc.py
 ```
 
 ### `loop_ic_check.png`
 Sanity-check a loop `.dat` initial condition (T, densities, ionization fraction, hydrostatic residual vs height).
 ```bash
-.venv/bin/python util/check_loop_ic.py scenarios/data/loop_full_fine.dat visualization/loops/loop_ic_check.png
+.venv/bin/python util/legacy/check_loop_ic.py scenarios/data/loop_full_fine.dat visualization/loops/loop_ic_check.png
 ```
 Positional (defaults): `<loop.dat>`=`scenarios/data/loop_closed_test.dat`, `[out.png]`=`visualization/loops/loop_ic_check.png`.
 
 ### `beam_stopping_feedback.png`
 Thick-target beam stopping-depth feedback (loop becomes opaque as it fills): deposition-weighted mean height + chromospheric energy fraction over time.
 ```bash
-.venv/bin/python util/beam_stopping_feedback.py scenarios/data/loop_full_fine.dat outputs/loops/loop_full_thick.txt visualization/loops/beam_stopping_feedback.png 20 5
+.venv/bin/python util/legacy/beam_stopping_feedback.py scenarios/data/loop_full_fine.dat outputs/loops/loop_full_thick.txt visualization/loops/beam_stopping_feedback.png 20 5
 ```
 Positional (defaults): `[loop.dat]`, `[thick.txt]`, `[out.png]`, `[E_cut_keV]`=`20`, `[delta]`=`5`, `[T_off_s]`=`62`.
 
@@ -169,7 +169,7 @@ Positional (defaults): `[loop.dat]`, `[thick.txt]`, `[out.png]`, `[E_cut_keV]`=`
 ### `pfss_3d_global.png`, `pfss_3d_local.png`, `pfss_3d_rotate.mp4`
 Global PFSS sphere (B_LOS + altitude-coloured field lines), a local footpoint box, and a rotating-camera movie — from one PFSS solve. Output names are hardcoded; `--out-dir` sets location. `--no-movie` skips the MP4.
 ```bash
-.venv/bin/python util/visualize_pfss_3d.py \
+.venv/bin/python util/legacy/visualize_pfss_3d.py \
     --magnetogram util/data/mrzqs190801t0014c2220_229.fits \
     --nseeds 96 --nrho 60 --rss 2.5 \
     --out-dir visualization/pfss
@@ -178,7 +178,7 @@ Global PFSS sphere (B_LOS + altitude-coloured field lines), a local footpoint bo
 ### `pfss_lines_evolution.png`, `pfss_lines_evolution.mp4`
 2–3 PFSS field lines side-by-side: 3D geometry + BC table (PNG) and a per-line 4-field strip animation (MP4). `len(--dats)` must equal `len(--outs)`.
 ```bash
-.venv/bin/python util/visualize_pfss_lines_evolution.py \
+.venv/bin/python util/legacy/visualize_pfss_lines_evolution.py \
     --magnetogram util/data/mrzqs190801t0014c2220_229.fits \
     --dats scenarios/data/pfss_lineA.dat scenarios/data/pfss_lineB.dat scenarios/data/pfss_lineC.dat \
     --outs outputs/pfss/out_lineA.txt outputs/pfss/out_lineB.txt outputs/pfss/out_lineC.txt \
@@ -189,26 +189,26 @@ Global PFSS sphere (B_LOS + altitude-coloured field lines), a local footpoint bo
 ### `pfss_lineA_flare_evolution.mp4`
 4-panel vertical-profile animation (T_i, V, densities, ionization) of a flaring PFSS line (PFSS_FLARE run), beam window shaded.
 ```bash
-.venv/bin/python util/animate_pfss_flare.py outputs/pfss/pfss_lineA_flare.txt visualization/pfss/pfss_lineA_flare_evolution.mp4
+.venv/bin/python util/legacy/animate_pfss_flare.py outputs/pfss/pfss_lineA_flare.txt visualization/pfss/pfss_lineA_flare_evolution.mp4
 ```
 Positional: `[input.txt] [out.mp4]` — defaults `outputs/pfss/pfss_lineA_flare.txt`, `visualization/pfss/pfss_lineA_flare_evolution.mp4`.
 
 ### `pfss_10x_evolution.mp4`
 Same 4-panel flare-profile animation applied to the 10×-duration PFSS relaxation run.
 ```bash
-.venv/bin/python util/animate_pfss_flare.py outputs/pfss/out_pfss_10x.txt visualization/pfss/pfss_10x_evolution.mp4
+.venv/bin/python util/legacy/animate_pfss_flare.py outputs/pfss/out_pfss_10x.txt visualization/pfss/pfss_10x_evolution.mp4
 ```
 
 ### `pfss_lineA_flare_verify.png`
 Phase-3 de-risk: control (beam off) vs explosive (beam on) PFSS-line run; height-time T_i and V heatmaps + printed diagnostics.
 ```bash
-.venv/bin/python util/verify_pfss_flare.py outputs/pfss/pfss_lineA_control.txt outputs/pfss/pfss_lineA_flare.txt visualization/pfss/pfss_lineA_flare_verify.png
+.venv/bin/python util/legacy/verify_pfss_flare.py outputs/pfss/pfss_lineA_control.txt outputs/pfss/pfss_lineA_flare.txt visualization/pfss/pfss_lineA_flare_verify.png
 ```
 
 ### `canopy_geometry_evolution.png`, `canopy_evolution.mp4`
 `analytic_canopy` scenario: static figure (3D "trumpet" flux tube + B(z)/A(z) + BC table + 4-panel evolution) and the matching evolution movie.
 ```bash
-.venv/bin/python util/visualize_canopy.py \
+.venv/bin/python util/legacy/visualize_canopy.py \
     --sim-output outputs/analytic_canopy/out_canopy.txt \
     --out-png visualization/analytic_canopy/canopy_geometry_evolution.png \
     --out-mp4 visualization/analytic_canopy/canopy_evolution.mp4
@@ -217,7 +217,7 @@ Phase-3 de-risk: control (beam off) vs explosive (beam on) PFSS-line run; height
 ### `event_ensemble_3d_peak.png`, `event_ensemble_3d.mp4`
 Simulated event ensemble on a 3D solar sphere — each PFSS line drawn along its real path, coloured by its own run's temperature. PNG = snapshot at `--snap-time`; MP4 = flare over time. Names hardcoded; `--out-dir` sets location. `--no-anim` skips the MP4.
 ```bash
-.venv/bin/python util/visualize_event_3d.py \
+.venv/bin/python util/legacy/visualize_event_3d.py \
     --lines-json outputs/events/event_ensemble_lines.json \
     --magnetogram util/data/adapt40311_044012_202408010600_i00053600n1.fts.gz \
     --out-dir visualization/events
@@ -226,7 +226,7 @@ Simulated event ensemble on a 3D solar sphere — each PFSS line drawn along its
 ### `event_ensemble_3d_global.png`
 Wide framing of the same 3D ensemble — same script; only `event_ensemble_3d_peak.png` is emitted natively, so this is a second run (wider `--zoom-rsun`) whose PNG was renamed.
 ```bash
-.venv/bin/python util/visualize_event_3d.py \
+.venv/bin/python util/legacy/visualize_event_3d.py \
     --lines-json outputs/events/event_ensemble_lines.json \
     --magnetogram util/data/adapt40311_044012_202408010600_i00053600n1.fts.gz \
     --out-dir visualization/events --no-anim
@@ -237,27 +237,27 @@ mv visualization/events/event_ensemble_3d_peak.png visualization/events/event_en
 Event-starter full-loop flare animation (AR 13768): split-x 4-panel profile movie vs arc length, live thick-target beam Q(s) overlay. `_Te` variant uses the 3-temperature (`ENABLE_TE=1`) dump (auto-detected).
 ```bash
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 \
-  .venv/bin/python util/animate_loop_flare.py scenarios/data/event_20240801_AR13768.dat outputs/events/event_20240801_AR13768_flare.txt visualization/events/event_20240801_AR13768_flare.mp4
+  .venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_20240801_AR13768.dat outputs/events/event_20240801_AR13768_flare.txt visualization/events/event_20240801_AR13768_flare.mp4
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 \
-  .venv/bin/python util/animate_loop_flare.py scenarios/data/event_20240801_AR13768.dat outputs/events/event_te/event_20240801_AR13768_te.txt visualization/events/event_20240801_AR13768_Te.mp4
+  .venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_20240801_AR13768.dat outputs/events/event_te/event_20240801_AR13768_te.txt visualization/events/event_20240801_AR13768_Te.mp4
 ```
 
 ### `event_20240801_c05_101Mm_Te.mp4`, `event_20240801_o00_1040Mm_Te.mp4`
 3-temperature ensemble-member animations (closed 101 Mm; open 1040 Mm).
 ```bash
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 \
-  .venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/events/event_te/c05_101Mm_te.txt  visualization/events/event_20240801_c05_101Mm_Te.mp4
+  .venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/events/event_te/c05_101Mm_te.txt  visualization/events/event_20240801_c05_101Mm_Te.mp4
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 \
-  .venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/events/event_te/o00_1040Mm_te.txt visualization/events/event_20240801_o00_1040Mm_Te.mp4
+  .venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/events/event_te/o00_1040Mm_te.txt visualization/events/event_20240801_o00_1040Mm_Te.mp4
 ```
 
 ### `event_ensemble_c05_101Mm_closed.mp4`, `event_ensemble_o00_1040Mm_open.mp4`
 Ensemble-member flare animations: closed loop (vs arc length) and open line (vs height).
 ```bash
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 \
-  .venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/events/event_ensemble/c05_101Mm.txt  visualization/events/event_ensemble_c05_101Mm_closed.mp4
+  .venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/events/event_ensemble/c05_101Mm.txt  visualization/events/event_ensemble_c05_101Mm_closed.mp4
 FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 \
-  .venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/events/event_ensemble/o00_1040Mm.txt visualization/events/event_ensemble_o00_1040Mm_open.mp4
+  .venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/events/event_ensemble/o00_1040Mm.txt visualization/events/event_ensemble_o00_1040Mm_open.mp4
 ```
 
 ---
@@ -273,111 +273,111 @@ The shaded beam window is read from `FLARE_T_ON`/`FLARE_DUR` (defaults 2.0 s / 1
 ### `c05_101Mm_te_{doppler,dopplergram}.png`
 Synthetic IRIS Doppler (closed 101 Mm loop, T_e≠T_i run).
 ```bash
-.venv/bin/python util/synth_doppler.py scenarios/data/event_ensemble/c05_101Mm.dat outputs/events/event_te/c05_101Mm_te.txt c05_101Mm_te
+.venv/bin/python util/legacy/synth_doppler.py scenarios/data/event_ensemble/c05_101Mm.dat outputs/events/event_te/c05_101Mm_te.txt c05_101Mm_te
 ```
 
 ### `o00_1040Mm_te_{doppler,dopplergram}.png`
 Synthetic IRIS Doppler (open 1040 Mm line, T_e≠T_i run).
 ```bash
-.venv/bin/python util/synth_doppler.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/events/event_te/o00_1040Mm_te.txt o00_1040Mm_te
+.venv/bin/python util/legacy/synth_doppler.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/events/event_te/o00_1040Mm_te.txt o00_1040Mm_te
 ```
 
 ### `event_20240801_AR13768_te_{doppler,dopplergram}.png`
 Synthetic IRIS Doppler (2024-08-01 AR13768 line, T_e≠T_i run).
 ```bash
-.venv/bin/python util/synth_doppler.py scenarios/data/event_20240801_AR13768.dat outputs/events/event_te/event_20240801_AR13768_te.txt event_20240801_AR13768_te
+.venv/bin/python util/legacy/synth_doppler.py scenarios/data/event_20240801_AR13768.dat outputs/events/event_te/event_20240801_AR13768_te.txt event_20240801_AR13768_te
 ```
 
 ### `sol20140329_10Mm_1T_{doppler,dopplergram}.png`
 SOL2014-03-29 10 Mm loop, single-temperature (T_e=T_i) run.
 ```bash
-.venv/bin/python util/synth_doppler.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_10Mm_1T.txt sol20140329_10Mm_1T
+.venv/bin/python util/legacy/synth_doppler.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_10Mm_1T.txt sol20140329_10Mm_1T
 ```
 
 ### `sol20140329_10Mm_te_{doppler,dopplergram}.png`
 SOL2014-03-29 10 Mm loop, T_e≠T_i run.
 ```bash
-.venv/bin/python util/synth_doppler.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_10Mm_te.txt sol20140329_10Mm_te
+.venv/bin/python util/legacy/synth_doppler.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_10Mm_te.txt sol20140329_10Mm_te
 ```
 
 ### `sol20140329_10Mm_te_stab_{doppler,dopplergram}.png`
 SOL2014-03-29 10 Mm loop, T_e≠T_i, numerically-stabilized variant.
 ```bash
-.venv/bin/python util/synth_doppler.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_10Mm_te_stab.txt sol20140329_10Mm_te_stab
+.venv/bin/python util/legacy/synth_doppler.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_10Mm_te_stab.txt sol20140329_10Mm_te_stab
 ```
 
 ### `sol20140329_dur6_te_{doppler,dopplergram}.png`
 SOL2014-03-29 10 Mm loop, T_e≠T_i, 6 s beam-duration variant.
 ```bash
-FLARE_DUR=6 .venv/bin/python util/synth_doppler.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_dur6_te.txt sol20140329_dur6_te
+FLARE_DUR=6 .venv/bin/python util/legacy/synth_doppler.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_dur6_te.txt sol20140329_dur6_te
 ```
 
 ### `sol20140329_10Mm_te_vs_obs.png`, `sol20140329_dur6_te_vs_obs.png`
 Synthetic loop Doppler (Fe XXI / Si IV / C II / Mg II) overlaid on observed IRIS values for SOL2014-03-29 (Young+2015, Li+2015).
 ```bash
-.venv/bin/python util/compare_doppler_obs.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_10Mm_te.txt sol20140329_10Mm_te
-FLARE_DUR=6 .venv/bin/python util/compare_doppler_obs.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_dur6_te.txt sol20140329_dur6_te
+.venv/bin/python util/legacy/compare_doppler_obs.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_10Mm_te.txt sol20140329_10Mm_te
+FLARE_DUR=6 .venv/bin/python util/legacy/compare_doppler_obs.py scenarios/data/sol20140329_10Mm.dat outputs/events/sol2014/sol20140329_dur6_te.txt sol20140329_dur6_te
 ```
 
 ### `two_fluid_diag_{c05_closed,o00_open,starter}.png`
 Two-fluid decoupling diagnostic (slip-Mach |V−U|/c_s and |T_i−T_n|/T_i heatmaps). Args `<loop.dat> <state.txt> [tag]`; `tag` → `two_fluid_diag_<tag>.png`.
 ```bash
-.venv/bin/python util/diag_two_fluid.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/c05_closed.txt c05_closed
-.venv/bin/python util/diag_two_fluid.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/two_fluid/o00_open.txt   o00_open
-.venv/bin/python util/diag_two_fluid.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/starter.txt   starter
+.venv/bin/python util/legacy/diag_two_fluid.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/c05_closed.txt c05_closed
+.venv/bin/python util/legacy/diag_two_fluid.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/two_fluid/o00_open.txt   o00_open
+.venv/bin/python util/legacy/diag_two_fluid.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/starter.txt   starter
 ```
 
 ### `two_fluid/compare_{c05_closed,o00_open}.png`
 Neutrals-ON (two-fluid) vs neutrals-OFF (`SINGLE_FLUID=1`) comparison: ΔT(s,t), ΔV(s,t) heatmaps + peak-departure profiles. Args `<loop.dat> <on.txt> <off.txt> [tag]`; `tag` → `two_fluid/compare_<tag>.png`.
 ```bash
-.venv/bin/python util/compare_two_fluid.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/c05_neutrals_on.txt outputs/two_fluid/c05_neutrals_off.txt c05_closed
-.venv/bin/python util/compare_two_fluid.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/two_fluid/o00_neutrals_on.txt outputs/two_fluid/o00_neutrals_off.txt o00_open
+.venv/bin/python util/legacy/compare_two_fluid.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/c05_neutrals_on.txt outputs/two_fluid/c05_neutrals_off.txt c05_closed
+.venv/bin/python util/legacy/compare_two_fluid.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/two_fluid/o00_neutrals_on.txt outputs/two_fluid/o00_neutrals_off.txt o00_open
 ```
 
 ### `two_fluid/{c05,o00}_neutrals_{on,off}.mp4`
 Per-run movies of the neutrals-on / neutrals-off two-fluid runs (the same `outputs/two_fluid/` dumps used by the comparison PNGs above), animated with `animate_loop_flare.py` and written under `visualization/two_fluid/`.
 ```bash
-.venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/c05_neutrals_on.txt  visualization/two_fluid/c05_neutrals_on.mp4
-.venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/c05_neutrals_off.txt visualization/two_fluid/c05_neutrals_off.mp4
-.venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/two_fluid/o00_neutrals_on.txt  visualization/two_fluid/o00_neutrals_on.mp4
-.venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/two_fluid/o00_neutrals_off.txt visualization/two_fluid/o00_neutrals_off.mp4
+.venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/c05_neutrals_on.txt  visualization/two_fluid/c05_neutrals_on.mp4
+.venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/two_fluid/c05_neutrals_off.txt visualization/two_fluid/c05_neutrals_off.mp4
+.venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/two_fluid/o00_neutrals_on.txt  visualization/two_fluid/o00_neutrals_on.mp4
+.venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/two_fluid/o00_neutrals_off.txt visualization/two_fluid/o00_neutrals_off.mp4
 ```
 
 ---
 
 ## Prerequisite input generators (write to `outputs/` & `scenarios/data/`, not `visualization/`)
 
-### `util/make_loop_dat.py`
+### `util/legacy/make_loop_dat.py`
 Builds a chromosphere→TR→corona loop `.dat` (C7 chromosphere + hydrostatic corona) — the `.dat` consumed by all loop plots.
 ```bash
-.venv/bin/python util/make_loop_dat.py --output scenarios/data/loop_full_fine.dat --topology full --half-length-mm 25 --apex-T-MK 2.0 --fp-B-G 100
+.venv/bin/python util/legacy/make_loop_dat.py --output scenarios/data/loop_full_fine.dat --topology full --half-length-mm 25 --apex-T-MK 2.0 --fp-B-G 100
 ```
 
-### `util/extract_field_line.py`
+### `util/legacy/extract_field_line.py`
 Extracts a single PFSS field line from a GONG synoptic magnetogram and writes the `pfss_field_line` `.dat`.
 ```bash
-.venv/bin/python util/extract_field_line.py --magnetogram util/data/mrzqs190801t0014c2220_229.fits --output scenarios/data/pfss_qs_20190801.dat --ns 100 --top-height-km 986
+.venv/bin/python util/legacy/extract_field_line.py --magnetogram util/data/mrzqs190801t0014c2220_229.fits --output scenarios/data/pfss_qs_20190801.dat --ns 100 --top-height-km 986
 ```
 
-### `util/extract_event_loop.py`
+### `util/legacy/extract_event_loop.py`
 Extracts one flare-loop geometry (half-length, topology, footpoint |B|) from a real-event magnetogram via PFSS; emits a geometry JSON and prints the next `make_loop_dat.py` command.
 ```bash
-.venv/bin/python util/extract_event_loop.py --magnetogram util/data/adapt40311_044012_202408010600_i00005600n1.fts.gz --ar-lon 74 --ar-lat -16 --obstime 2024-08-01T07:09:00 --out-json outputs/events/event_20240801_AR13768_geometry.json
+.venv/bin/python util/legacy/extract_event_loop.py --magnetogram util/data/adapt40311_044012_202408010600_i00005600n1.fts.gz --ar-lon 74 --ar-lat -16 --obstime 2024-08-01T07:09:00 --out-json outputs/events/event_20240801_AR13768_geometry.json
 ```
 
-### `util/extract_event_ensemble.py`
+### `util/legacy/extract_event_ensemble.py`
 Traces an ensemble of PFSS lines around an AR, builds a loop `.dat` per line, and emits the `run_ensemble.py` manifest + the 3D lines index (`event_ensemble_lines.json`, consumed by `visualize_event_3d.py`).
 ```bash
-.venv/bin/python util/extract_event_ensemble.py --magnetogram util/data/adapt40311_044012_202408010600_i00053600n1.fts.gz --ar-lon 74 --ar-lat -16 --obstime 2024-08-01T07:09:00 --n-closed 10 --n-open 4
+.venv/bin/python util/legacy/extract_event_ensemble.py --magnetogram util/data/adapt40311_044012_202408010600_i00053600n1.fts.gz --ar-lon 74 --ar-lat -16 --obstime 2024-08-01T07:09:00 --n-closed 10 --n-open 4
 ```
 
-### `util/run_ensemble.py`
+### `util/run/run_ensemble.py`
 Embarrassingly-parallel ensemble runner: one `chromo_main` per field line, writing each `<out>.txt` (+ `.run.log`).
 ```bash
 # Mode A (manifest):
-.venv/bin/python util/run_ensemble.py --manifest outputs/events/event_ensemble_jobs.json --workers 16
+.venv/bin/python util/run/run_ensemble.py --manifest outputs/events/event_ensemble_jobs.json --workers 16
 # Mode B (glob, shared env):
-.venv/bin/python util/run_ensemble.py --dats "scenarios/data/event_ensemble/*.dat" --out-dir outputs/events/event_ensemble --env PFSS_FLARE=1 FLARE_BEAM_FLUX=3e7 FLARE_DELTA=4 FLARE_E_CUT=20
+.venv/bin/python util/run/run_ensemble.py --dats "scenarios/data/event_ensemble/*.dat" --out-dir outputs/events/event_ensemble --env PFSS_FLARE=1 FLARE_BEAM_FLUX=3e7 FLARE_DELTA=4 FLARE_E_CUT=20
 ```
 
 ---
@@ -398,32 +398,32 @@ The `GENTLE=1` overlay (scenarios/pfss_field_line.cpp) adds the ambient coronal 
 
 ```bash
 # (0) build the heating-consistent loop IC (prints the auto-calibrated E_H0, s_H)
-python util/make_loop_dat.py --output scenarios/data/loop_closed_gentle.dat \
+python util/legacy/make_loop_dat.py --output scenarios/data/loop_closed_gentle.dat \
     --topology closed --half-length-mm 25 --apex-T-MK 2.0 --fp-B-G 100
 
 # (1) Phase-2 relaxation to the steady preflare state (steady heating, enhance=1)
 GENTLE=1 ./build/chromo_main outputs/model_column/gentle_relax.txt full ionization \
     pfss_field_line scenarios/data/loop_closed_gentle.dat 12 cooling
 # → visualization/model_column/gentle_relax_convergence.png : max|V|(t), mean|V|(t), max|dlnT/dt|, T(t)
-python util/check_relaxation.py outputs/model_column/gentle_relax.txt visualization/model_column/gentle_relax_convergence.png
+python util/legacy/check_relaxation.py outputs/model_column/gentle_relax.txt visualization/model_column/gentle_relax_convergence.png
 
 # (2) Phase-3 combined run: relax (to t=1000 s) then ramp heating ×3 over 200 s
 GENTLE=1 GENTLE_ENHANCE=3 GENTLE_T_ON=1000 GENTLE_RAMP=200 ./build/chromo_main \
     outputs/model_column/gentle_evap.txt full ionization pfss_field_line \
     scenarios/data/loop_closed_gentle.dat 16 cooling
 # → visualization/model_column/gentle_evap_signature.png : coronal EM rise, TR upflow, T step, upflow Mach (≪1)
-python util/gentle_evaporation_diag.py outputs/model_column/gentle_evap.txt visualization/model_column/gentle_evap_signature.png 1000 200
+python util/legacy/gentle_evaporation_diag.py outputs/model_column/gentle_evap.txt visualization/model_column/gentle_evap_signature.png 1000 200
 # → visualization/model_column/gentle_evap_profiles.png : split-axis preflare-vs-evaporation T, n_e, V profiles
-python util/gentle_evap_profiles.py scenarios/data/loop_closed_gentle.dat \
+python util/legacy/gentle_evap_profiles.py scenarios/data/loop_closed_gentle.dat \
     outputs/model_column/gentle_evap.txt visualization/model_column/gentle_evap_profiles.png 1000
 
 # (3) evolution movies (split-axis T/V/n/ionization; parallel frames → MP4).
 #     animate_gentle.py reuses animate_loop_flare's transform but relabels the
 #     timeline RELAXING / HEATING RAMP / EVAPORATION (no beam) and overlays H(s,t).
 #     Trailing args = t_on ramp enhance (match the run; t_on=1e9 ⇒ always RELAXING).
-python util/animate_gentle.py scenarios/data/loop_closed_gentle.dat \
+python util/legacy/animate_gentle.py scenarios/data/loop_closed_gentle.dat \
     outputs/model_column/gentle_relax.txt visualization/model_column/gentle_relax_evolution.mp4 1e9 1 1
-python util/animate_gentle.py scenarios/data/loop_closed_gentle.dat \
+python util/legacy/animate_gentle.py scenarios/data/loop_closed_gentle.dat \
     outputs/model_column/gentle_evap.txt  visualization/model_column/gentle_evap_evolution.mp4 1000 200 3
 ```
 
@@ -440,14 +440,14 @@ First corona-as-boundary attempt: single C7 column lifted only to h ≈ 2.628 Mm
 ```bash
 # Phase B — relaxation to the steady preflare state (steady q, enhance=1 default)
 ./build/chromo_main outputs/model_column/gentle_v2_relax.txt full ionization model_gentle - 6 cooling
-python util/check_relaxation.py outputs/model_column/gentle_v2_relax.txt visualization/model_column/gentle_v2_relax_convergence.png
+python util/legacy/check_relaxation.py outputs/model_column/gentle_v2_relax.txt visualization/model_column/gentle_v2_relax_convergence.png
 
 # Phase B+C combined — relax (to t=1000 s) then ramp q(T) ×3 over 120 s
 GENTLE_Q_ENHANCE=3 GENTLE_Q_T_ON=1000 GENTLE_Q_RAMP=120 \
     ./build/chromo_main outputs/model_column/gentle_v2_evap.txt full ionization model_gentle - 8 cooling
 # evolution movie (6 height panels: T / total gas pressure / V / n_e,n_n /
 #   ionization / field-aligned conductive flux q∥; phase-labeled by the q(T) ramp)
-python util/animate_gentle_column.py outputs/model_column/gentle_v2_evap.txt \
+python util/legacy/animate_gentle_column.py outputs/model_column/gentle_v2_evap.txt \
     visualization/model_column/gentle_v2_evolution.mp4 1000 120 3
 ```
 
@@ -469,16 +469,16 @@ GENTLE_NS=300 GENTLE_Q_ENHANCE=3 GENTLE_Q_T_ON=3000 GENTLE_Q_RAMP=300 \
     ./build/chromo_main outputs/model_column/gentle_v3_evap.txt full ionization model_gentle - 12 cooling
 # evolution movie — Nature-styled, split x-axis (zoom TR / compress corona),
 #   slow-motion in the evaporation-onset window. Default slow window = [t_on, t_on+1000].
-python util/animate_gentle_column.py outputs/model_column/gentle_v3_evap.txt \
+python util/legacy/animate_gentle_column.py outputs/model_column/gentle_v3_evap.txt \
     visualization/model_column/gentle_v3_evolution.mp4 3000 300 3
 # tune slow-mo: SLOW_T0 / SLOW_T1 [s] window, SLOW_FACTOR (default 4), ANIM_MAX_FRAMES (500)
 
 # the imposed conductive-flux ramp q(t) itself (the gentle-evaporation driver)
-python util/plot_q_ramp.py        # defaults reproduce gentle_v3: q0=230, x3, t_on=3000, ramp=300
+python util/legacy/plot_q_ramp.py        # defaults reproduce gentle_v3: q0=230, x3, t_on=3000, ramp=300
 
 # writeup summary figure (driver+EM response, and corona-filling profiles).
 # NOTE: writes to docs/writeup-overleaf/ (a committed paper figure), not visualization/
-python util/plot_gentle_summary.py
+python util/legacy/plot_gentle_summary.py
 ```
 
 - `gentle_v3_evolution.mp4` — relaxation → q(T)-ramp ×3 in the resolved corona. **Evaporation now appears**: across the ramp the coronal (h > 2.3 Mm) emission measure ∫n_e² ds **× 2.0**, coronal mass ∫n_e ds ×1.42, T_top 1.14 → 1.50 MK, n_e(top) ×1.47, TR burns down 1.595 → 1.526 Mm, with a transient +1 km/s upflow during the ramp. Contrast §9b (same driver, boundary at 2.628 Mm): EM flat, no evaporation. **Confirms the v2 null was geometric** — the boundary needed coronal volume above the TR, not a different mechanism. Caveat: the relaxed baseline carries a steady ~8 km/s cap-throttled coronal downflow (no volumetric heating to pin V=0), so the *sustained* signature is the EM/density rise rather than a fast bulk upflow; the resolved-corona-with-heating run (§9a/v1) gives the cleaner upflow (15.6 km/s, EM ×2.6).
@@ -500,7 +500,7 @@ User-directed variant (2026-06-25): drive the evaporation by the **coronal condu
 GENTLE_NS=300 GENTLE_T_BOOST=1.5 GENTLE_Q_ENHANCE=1 \
     ./build/chromo_main outputs/model_column/gentle_hotcorona.txt full ionization model_gentle - 6 cooling
 # steady run ⇒ animate with enhance=1 (phase chip reads RELAXING throughout); slow-mo the transient
-SLOW_T0=0 SLOW_T1=200 SLOW_FACTOR=4 .venv/bin/python util/animate_gentle_column.py \
+SLOW_T0=0 SLOW_T1=200 SLOW_FACTOR=4 .venv/bin/python util/legacy/animate_gentle_column.py \
     outputs/model_column/gentle_hotcorona.txt visualization/model_column/gentle_hotcorona_evolution.mp4 1e9 1 1
 ```
 
@@ -514,7 +514,7 @@ The RTV static-balance term `H(s) = E_H0·exp(−(s−s0)/s_H)` (Aschwanden & Sc
 # uniform-ish heating (s_H = 3L), target apex 1.3 MK, steady (no ramp)
 GENTLE_NS=300 GENTLE_HEAT=1 GENTLE_HEAT_SH_FRAC=3.0 GENTLE_HEAT_TMAX_MK=1.3 \
     ./build/chromo_main outputs/model_column/gentle_Hs_uniform.txt full ionization model_gentle - 10 cooling
-SLOW_T0=0 SLOW_T1=300 SLOW_FACTOR=4 .venv/bin/python util/animate_gentle_column.py \
+SLOW_T0=0 SLOW_T1=300 SLOW_FACTOR=4 .venv/bin/python util/legacy/animate_gentle_column.py \
     outputs/model_column/gentle_Hs_uniform.txt visualization/model_column/gentle_Hs_evolution.mp4 1e9 1 1
 ```
 
@@ -551,29 +551,29 @@ First-principles restart of gentle evaporation: isentropic (adiabatic) chromosph
 Stage 1 (single-fluid hydro only; conduction/cooling/ionization off): the isentropic atmosphere relaxes to a steady state — T linear vs height (R²≈0.9999, flattening near the ghosts), V≈0 (interior ~2 m/s, max 7.3 m/s at the bottom boundary cell), pressure hydrostatic. Three panels: T(h) IC vs relaxed + linear fit; V(h); p(h).
 ```bash
 ISO_HEAT_FLUX=0 ./build/chromo_main outputs/_archive/iso_stage1.txt full no-ionization model_isentropic - 20 no-cooling
-.venv/bin/python util/iso_plot_stage1.py
+.venv/bin/python util/legacy/iso_plot_stage1.py
 ```
 
 ### `iso_stage2_evaporation.png`
 Stage 2 (conduction + the upper-BC temperature jump on): the downward conductive flux heats the top of the column; with no radiative sink the heat front sweeps the whole thin domain (no localized evaporation upflow). Panels: T(h), V(h), ρ(h) at several times. Default jump a=10, b=5 (env `ISO_TJUMP_A/_B`); gentle variant a=2, b=1.5.
 ```bash
 ISO_HEAT_FLUX=1 ISO_TJUMP_A=10 ISO_TJUMP_B=5 ./build/chromo_main outputs/_archive/iso_stage2.txt full no-ionization model_isentropic - 20 no-cooling
-.venv/bin/python util/iso_plot_stage2.py
+.venv/bin/python util/legacy/iso_plot_stage2.py
 ```
 
 ### `iso_stage2b_evaporation.png`
 Stage 2b (conduction + temperature jump + radiative cooling `ISO_COOLING=1` + TRAC): the conduction-vs-radiation balance localizes a steady transition region (cool ~5 kK base, sharp ~20 kK top) and a condensation downflow front (≈−1.4 km/s) propagates down during TR formation; the evaporation upflow stays weak (frozen ionization + unresolved corona). Panels: T(h), V(h), ρ(h) at several times.
 ```bash
 ISO_HEAT_FLUX=1 ISO_COOLING=1 ISO_TJUMP_A=10 ISO_TJUMP_B=5 ./build/chromo_main outputs/_archive/iso_stage2b.txt full no-ionization model_isentropic - 20 no-cooling
-.venv/bin/python util/iso_plot_stage2b.py
+.venv/bin/python util/legacy/iso_plot_stage2b.py
 ```
 
 ### `iso_stage1_evolution.mp4`, `iso_stage2_evolution.mp4`, `iso_stage2b_evolution.mp4`
-Time-evolution animations of the three staged `model_isentropic` runs (single linear height axis — the domain is a thin sub-Mm slab, no split x-axis). 2×2 panels: T(h), V(h) in km/s, ρ(h) and p(h) (both log). `util/animate_isentropic.py` takes any iso output, subsamples uniformly to `ANIM_MAX_FRAMES` (default 400) frames, and renders them in parallel via `_anim_parallel.py`. Stage 1 shows the relaxation to V≈0; Stage 2 the heat front sweeping the whole column; Stage 2b the TR localizing with the condensation downflow front.
+Time-evolution animations of the three staged `model_isentropic` runs (single linear height axis — the domain is a thin sub-Mm slab, no split x-axis). 2×2 panels: T(h), V(h) in km/s, ρ(h) and p(h) (both log). `util/release/animate_isentropic.py` takes any iso output, subsamples uniformly to `ANIM_MAX_FRAMES` (default 400) frames, and renders them in parallel via `_anim_parallel.py`. Stage 1 shows the relaxation to V≈0; Stage 2 the heat front sweeping the whole column; Stage 2b the TR localizing with the condensation downflow front.
 ```bash
-.venv/bin/python util/animate_isentropic.py outputs/_archive/iso_stage1.txt
-.venv/bin/python util/animate_isentropic.py outputs/_archive/iso_stage2.txt
-.venv/bin/python util/animate_isentropic.py outputs/_archive/iso_stage2b.txt   # default input if omitted
+.venv/bin/python util/release/animate_isentropic.py outputs/_archive/iso_stage1.txt
+.venv/bin/python util/release/animate_isentropic.py outputs/_archive/iso_stage2.txt
+.venv/bin/python util/release/animate_isentropic.py outputs/_archive/iso_stage2b.txt   # default input if omitted
 ```
 
 ### `iso_stage2_ext_evolution.mp4`
@@ -582,11 +582,11 @@ Stage 2 (heat flux + jump, no cooling) on the **extended, photosphere-anchored**
 # Relax adiabatically for 1500 s (ISO_RELAX_TIME), then Stage 2; Neumann (insulating) base T.
 # Drop ISO_RELAX_TIME for immediate Stage 2, or ISO_INNER_T_NEUMANN for the Dirichlet-sink base.
 ISO_C7_IC=1 ISO_RELAX_TIME=1500 ISO_INNER_T_NEUMANN=1 ISO_HEAT_FLUX=1 ISO_TJUMP_A=10 ISO_TJUMP_B=5 ./build/chromo_main outputs/model_column/iso_stage2_ext.txt full no-ionization model_isentropic - 60 no-cooling
-.venv/bin/python util/animate_isentropic.py outputs/model_column/iso_stage2_ext.txt
+.venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_stage2_ext.txt
 ```
 
 ### `iso_t22k_evolution.mp4` — C7 chromosphere extended to the 22 kK TR base (h≈2153 km)
-Photosphere-anchored real-C7 domain extended **up to the height where C7 reaches 22 kK** — the lower-TR base at **h ≈ 2152.6 km** (interpolated between the 2152 km/20.5 kK and 2153 km/23.1 kK table rows; top of the standard C7 column), `ISO_DH=2152.6`, `ISO_NS=1000`, Δs ≈ 2.15 km. Unlike the earlier 0→1300 km version (which truncated at 6.6 kK and imposed 22 kK as a hot reservoir above a cool top), this **resolves the lower TR rise (6.6 → ~19 kK) inside the domain**, with the boundary sitting at the natural 22 kK level (`ISO_T_TOP=22000` pins the outer ghost there). Density is rebuilt hydrostatically (`ISO_C7_HSE=1`, keeping C7's T(h) and ionization fraction): **required** here — the raw off-HSE C7 density (~20–26% off hydrostatic) launches a runaway flow at the steep TR gradient and NaNs in a few hundred steps; the HSE rebuild gives a clean V=0 start and runs stably the full t ≈ 13 460 s (no NaN, no TRAC/cooling needed at these ≤22 kK temperatures). Conduction on from t=0 (`ISO_HEAT_FLUX=1`), inner-BC well-balanced (`ISO_INNER_WB=1`), log-space reconstruction (`ISO_LOG_RECON=1`), default Dirichlet base, single fluid, no cooling/ionization. **Result:** T holds ~6.6 kK through the chromosphere (h ≲ 1900 km) then rises through the resolved TR to ~19 kK at the top cell; a **~+1 km/s upflow** develops in the TR (the gentle-evaporation–like conductive response, now resolved rather than imposed), with the base near V≈0 aside from the residual ~16 m/s conduction-driven drainage. Single linear height axis (2.15 Mm < 3 Mm split threshold; the TR occupies the top ~15% of the axis). `util/animate_isentropic.py` 2×3 panels: T, V [km/s], conductive heat flux q [kW/m²], ρ (log), p (log), mass flux ρV [kg/m²/s]; 400 frames @ 20 fps.
+Photosphere-anchored real-C7 domain extended **up to the height where C7 reaches 22 kK** — the lower-TR base at **h ≈ 2152.6 km** (interpolated between the 2152 km/20.5 kK and 2153 km/23.1 kK table rows; top of the standard C7 column), `ISO_DH=2152.6`, `ISO_NS=1000`, Δs ≈ 2.15 km. Unlike the earlier 0→1300 km version (which truncated at 6.6 kK and imposed 22 kK as a hot reservoir above a cool top), this **resolves the lower TR rise (6.6 → ~19 kK) inside the domain**, with the boundary sitting at the natural 22 kK level (`ISO_T_TOP=22000` pins the outer ghost there). Density is rebuilt hydrostatically (`ISO_C7_HSE=1`, keeping C7's T(h) and ionization fraction): **required** here — the raw off-HSE C7 density (~20–26% off hydrostatic) launches a runaway flow at the steep TR gradient and NaNs in a few hundred steps; the HSE rebuild gives a clean V=0 start and runs stably the full t ≈ 13 460 s (no NaN, no TRAC/cooling needed at these ≤22 kK temperatures). Conduction on from t=0 (`ISO_HEAT_FLUX=1`), inner-BC well-balanced (`ISO_INNER_WB=1`), log-space reconstruction (`ISO_LOG_RECON=1`), default Dirichlet base, single fluid, no cooling/ionization. **Result:** T holds ~6.6 kK through the chromosphere (h ≲ 1900 km) then rises through the resolved TR to ~19 kK at the top cell; a **~+1 km/s upflow** develops in the TR (the gentle-evaporation–like conductive response, now resolved rather than imposed), with the base near V≈0 aside from the residual ~16 m/s conduction-driven drainage. Single linear height axis (2.15 Mm < 3 Mm split threshold; the TR occupies the top ~15% of the axis). `util/release/animate_isentropic.py` 2×3 panels: T, V [km/s], conductive heat flux q [kW/m²], ρ (log), p (log), mass flux ρV [kg/m²/s]; 400 frames @ 20 fps.
 ```bash
 # Domain extended to where C7 T=22 kK (h≈2152.6 km, the lower-TR base); HSE-rebuilt density (ISO_C7_HSE)
 # is REQUIRED — raw off-HSE C7 density NaNs at the steep TR.
@@ -594,23 +594,23 @@ Photosphere-anchored real-C7 domain extended **up to the height where C7 reaches
 # smaller, so reaching the full 13 500 s is ~16× the ns=1000 wall-time (impractical); 2080 s captures
 # the rise→peak→decay-onset of the upflow. ns=1000/time_mult=60 reaches the full ~13 460 s.
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_NS=4000 ./build/chromo_main outputs/model_column/iso_t22k.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2080s
-.venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k.txt
-.venv/bin/python util/plot_iso_frame.py outputs/model_column/iso_t22k.txt   # final-frame snapshot
+.venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_t22k.txt
+.venv/bin/python util/legacy/plot_iso_frame.py outputs/model_column/iso_t22k.txt   # final-frame snapshot
 
 # γ=1.05 (near-isothermal) variant at ns=4000. ISO_GAMMA must be passed to BOTH the run and the animator
 # (the .txt stores no γ; default decode is 5/3). Manually stopped at t≈2140s.
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_NS=4000 ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_t22k_gamma105.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2140s
-ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k_gamma105.txt visualization/model_column/iso_t22k_evolution_gamma105.mp4   # -> iso_t22k_evolution_gamma105.mp4
+ISO_GAMMA=1.05 .venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_t22k_gamma105.txt visualization/model_column/iso_t22k_evolution_gamma105.mp4   # -> iso_t22k_evolution_gamma105.mp4
 
 # ns=2000 companion (same config, half resolution; for the grid-convergence comparison). Auto-stopped ~t=2208s.
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_NS=2000 ./build/chromo_main outputs/model_column/iso_t22k_ns2000.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2080s (overshot to 2208s)
-.venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k_ns2000.txt visualization/model_column/iso_t22k_evolution_ns2000.mp4   # -> iso_t22k_evolution_ns2000.mp4
+.venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_t22k_ns2000.txt visualization/model_column/iso_t22k_evolution_ns2000.mp4   # -> iso_t22k_evolution_ns2000.mp4
 
 # γ=1.05 (near-isothermal) variant of the SAME ns=2000 run. ISO_GAMMA sets grid.gamma_mono for the whole
 # run (IC/BC/EOS). The plot decode MUST get the same γ (the .txt stores no γ): pass ISO_GAMMA=1.05 to the
 # animator too. Manually stopped at t≈2300s (≈ baseline's t≈2208s) for a fair γ=5/3-vs-1.05 comparison.
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_NS=2000 ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2300s
-ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105.mp4   # -> iso_t22k_evolution_ns2000_gamma105.mp4
+ISO_GAMMA=1.05 .venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105.mp4   # -> iso_t22k_evolution_ns2000_gamma105.mp4
 ```
 `iso_t22k_evolution_ns2000_gamma105.mp4` repeats the ns=2000 conduction-only run with a **reduced adiabatic index γ=1.05** (vs 5/3) — a near-isothermal polytropic closure that stands in for the radiative sink this conduction-only run leaves out (c_v=k/(γ−1) is ~13× larger, so the gas absorbs conductive heat at nearly constant T). γ is now a single knob (`ISO_GAMMA`) threaded through the whole code: every energy↔pressure / heat-capacity factor derives from `grid.gamma_mono` via `Grid::gm1()`/`inv_gm1()`/`half_gm1()` (γ=5/3 reproduces the byte-baseline, 5958/5958). **Result vs the γ=5/3 baseline** (both at t≈2200–2300 s): the upper chromosphere (~1900 km) stays **pinned at ~6.6 kK** (init 6661 → final 6616 K) instead of conduction-heating to **~9.8 kK** (6669 → 9805 K) — the implicit thermostat — while a gentle evaporation upflow still develops (**+0.95 km/s** vs +1.05 km/s, Mach≈0.07). The top-cell density fills only ×1.17 (vs ×5.99). No NaNs (672 frames). (NB: the ion–neutral collisional energy-exchange coefficient 3 k_Bα/(m_i+m_n) is a kinetic-theory factor and is intentionally NOT tied to `gamma_mono`.)
 `iso_t22k_evolution_ns2000.mp4` is the **ns=2000** companion to `iso_t22k_evolution.mp4` (ns=4000): identical production config, Δs ≈ 1.08 km (2× coarser), run to a comparable t≈2208 s. Use the pair to see the resolution dependence — the base downflow is ~2× larger at ns=2000 than ns=4000 (O(Δs) truncation), while the +1 km/s evaporation upflow is grid-converged.
@@ -635,34 +635,34 @@ The inner-BC density fix is the dominant lever (removes the boundary spike, −7
 ```bash
 # MC3 limiter only (flat-ρ inner ghost)
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_NS=2000 ISO_GAMMA=1.05 ISO_MC3=1 ISO_MC3_BETA=2 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105_mc3.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2300s
-ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_mc3.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_mc3.mp4
+ISO_GAMMA=1.05 .venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_mc3.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_mc3.mp4
 
 # fix (inner-BC density WB) + MC3 — best config
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_INNER_WB_RHO=1 ISO_MC3=1 ISO_MC3_BETA=2 ISO_NS=2000 ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105_mc3_wbrho.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2300s
-ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_mc3_wbrho.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_mc3_wbrho.mp4
+ISO_GAMMA=1.05 .venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_mc3_wbrho.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_mc3_wbrho.mp4
 ```
 
 ### `iso_t22k_evolution_ns2000_gamma105_bestwb.mp4` + `..._bestwb_condcompare.mp4` — full well-balancing stack + conduction on/off mass-flux demo
 The **best well-balanced** ns=2000 γ=1.05 config: `ISO_INNER_WB=1` (2nd-ghost pressure) + `ISO_INNER_WB_RHO=1` (ghost density) + `ISO_EQ_WB=1` (equilibrium-reference δ-form: subtract the frozen explicit-RHS residual at the IC so V=0 is an EXACT discrete fixed point for the non-isothermal C7 column) + `ISO_MC3=1` (Koren limiter) + `ISO_LOG_RECON=1`. Together these remove the O(Δs) numerical base-drainage entirely (root-caused in `docs/studies/boundaries/boundary_conditions_plan.md`).
 - **`..._bestwb.mp4`** — the newest best result (conduction ON): the standard 2×3 `animate_isentropic.py` panels, decoded with `ISO_GAMMA=1.05`. The base ρV panel now sits ~flat while the TR evaporation upflow (+0.90 km/s) proceeds.
-- **`..._bestwb_condcompare.mp4`** — the well-balancing demonstration: overlays ρV from two best-WB runs differing ONLY in conduction. `util/animate_iso_condcompare.py` (3 panels: ρV full domain, ρV zoomed h>1800 km, V zoomed; ρV/V decoded from RHO/MOM ⇒ NO γ needed). **conduction OFF stays flat at ~round-off everywhere (ρV∈[−5×10⁻⁶,+1×10⁻⁵], mean|V|base≈35 m/s, "upflow" ≈2 m/s) — the equilibrium is held to round-off with no driver — while conduction ON develops the physical TR evaporation (ρV up to +2.7×10⁻⁴, upflow +0.90 km/s).** So with the stack on, essentially ALL the mass flux is physical (conduction-driven); the former base "downflow" (−8×10³ m/s at cell 0 in the original flat-ρ minmod run) was numerical truncation and is gone.
+- **`..._bestwb_condcompare.mp4`** — the well-balancing demonstration: overlays ρV from two best-WB runs differing ONLY in conduction. `util/legacy/animate_iso_condcompare.py` (3 panels: ρV full domain, ρV zoomed h>1800 km, V zoomed; ρV/V decoded from RHO/MOM ⇒ NO γ needed). **conduction OFF stays flat at ~round-off everywhere (ρV∈[−5×10⁻⁶,+1×10⁻⁵], mean|V|base≈35 m/s, "upflow" ≈2 m/s) — the equilibrium is held to round-off with no driver — while conduction ON develops the physical TR evaporation (ρV up to +2.7×10⁻⁴, upflow +0.90 km/s).** So with the stack on, essentially ALL the mass flux is physical (conduction-driven); the former base "downflow" (−8×10³ m/s at cell 0 in the original flat-ρ minmod run) was numerical truncation and is gone.
 ```bash
 # best well-balanced, conduction ON — the "newest best result" (item 1)
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_INNER_WB_RHO=1 ISO_EQ_WB=1 ISO_MC3=1 ISO_MC3_BETA=2 ISO_NS=2000 ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2300s
-ISO_GAMMA=1.05 Q_PHYS_YMAX_WM2=0.05 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_bestwb.mp4 20
+ISO_GAMMA=1.05 Q_PHYS_YMAX_WM2=0.05 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_bestwb.mp4 20
 
 # same config, conduction OFF (ISO_HEAT_FLUX=0) — the equilibrium reference for the comparison
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=0 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_INNER_WB_RHO=1 ISO_EQ_WB=1 ISO_MC3=1 ISO_MC3_BETA=2 ISO_NS=2000 ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condoff.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2300s
 
 # mass-flux comparison movie (item 2): conduction ON vs OFF overlaid (defaults to the two files above)
-.venv/bin/python util/animate_iso_condcompare.py   # -> visualization/model_column/iso_t22k_ns2000_gamma105_bestwb_condcompare.mp4
+.venv/bin/python util/legacy/animate_iso_condcompare.py   # -> visualization/model_column/iso_t22k_ns2000_gamma105_bestwb_condcompare.mp4
 ```
 
 ### `iso_t22k_evolution_ns2000_gamma105_tracon.mp4` — TRAC "try" experiment (forced broadening)
 Same best-WB ns=2000 γ=1.05 config as `..._bestwb.mp4`, but with TRAC **force-enabled** via the new default-off knobs (`ISO_TRAC=1`, `ISO_TRAC_TCHROM=8000`, `ISO_TRAC_TC_FIXED=22000`) so the charged-fluid conductivity κ_e is broadened by ε=(T_c/T)^{5/2} throughout the 8–22 kK near-top rise. **Result: no measurable change.** Adaptive TRAC does not engage on this domain (T_c pins to the floor — the sub-22 kK profile is well-resolved at ns=2000, so the δ=½ criterion never fires, and Johnston's 0.2·T_peak cap forbids T_c from reaching the TR; the steep TR TRAC targets lives above the 22 kK top, outside the domain). Even the forced broadening changes the solution by <0.3% (global max|V| 1215→1218 m/s at the top). The standard 2×3 `animate_isentropic.py` panels are visually identical to `..._bestwb.mp4`: tiny chromospheric flow (V@250≈+6.6 m/s, peak|V|[60–700 km]≈9 m/s) and the physical +0.9 km/s A&S78 evaporation upflow at the 22 kK top. Confirms TRAC is neither triggered nor needed here (it belongs on the resolved-TR `ISO_CORONA` domain). New knobs: `ISO_TRAC` (force enable/disable, -1=auto=cooling‖corona), `ISO_TRAC_TCHROM` (T_b), `ISO_TRAC_TCMAXFRAC` (lift the 0.2·T_peak cap → `Grid::trac_Tc_max_frac`), `ISO_TRAC_TC_FIXED` (diagnostic fixed cutoff → `Grid::trac_fixed_cutoff_T`).
 ```bash
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_INNER_WB_RHO=1 ISO_EQ_WB=1 ISO_MC3=1 ISO_MC3_BETA=2 ISO_NS=2000 ISO_GAMMA=1.05 ISO_TRAC=1 ISO_TRAC_TCHROM=8000 ISO_TRAC_TC_FIXED=22000 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105_tracon.txt full no-ionization model_isentropic - 4 no-cooling
-ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_tracon.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_tracon.mp4
+ISO_GAMMA=1.05 .venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_t22k_ns2000_gamma105_tracon.txt visualization/model_column/iso_t22k_evolution_ns2000_gamma105_tracon.mp4
 ```
 
 ### `iso_t22k_250km_convergence.png` — the ~250 km mass-flux maximum is NUMERICAL (O(Δs))
@@ -670,13 +670,13 @@ Grid-convergence of the positive lower-chromosphere maximum that survives well-b
 ```bash
 # three matched bestwb cond-ON runs (delete the large .txt after plotting)
 for NS in 3000 4000; do ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_INNER_WB_RHO=1 ISO_EQ_WB=1 ISO_MC3=1 ISO_MC3_BETA=2 ISO_NS=$NS ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_bestwb_condon_ns$NS.txt full no-ionization model_isentropic - 2 no-cooling; done
-.venv/bin/python util/plot_iso_250km_convergence.py 100   # ns=2000 uses the existing bestwb_condon.txt
+.venv/bin/python util/legacy/plot_iso_250km_convergence.py 100   # ns=2000 uses the existing bestwb_condon.txt
 ```
 
 ### `iso_cond_hydro_convergence_t100.png` — matched-time split conduction-to-hydro diagnostic
 Uses the Stage-D diagnostic CSVs from the best-WB ns=2000/3000/4000 sweep. It linearly interpolates each profile to t=100 s, then plots the time-normalized total conduction pressure change, total momentum-RHS difference, and total mass flux near 250 km. Each row includes a value-at-250-km versus Δs linear fit.
 ```bash
-.venv/bin/python util/plot_cond_hydro_diagnostic.py --time 100 --out visualization/_archive/iso_cond_hydro_convergence_t100.png \
+.venv/bin/python util/legacy/plot_cond_hydro_diagnostic.py --time 100 --out visualization/_archive/iso_cond_hydro_convergence_t100.png \
   outputs/_archive/iso_cond_hydro_ns2000.csv outputs/_archive/iso_cond_hydro_ns3000.csv outputs/_archive/iso_cond_hydro_ns4000.csv
 ```
 
@@ -692,7 +692,7 @@ for pair in "2000 500 2.0" "3000 750 3.0" "4000 1000 4.0"; do set -- $pair; NS=$
     ISO_NS=$NS ISO_DIAG_COND_HYDRO=1 ISO_DIAG_COND_HYDRO_EVERY=$EVERY \
     ISO_DIAG_COND_HYDRO_OUT=outputs/_archive/iso_cond_hydro_local4_outer$NS.csv \
     ./build/chromo_main /tmp/_iso_local4_$NS.txt full no-ionization model_isentropic - $TM no-cooling; done
-.venv/bin/python util/plot_cond_hydro_diagnostic.py --time 100 \
+.venv/bin/python util/legacy/plot_cond_hydro_diagnostic.py --time 100 \
   --out visualization/_archive/iso_cond_hydro_local4_convergence_t100.png \
   outputs/_archive/iso_cond_hydro_local4_outer2000.csv outputs/_archive/iso_cond_hydro_local4_outer3000.csv outputs/_archive/iso_cond_hydro_local4_outer4000.csv
 ```
@@ -700,7 +700,7 @@ for pair in "2000 500 2.0" "3000 750 3.0" "4000 1000 4.0"; do set -- $pair; NS=$
 ### `iso_dynamic_mix_hse_t100.png` — total-mixture dynamic-HSE diagnostic
 Bottom-anchored **total-mixture** HSE reference (`p_mix`, `rho_mix`) for the best-WB ns=2000/3000/4000 sweep. The script linearly interpolates each diagnostic to t=100 s, plots `dp_cond_mix/dt`, `dpi_cond_mix/dt`, post-conduction mixture perturbation pressure, and total mass flux over 0–700 km, and prints both 250-km fits and window max/L1/peak metrics. The charged/neutral pressure fractions are partition diagnostics only, not separate HSE references.
 ```bash
-.venv/bin/python util/plot_dynamic_mix_hse_diagnostic.py --time 100 --out visualization/_archive/iso_dynamic_mix_hse_t100.png \
+.venv/bin/python util/legacy/plot_dynamic_mix_hse_diagnostic.py --time 100 --out visualization/_archive/iso_dynamic_mix_hse_t100.png \
   outputs/_archive/iso_dynamic_mix_hse_ns2000.csv outputs/_archive/iso_dynamic_mix_hse_ns3000.csv outputs/_archive/iso_dynamic_mix_hse_ns4000.csv
 ```
 
@@ -709,29 +709,29 @@ Same as `..._bestwb_condcompare.mp4` (ρV conduction ON vs OFF overlaid, 3 panel
 ```bash
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=1 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_INNER_WB_RHO=1 ISO_MC3=1 ISO_MC3_BETA=2 ISO_NS=2000 ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105_innerwb_condon.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2650s
 ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLUX=0 ISO_LOG_RECON=1 ISO_INNER_WB=1 ISO_INNER_WB_RHO=1 ISO_MC3=1 ISO_MC3_BETA=2 ISO_NS=2000 ISO_GAMMA=1.05 ./build/chromo_main outputs/model_column/iso_t22k_ns2000_gamma105_innerwb_condoff.txt full no-ionization model_isentropic - 120 no-cooling   # stop ~t=2650s
-ANIM_LABEL="inner-BC WB only (INNER_WB+RHO, MC3; NO eq-WB)" .venv/bin/python util/animate_iso_condcompare.py outputs/model_column/iso_t22k_ns2000_gamma105_innerwb_condon.txt outputs/model_column/iso_t22k_ns2000_gamma105_innerwb_condoff.txt visualization/model_column/iso_t22k_ns2000_gamma105_innerwb_condcompare.mp4
+ANIM_LABEL="inner-BC WB only (INNER_WB+RHO, MC3; NO eq-WB)" .venv/bin/python util/legacy/animate_iso_condcompare.py outputs/model_column/iso_t22k_ns2000_gamma105_innerwb_condon.txt outputs/model_column/iso_t22k_ns2000_gamma105_innerwb_condoff.txt visualization/model_column/iso_t22k_ns2000_gamma105_innerwb_condcompare.mp4
 ```
 
 ### `iso_t22k_gamma105_massflux_compare.mp4` — γ=1.05 mass-flux grid convergence (ns=1000/2000/4000)
-Overlays the **three γ=1.05 resolutions** (ns=1000 `outputs/model_column/iso_t22k_ns1000_gamma105.txt`, ns=2000, ns=4000) to show grid convergence of the mass flux ρV. Three panels, all three resolutions overlaid: **(a)** ρV over the full domain (h>1800 km shaded), **(b)** ρV zoomed to **h>1800 km** (the TR), **(c)** V zoomed to h>1800 km. Synced on a common time axis [0, min(t_max)=2141 s]; nearest-frame matching across the runs' different cadences. ρV=(ρ_i+ρ_n)·V and V are pure RHO/MOM decodes (**no γ** — so this animator needs no ISO_GAMMA, unlike animate_isentropic.py). **What it shows:** in the full-domain panel the dense-base ρV (h≲500 km) **diverges** with resolution (ns=1000 largest excursions, ns=4000 smallest) — the non-converging O(Δs) numerical/relaxation artifact; in the h>1800 km panels the **TR evaporation** (ρV≈5–7×10⁻⁷, V→~0.95 km/s) sits nearly on top of each other across all three grids — grid-converged & physical. (Quantitatively, mean over t∈[1000,2000] s: TR max ρV 7.46→7.19→6.98×10⁻⁷ for ns=1000/2000/4000 — converging; global/base max ρV 1.97→1.72→1.15×10⁻⁴ — successive differences *grow*, i.e. NOT converging.) `util/animate_iso_gamma_compare.py [out.mp4]`; 300 frames @ 20 fps.
+Overlays the **three γ=1.05 resolutions** (ns=1000 `outputs/model_column/iso_t22k_ns1000_gamma105.txt`, ns=2000, ns=4000) to show grid convergence of the mass flux ρV. Three panels, all three resolutions overlaid: **(a)** ρV over the full domain (h>1800 km shaded), **(b)** ρV zoomed to **h>1800 km** (the TR), **(c)** V zoomed to h>1800 km. Synced on a common time axis [0, min(t_max)=2141 s]; nearest-frame matching across the runs' different cadences. ρV=(ρ_i+ρ_n)·V and V are pure RHO/MOM decodes (**no γ** — so this animator needs no ISO_GAMMA, unlike animate_isentropic.py). **What it shows:** in the full-domain panel the dense-base ρV (h≲500 km) **diverges** with resolution (ns=1000 largest excursions, ns=4000 smallest) — the non-converging O(Δs) numerical/relaxation artifact; in the h>1800 km panels the **TR evaporation** (ρV≈5–7×10⁻⁷, V→~0.95 km/s) sits nearly on top of each other across all three grids — grid-converged & physical. (Quantitatively, mean over t∈[1000,2000] s: TR max ρV 7.46→7.19→6.98×10⁻⁷ for ns=1000/2000/4000 — converging; global/base max ρV 1.97→1.72→1.15×10⁻⁴ — successive differences *grow*, i.e. NOT converging.) `util/legacy/animate_iso_gamma_compare.py [out.mp4]`; 300 frames @ 20 fps.
 ```bash
-.venv/bin/python util/animate_iso_gamma_compare.py   # -> visualization/model_column/iso_t22k_gamma105_massflux_compare.mp4
+.venv/bin/python util/legacy/animate_iso_gamma_compare.py   # -> visualization/model_column/iso_t22k_gamma105_massflux_compare.mp4
 ```
 **Resolution dependence of the base downflow (ns=1000 → 4000).** At a fixed time (t≈2000 s) the base downflow falls **≈−14 → ≈−3.3 m/s** — a ~4× reduction for 4× finer grid, i.e. **≈O(Δs)**. So the base downflow is *dominantly numerical*: the under-resolved steep TR produces a spurious conduction-driven compression that propagates down as a first-order truncation artifact, larger than the conduction-OFF residual alone implied. The **upflow** (gentle-evaporation signature, V_top≈+1 km/s, ρV peak ≈+2.9×10⁻⁴) is **grid-converged** (consistent with the earlier ns=600≈1200 check) and decays in time via self-limiting conduction (the TR warms toward the 22 kK boundary ⇒ ∂T/∂s flattens ⇒ flux and overpressure fall). Net: upflow = physical & converged; base downflow = mostly numerical & shrinks ~linearly with Δs.
 **Inner-BC well-balancing** (`ISO_INNER_WB=1`, `Grid` inner reservoir): the second inner ghost was a flat *copy* of the first, so the ghost-side pressure slope was zero while the interior was hydrostatic — the inner-face MUSCL reconstruction went first-order (limiter r=0), the reconstructed face pressure jumped by ½ρgΔs, and the boundary cell felt a spurious force ⇒ a base downflow **even in HSE with conduction off**. `ISO_INNER_WB=1` continues the reservoir hydrostatically (p₀+2ρgΔs), so the ghost-side slope matches the interior, r→1, and V=0 is an exact discrete fixed point. **Clean proof on the analytic isentrope** (exact Euler steady state, conduction off): bottom-cell V 7.3→2.5 m/s, spike eliminated (base now = interior O(Δs) drift). In this conduction-on C7 run the base improves 20.9→15.0 m/s (mass-flux spike −4.1→−3.0×10⁻³); the residual is the C7-IC relaxation flow + genuine conduction drainage, not the inner BC. Default-off keeps the test baseline byte-for-byte (5958/5958).
 **Log-space reconstruction** (`ISO_LOG_RECON=1`, `Grid::log_reconstruct`): the explicit MUSCL step limits log ρ / log p (the exponentially-stratified slots) instead of ρ / p; V, U stay linear. Default-off keeps the test baseline byte-for-byte (5958/5958). Effect here is **concentrated at the TR/top** (where the gradient is under-resolved and reverses — ρ differs ~7% at h≈1300 km, Tmax 17.9→18.2 kK), and **negligible in the chromosphere/base**: ds/H ≈ 1% there, so linear reconstruction is already accurate and minmod doesn't clip a monotonic exponential (r=e^(ds/H)>1 ⇒ full slope). The ~−20 m/s base downflow is therefore **not** ρ-limiter diffusion — it's the inner-BC drainage + the known O(Δs) bottom-boundary-cell truncation artifact (≈7 m/s even in Stage-1 with conduction off).
 
 ### `iso_t22k_final_frame.png` — final-frame snapshot (zoomed mass flux)
-Static 6-panel snapshot of the **final frame** (t ≈ 13 460 s) of the `iso_t22k` run, same panels as the movie (T, V, q, ρ, p, ρV). The Temperature panel shows the flat ~6.6 kK chromosphere then the resolved TR rise to ~19 kK in the top ~350 km; the conductive-flux panel shows the downward flux concentrated at the TR. The mass-flux panel ρV is **zoomed** to its own 0.5–99.5 percentile range (the movie's shared scale is dominated by the early transient): downward **drainage** through the chromosphere (ρV down to ~−9×10⁻⁴ kg/m²/s at the dense base) easing toward ~0 in the TR, with only a thin near-top upflow. `util/plot_iso_frame.py [input.txt] [frame_index=-1] [output.png]` plots any single frame of any iso run as a static PNG (mass-flux panel always autoscaled robustly to that frame).
+Static 6-panel snapshot of the **final frame** (t ≈ 13 460 s) of the `iso_t22k` run, same panels as the movie (T, V, q, ρ, p, ρV). The Temperature panel shows the flat ~6.6 kK chromosphere then the resolved TR rise to ~19 kK in the top ~350 km; the conductive-flux panel shows the downward flux concentrated at the TR. The mass-flux panel ρV is **zoomed** to its own 0.5–99.5 percentile range (the movie's shared scale is dominated by the early transient): downward **drainage** through the chromosphere (ρV down to ~−9×10⁻⁴ kg/m²/s at the dense base) easing toward ~0 in the TR, with only a thin near-top upflow. `util/legacy/plot_iso_frame.py [input.txt] [frame_index=-1] [output.png]` plots any single frame of any iso run as a static PNG (mass-flux panel always autoscaled robustly to that frame).
 ```bash
-.venv/bin/python util/plot_iso_frame.py outputs/model_column/iso_t22k.txt
+.venv/bin/python util/legacy/plot_iso_frame.py outputs/model_column/iso_t22k.txt
 ```
 
 ### `iso_corona_evolution.mp4`
 **Resolved-corona evaporation testbed** (`ISO_CORONA=1`): the single-fluid model_isentropic domain is extended from the photosphere up into a **resolved ~1 MK corona** (h = 0 → 10 Mm) initialized from the real C7 profile with a **realistic frozen ionization profile** (n_i=n_e, n_n=n_HI via `c7_full_profile` — neutral chromosphere, ionized corona) and TRAC on. This is what was missing from the chromosphere-only `iso_stage2_ext` run: only an *ionized* corona conducts via Spitzer κ_e (a uniform frozen f leaves it neutral ⇒ κ_e ~10⁴× too small), and only a resolved coronal *volume* gives evaporated material somewhere to fill. Result: **conduction now drives a clear evaporation upflow** — V≈0 in the chromosphere rising through the TR to **+75 km/s in the corona** (T → ~1.2 MK), the Antiochos & Sturrock (1978) signature, opposite the chromosphere-only downflow. Conduction is on from t=0 (a conduction-off relaxation of the steep TR is unstable); HSE IC gives a clean V=0 start. No radiative cooling, no ionization dynamics, single fluid. **Split x-axis** (chromosphere+TR zoomed | corona compressed). The no-sink corona evaporates then drains and goes numerically unstable at the late drainage shock (~300 s); the animator stops at the last finite frame, so the movie covers the evaporation phase. **The ~300 s cap is physical, not a grid artifact:** at 2× resolution (`ISO_NS=1200`) the NaN moves only 302 → 319 s, and extra thermal diffusivity (`ISO_DIFF_MULT=12`) made it slightly *worse* (290 s) — it is the unmaintained 1 MK corona draining to vacuum at the top (a hydrodynamic, not thermal, instability). Running 3× longer would require the radiative sink (Stage 2b) so the corona reaches a quasi-steady state. This movie uses the longest stable window (the 1200-cell run, t→318.6 s). **2×3 panel layout:** T, V, **conductive heat flux** `q = -(κ_e+κ_n) dT/ds` (kW/m², >0 up; the un-broadened Spitzer flux computed in `animate_isentropic.py` from the same κ_e/κ_n as `physics.hpp`), ρ (log), p (log); the 6th cell is blank. The heat-flux panel shows the downward conductive flux spike at the TR — the driver of the A&S78 evaporation upflow — turning positive (upward) near the top where T falls toward the boundary.
 ```bash
 ISO_CORONA=1 ISO_CORONA_TOP_KM=10000 ISO_C7_HSE=1 ISO_HEAT_FLUX=1 ISO_NS=1200 ./build/chromo_main outputs/model_column/iso_corona.txt full no-ionization model_isentropic - 30 no-cooling
-.venv/bin/python util/animate_isentropic.py outputs/model_column/iso_corona.txt
+.venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_corona.txt
 ```
 
 ### `iso_corona_full_evolution.mp4` — resolved corona with the FULL physics (radiation sink + two-fluid + ionization/recomb)
@@ -745,22 +745,22 @@ The resolved-corona run repeated with the three physics pieces the clean testbed
 ISO_CORONA=1 ISO_CORONA_TOP_KM=10000 ISO_H_BASE=1003 ISO_C7_HSE=1 ISO_HEAT_FLUX=1 \
     ISO_COOLING=1 ISO_IONIZATION=1 ISO_TWO_FLUID=1 ISO_NS=600 \
     ./build/chromo_main outputs/model_column/iso_corona_full.txt full ionization model_isentropic - 10 cooling
-.venv/bin/python util/animate_isentropic.py outputs/model_column/iso_corona_full.txt
+.venv/bin/python util/release/animate_isentropic.py outputs/model_column/iso_corona_full.txt
 ```
 
 ### `iso_combined_stage1_stage2.mp4`
 Publication-styled (nature-figure) combined movie that concatenates **Stage 1 (relaxation)** then **Stage 2 (heat conduction enabled, = Stage 2b)** with a stage banner caption, persistently labelling it **single fluid**. 2×2 panel grid: **a** temperature (the TR forming), **b** velocity (downflow/condensation front, filled; minor gridlines + a +0.1 km/s tick), **c** density (TR cliff, log), **d** pressure (log). Common y-axes across both stages so the cool→hot contrast is honest; a q(T) arrow marks the conductive-flux boundary in Stage 2. Early times are sampled densely (power-law) to capture the transient/TR formation. Stage 2 = the `iso_stage2b` run (conduction + jump + radiative cooling). Single linear height axis (thin sub-Mm slab). 24 fps, ~10 s.
 ```bash
-.venv/bin/python util/animate_iso_combined.py
-# or: util/animate_iso_combined.py <stage1.txt> <stage2b.txt> <out.mp4> [fps]
+.venv/bin/python util/legacy/animate_iso_combined.py
+# or: util/legacy/animate_iso_combined.py <stage1.txt> <stage2b.txt> <out.mp4> [fps]
 ```
 
 ### `docs/posters/2026-07-11-shine/figs/iso_t22k_snapshots.pdf` (+ `.png`) — SHINE poster Result 2 figure
-Poster-styled (nature-figure) **initial-vs-final overlay** snapshot of the **γ=1.05** `iso_t22k_ns2000_gamma105` run (real Model-C7 atmosphere, photosphere → 22 kK lower-TR base, h = 0 → 2.15 Mm, HSE-rebuilt density, frozen ionization, conduction-driven from a hydrostatic V=0 start; **near-isothermal γ=1.05** as a polytropic stand-in for the omitted radiative sink). Four panels, each overlaying the **initial** (t=0, navy) and **final** (t≈2300 s, orange) frames on a single linear height axis (Mm): **(a)** Temperature — the upper chromosphere is **held near-isothermal at ~6.6 kK** (conductive heat absorbed at constant T; init/final overlap); **(b)** Velocity (hero) — a gentle **+0.95 km/s** subsonic upflow develops at the TR (Mach ≈ 0.07); **(c)** Density (log) — the TR/top fills modestly **~1.2×**; **(d)** Mass flux ρV — **whole-domain** view (the dense base carries a large **numerical O(Δs)** drainage spike that dominates the scale) **plus a zoomed inset for h > 1.8 Mm** (the TR), where the grid-converged evaporative upflow (~10⁻⁶) lives. The figure decode reads γ via `ISO_GAMMA` (default 1.05 here; `animate_isentropic.primitives` is reused, with `A.GM1` overridden). ρV and V are γ-independent; only T/p need the γ. UM navy/maize palette/fonts match `iso_corona_poster.py`. The upper-chromosphere+TR region is shaded. Written into `docs/poster-shine/figs/` (the poster's `\graphicspath`); this is the **Result 2 figure** in `poster.tex` (which was likewise updated to the γ=1.05 setup/numbers). `util/iso_t22k_poster.py [input.txt] [output.pdf]` (defaults to the γ=1.05 ns=2000 file).
+Poster-styled (nature-figure) **initial-vs-final overlay** snapshot of the **γ=1.05** `iso_t22k_ns2000_gamma105` run (real Model-C7 atmosphere, photosphere → 22 kK lower-TR base, h = 0 → 2.15 Mm, HSE-rebuilt density, frozen ionization, conduction-driven from a hydrostatic V=0 start; **near-isothermal γ=1.05** as a polytropic stand-in for the omitted radiative sink). Four panels, each overlaying the **initial** (t=0, navy) and **final** (t≈2300 s, orange) frames on a single linear height axis (Mm): **(a)** Temperature — the upper chromosphere is **held near-isothermal at ~6.6 kK** (conductive heat absorbed at constant T; init/final overlap); **(b)** Velocity (hero) — a gentle **+0.95 km/s** subsonic upflow develops at the TR (Mach ≈ 0.07); **(c)** Density (log) — the TR/top fills modestly **~1.2×**; **(d)** Mass flux ρV — **whole-domain** view (the dense base carries a large **numerical O(Δs)** drainage spike that dominates the scale) **plus a zoomed inset for h > 1.8 Mm** (the TR), where the grid-converged evaporative upflow (~10⁻⁶) lives. The figure decode reads γ via `ISO_GAMMA` (default 1.05 here; `animate_isentropic.primitives` is reused, with `A.GM1` overridden). ρV and V are γ-independent; only T/p need the γ. UM navy/maize palette/fonts match `iso_corona_poster.py`. The upper-chromosphere+TR region is shaded. Written into `docs/posters/2026-07-11-shine/figs/` (the poster's `\graphicspath`); this is the **Result 2 figure** in `poster.tex` (which was likewise updated to the γ=1.05 setup/numbers). `util/legacy/iso_t22k_poster.py [input.txt] [output.pdf]` (defaults to the γ=1.05 ns=2000 file).
 ```bash
-.venv/bin/python util/iso_t22k_poster.py   # defaults to outputs/model_column/iso_t22k_ns2000_gamma105.txt, γ=1.05
-# γ=5/3 version: ISO_GAMMA=1.6666667 .venv/bin/python util/iso_t22k_poster.py outputs/model_column/iso_t22k_ns2000.txt <out.pdf>
-# rebuild the poster: cd docs/poster-shine && latexmk -lualatex -output-directory=build poster.tex
+.venv/bin/python util/legacy/iso_t22k_poster.py   # defaults to outputs/model_column/iso_t22k_ns2000_gamma105.txt, γ=1.05
+# γ=5/3 version: ISO_GAMMA=1.6666667 .venv/bin/python util/legacy/iso_t22k_poster.py outputs/model_column/iso_t22k_ns2000.txt <out.pdf>
+# rebuild the poster: cd docs/posters/2026-07-11-shine && latexmk -lualatex -output-directory=build poster.tex
 ```
 
 ### `iso_local4_ns2000_bestwb_evolution.mp4` — validated short run, best-WB C7-HSE + static local refinement 0–700 km ×4
@@ -781,7 +781,7 @@ ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLU
     ISO_DIAG_COND_HYDRO_OUT=outputs/_archive/iso_cond_hydro_local4_ns2000_main.csv \
     ./build/chromo_main outputs/_archive/iso_local4_ns2000_main.txt full no-ionization model_isentropic - 3 no-cooling
 
-ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py \
+ISO_GAMMA=1.05 .venv/bin/python util/release/animate_isentropic.py \
     outputs/_archive/iso_local4_ns2000_main.txt visualization/_archive/iso_local4_ns2000_bestwb_evolution.mp4
 ```
 
@@ -795,7 +795,7 @@ ISO_C7_IC=1 ISO_C7_HSE=1 ISO_H_BASE=0 ISO_DH=2152.6 ISO_T_TOP=22000 ISO_HEAT_FLU
     ISO_DIAG_COND_HYDRO_OUT=outputs/_archive/iso_cond_hydro_local4_ns2000_2000s.csv \
     ./build/chromo_main outputs/_archive/iso_local4_ns2000_2000s.txt full no-ionization model_isentropic - 32 no-cooling
 
-ISO_GAMMA=1.05 .venv/bin/python util/animate_isentropic.py \
+ISO_GAMMA=1.05 .venv/bin/python util/release/animate_isentropic.py \
     outputs/_archive/iso_local4_ns2000_2000s.txt visualization/_archive/iso_local4_ns2000_2000s_evolution.mp4
 ```
 
@@ -818,7 +818,7 @@ equilibrium composition, Γ₁, and conductivity to the six-panel animation.
 GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat ./build/chromo_main \
     outputs/model_column/model_column_saha_gamma.txt full no-ionization model_column - 1.0
 Q_PHYS_YMAX_WM2=0.05 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-    .venv/bin/python util/animate_isentropic.py \
+    .venv/bin/python util/release/animate_isentropic.py \
     outputs/model_column/model_column_saha_gamma.txt \
     visualization/model_column/model_column_saha_gamma_evolution.mp4 20
 ```
@@ -840,7 +840,7 @@ GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat ISO_H_BASE=0 ISO_DH=2152.6 \
     outputs/model_column/model_column_saha_gamma_t22k_ns2000.txt \
     full no-ionization model_column - 1.0 no-cooling
 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-    .venv/bin/python util/animate_isentropic.py \
+    .venv/bin/python util/release/animate_isentropic.py \
     outputs/model_column/model_column_saha_gamma_t22k_ns2000.txt \
     visualization/model_column/model_column_saha_gamma_t22k_ns2000_evolution.mp4 20
 ```
@@ -872,7 +872,7 @@ GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
     outputs/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s.txt \
     full no-ionization model_column - 9.0 no-cooling
 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-    .venv/bin/python util/animate_isentropic.py \
+    .venv/bin/python util/release/animate_isentropic.py \
     outputs/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s.txt \
     visualization/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s_evolution.mp4 20
 ```
@@ -893,7 +893,7 @@ GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
     outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s.txt \
     full no-ionization model_column - 30.0 no-cooling
 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-    .venv/bin/python util/animate_isentropic.py \
+    .venv/bin/python util/release/animate_isentropic.py \
     outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s.txt \
     visualization/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_evolution.mp4 20
 ```
@@ -921,7 +921,7 @@ GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
     outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_onesidedbc.txt \
     full no-ionization model_column - 30.0 no-cooling
 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-    .venv/bin/python util/animate_isentropic.py \
+    .venv/bin/python util/release/animate_isentropic.py \
     outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_onesidedbc.txt \
     visualization/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_onesidedbc_evolution.mp4 20
 ```
@@ -964,7 +964,7 @@ GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
 # ... same with CHROMO_T_END=1000       -> ..._1000s_hydroTbase / ..._1000s_hydroTdecoupled
 
 # metrics table + JSON + top-region comparison figure
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/upper_bc_decouple_diag.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/upper_bc_decouple_diag.py \
     --run baseline=outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_500s_hydroTbase.txt \
     --run decoupled=outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_500s_hydroTdecoupled.txt \
     --decoupled decoupled --p-back baseline=0.0102845 --p-back decoupled=0.0102845 \
@@ -975,11 +975,11 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/upper_bc_decouple_d
 
 # evolution movies (1000 s pair)
 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-    .venv/bin/python util/animate_isentropic.py \
+    .venv/bin/python util/release/animate_isentropic.py \
     outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_hydroTbase.txt \
     visualization/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_hydroTbase_evolution.mp4 20
 ANIM_MAX_FRAMES=400 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-    .venv/bin/python util/animate_isentropic.py \
+    .venv/bin/python util/release/animate_isentropic.py \
     outputs/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_hydroTdecoupled.txt \
     visualization/model_column/model_column_saha_gamma_h1600_2153_ns1000_pchip_1000s_hydroTdecoupled_evolution.mp4 20
 ```
@@ -1002,7 +1002,7 @@ sees, because `eq_wb` subtracts the reference residual from the continuity rows*
 release; `eq_wb` has since been retired, so for new runs `f_eff` is a diagnostic
 baseline only -- see `docs/studies/numerics/reference_free_release_recap.md`);
 `R = -(F[i]-F[i-1])/ds`; `roughness(x) = mean|D2 x| / mean|x|` (same definition as
-`util/upper_bc_decouple_diag.py`).
+`util/release/upper_bc_decouple_diag.py`).
 
 `faceflux_500s_decomposition.png` / `faceflux_1000s_decomposition.png` -- four
 panels over the top 90 cells: cell `rho V`, face total vs central flux, face
@@ -1037,21 +1037,21 @@ done; done
 #   ... CHROMO_CFL=0.0625    -> outputs/model_column/faceflux_500s_cfl00625.txt
 
 # metrics + per-peak dumps + figure (repeat with _1000s_ names and --times equivalents)
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/face_flux_diag.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/face_flux_diag.py \
     --run baseline=outputs/model_column/faceflux_500s_hydroTbase.txt.faceflux \
     --run decoupled=outputs/model_column/faceflux_500s_hydroTdecoupled.txt.faceflux \
     --json outputs/model_column/faceflux_500s_metrics.json \
     --plot visualization/model_column/faceflux_500s_decomposition.png \
     > outputs/model_column/faceflux_500s_report.txt 2>&1
 
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/face_flux_diag.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/face_flux_diag.py \
     --run mc3=outputs/model_column/faceflux_500s_hydroTbase.txt.faceflux \
     --run minmod=outputs/model_column/faceflux_500s_lim_minmod.txt.faceflux \
     --run first=outputs/model_column/faceflux_500s_lim_first.txt.faceflux \
     --json outputs/model_column/faceflux_500s_limiter_metrics.json \
     --plot visualization/model_column/faceflux_500s_limiter_compare.png
 
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/face_flux_diag.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/face_flux_diag.py \
     --run cfl0.25=outputs/model_column/faceflux_500s_hydroTbase.txt.faceflux \
     --run cfl0.125=outputs/model_column/faceflux_500s_cfl0125.txt.faceflux \
     --run cfl0.0625=outputs/model_column/faceflux_500s_cfl00625.txt.faceflux \
@@ -1059,7 +1059,7 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/face_flux_diag.py \
     --plot visualization/model_column/faceflux_500s_cfl_compare.png
 ```
 
-### Resolution convergence of the top-region ripple (`util/resolution_scan_diag.py`)
+### Resolution convergence of the top-region ripple (`util/release/resolution_scan_diag.py`)
 
 Follow-up to the section above: does the cell-centred `rho V` ripple in
 2130-2150 km converge as `Delta h -> 0`, while `f_eff = f_total - f_ref` stays
@@ -1108,7 +1108,7 @@ for NS in 500 1000 2000; do
 done
 
 # metrics, report, JSON and all five figures in one call
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/resolution_scan_diag.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/release/resolution_scan_diag.py \
     --run 500=outputs/model_column/resconv_ns500_dec_1000s.txt \
     --run 1000=outputs/model_column/resconv_ns1000_dec_1000s.txt \
     --run 2000=outputs/model_column/resconv_ns2000_dec_1000s.txt \
@@ -1118,7 +1118,7 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/resolution_scan_diag.py \
     --plot-dir visualization/model_column --plot-prefix resconv
 ```
 
-### Is grid-scaled numerical conduction why the evaporation flux does not converge? (`util/numerical_conduction_diag.py`)
+### Is grid-scaled numerical conduction why the evaporation flux does not converge? (`util/release/numerical_conduction_diag.py`)
 
 Follow-up to the section above, targeting Result D only. `numerical_diffusivity =
 2000 * Delta h` enters the conduction solve as `kappa_num = numerical_diffusivity *
@@ -1159,7 +1159,7 @@ for NS in 1000 2000; do for MULT in 1 0; do
 done; done
 
 # one table + one figure
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/numerical_conduction_diag.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/release/numerical_conduction_diag.py \
     --run prod_ns1000=outputs/model_column/ncond_ns1000_prod_1000s.txt \
     --run prod_ns2000=outputs/model_column/ncond_ns2000_prod_1000s.txt \
     --run dnum0_ns1000=outputs/model_column/ncond_ns1000_dnum0_1000s.txt \
@@ -1182,7 +1182,7 @@ numerical diffusivity, and imposed boundary flux; the JSON records below-500 km
 maxima for the temperature gradient, densities, conductivity components, and flux.
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_physical_flux_compare.py --fixed outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt --gamma outputs/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s.txt --time 1000 --fixed-gamma 1.05 --out visualization/model_column/iso_t22k_fixed105_vs_gamma_physical_flux_t1000.png --metrics-out outputs/model_column/iso_t22k_fixed105_vs_gamma_physical_flux_t1000_metrics.json
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/plot_physical_flux_compare.py --fixed outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt --gamma outputs/model_column/model_column_saha_gamma_t22k_ns2000_pchip_1000s.txt --time 1000 --fixed-gamma 1.05 --out visualization/model_column/iso_t22k_fixed105_vs_gamma_physical_flux_t1000.png --metrics-out outputs/model_column/iso_t22k_fixed105_vs_gamma_physical_flux_t1000_metrics.json
 ```
 
 ### Outer (upper-TR) static local refinement: does it reduce the top-region `rho V` ripple?
@@ -1226,7 +1226,7 @@ env GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
   > $O.console.log 2>&1
 
 # one table + one figure (metrics imported from resolution_scan_diag / numerical_conduction_diag)
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/outer_refine_diag.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/release/outer_refine_diag.py \
     --run U=outputs/model_column/outref_U_500s.txt \
     --run R2=outputs/model_column/outref_R2_500s.txt \
     --run R4=outputs/model_column/outref_R4_500s.txt \
@@ -1248,7 +1248,7 @@ refinement with `ISO_NUMERICAL_DIFFUSIVITY_MULT=0.25`. Only 19 frames, because t
 run used `CHROMO_FRAME_STRIDE=20000`.
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/animate_isentropic.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl python util/release/animate_isentropic.py \
     outputs/model_column/outref_R4_mult025_500s.txt \
     visualization/model_column/outref_R4_mult025_500s_evolution.mp4 6
 ```
@@ -1281,7 +1281,7 @@ rtk env GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
   full no-ionization model_column - 60.0 no-cooling \
   > outputs/model_column/outref_R4_local_500s.console.log 2>&1
 
-rtk /opt/miniconda3/bin/python util/outer_refine_diag.py \
+rtk /opt/miniconda3/bin/python util/release/outer_refine_diag.py \
   --run U=outputs/model_column/outref_local_U_500s.txt \
   --run R4_local=outputs/model_column/outref_R4_local_500s.txt \
   --time 500 --window 2130 2150 \
@@ -1314,7 +1314,7 @@ rtk env GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat \
   full no-ionization model_column - 120.0 no-cooling \
   > outputs/model_column/outref_R4_local_N2000_500s.console.log 2>&1
 
-rtk /opt/miniconda3/bin/python util/outer_refine_diag.py \
+rtk /opt/miniconda3/bin/python util/release/outer_refine_diag.py \
   --run R4_local_N1000=outputs/model_column/outref_R4_local_500s.txt \
   --run R4_local_N2000=outputs/model_column/outref_R4_local_N2000_500s.txt \
   --time 500 --window 2130 2150 \
@@ -1359,7 +1359,7 @@ env OMP_DYNAMIC=FALSE OMP_MAX_ACTIVE_LEVELS=1 OMP_NUM_THREADS=12 \
   full no-ionization model_column - 240.0 no-cooling \
   > outputs/model_column/outref_R4_local_N4000_500s.console.log 2>&1
 
-/opt/miniconda3/bin/python util/outer_refine_diag.py \
+/opt/miniconda3/bin/python util/release/outer_refine_diag.py \
   --run R4_N1000=outputs/model_column/outref_R4_local_500s.txt \
   --run R4_N2000=outputs/model_column/outref_R4_local_N2000_500s.txt \
   --run R4_N4000=outputs/model_column/outref_R4_local_N4000_500s.txt \
@@ -1368,7 +1368,7 @@ env OMP_DYNAMIC=FALSE OMP_MAX_ACTIVE_LEVELS=1 OMP_NUM_THREADS=12 \
   --json outputs/model_column/outref_local_N1000_N2000_N4000_metrics.json
 ```
 
-`util/outer_refine_diag.py` gained an `outer_boundary_layer` helper and the
+`util/release/outer_refine_diag.py` gained an `outer_boundary_layer` helper and the
 `ds_face`, `T_wall - T_top`, `G_wall` and boundary-layer report rows; every
 pre-existing metric is unchanged and reproduces the saved N=1000/N=2000 values.
 
@@ -1406,11 +1406,11 @@ env OMP_DYNAMIC=FALSE OMP_MAX_ACTIVE_LEVELS=1 OMP_NUM_THREADS=12 \
   > outputs/model_column/outref_R4_local_N2000_1000s.console.log 2>&1
 
 ANIM_MAX_FRAMES=350 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-  /opt/miniconda3/bin/python util/animate_isentropic.py \
+  /opt/miniconda3/bin/python util/release/animate_isentropic.py \
   outputs/model_column/outref_R4_local_N2000_1000s.txt \
   visualization/model_column/outref_R4_local_N2000_1000s_evolution.mp4 20
 
-/opt/miniconda3/bin/python util/outer_refine_diag.py \
+/opt/miniconda3/bin/python util/release/outer_refine_diag.py \
   --run R4_N2000_1000s=outputs/model_column/outref_R4_local_N2000_1000s.txt \
   --time 1000 --window 2130 2150 \
   --report outputs/model_column/outref_R4_local_N2000_1000s_report.txt \
@@ -1447,7 +1447,7 @@ cells, giving 2638 cells over 1600--2153 km.
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
-  util/plot_model_column_mesh_temperature.py
+  util/release/plot_model_column_mesh_temperature.py
 ```
 
 ### `model_column_2000s_evolution.mp4` -- historical 2000 s previous-production run
@@ -1477,7 +1477,7 @@ CHROMO_T_END=2000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=4 \
   > outputs/model_column/realtime_2000s_cfl050.console.log 2>&1
 
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/realtime_2000s_cfl050.txt \
   visualization/model_column/model_column_2000s_evolution.mp4 25
 ```
@@ -1505,7 +1505,7 @@ CHROMO_T_END=4000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=8 \
   > outputs/model_column/realtime_4000s_cfl050.console.log 2>&1
 
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/realtime_4000s_cfl050.txt \
   visualization/model_column/model_column_4000s_evolution.mp4 25
 ```
@@ -1521,7 +1521,7 @@ release visualization.
 
 ```bash
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/model_column_release_N1000_4000s.txt \
   visualization/model_column/model_column_release_N1000_4000s_evolution.mp4 25
 ```
@@ -1539,7 +1539,7 @@ shaded in both. Velocity is shaded blue for upflow and red for downflow — it s
 strictly positive for the whole run, corroborating the `n(V<0)=0` acceptance result.
 
 ```bash
-.venv/bin/python util/animate_column_rvp.py \
+.venv/bin/python util/release/animate_column_rvp.py \
   outputs/model_column/acc_lnp_N500.txt \
   visualization/model_column/acc_lnp_N500_rho_v_p.mp4 20
 ```
@@ -1556,7 +1556,7 @@ of the *same* reconstruction are directly comparable.
 
 ```bash
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/acc_lnp_N500.txt \
   visualization/model_column/acc_lnp_rusanov_N500_4000s_evolution.mp4 25
 ```
@@ -1574,15 +1574,15 @@ override at the time; Roe later became the release default and then, at the Godu
 
 ```bash
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/lnp_roe_N500_4000s.txt \
   visualization/model_column/lnp_roe_N500_4000s_evolution.mp4 25
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/roe_N500_4000s.txt \
   visualization/model_column/roe_N500_4000s_evolution.mp4 25
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/roe_N1000_4000s.txt \
   visualization/model_column/roe_N1000_4000s_evolution.mp4 25
 ```
@@ -1609,7 +1609,7 @@ CHROMO_T_END=4000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=20 \
   > outputs/model_column/lnp_roe_N1000_4000s.console.log 2>&1
 
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/lnp_roe_N1000_4000s.txt \
   visualization/model_column/lnp_roe_N1000_4000s_evolution.mp4 25
 ```
@@ -1689,7 +1689,7 @@ Full record: `docs/studies/numerics/float32_precision_control_experiment.md`.
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
-  util/plot_precision_control.py \
+  util/release/plot_precision_control.py \
   outputs/model_column/lnp_godunov_N500_4000s.txt \
   outputs/model_column/lnp_godunov_N500_4000s_f64.txt \
   visualization/model_column/precision_control_N500_4000s.png
@@ -1707,7 +1707,7 @@ height.
 
 ```bash
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/lnp_godunov_N500_4000s_f64.txt \
   visualization/model_column/lnp_godunov_N500_4000s_f64_evolution.mp4 25
 ```

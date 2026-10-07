@@ -29,7 +29,7 @@
 
 ### Phase C — drive gentle evaporation by ramping `q(T)`
 - From the relaxed IC, ramp `q(T) = q₀·enhance(t)` up (×2–5, slowly, ≫ the TR sound-crossing time); keep sub-threshold so it stays gentle (v ≪ c_s). Free-outflow top BC so the upflow exits at 2.6 Mm.
-- Diagnostics: height profiles of V, T, n (before vs during); TR upflow speed + Mach; **mass flux through the top** (what would fill a real corona); Doppler blueshift via `util/synth_doppler.py`.
+- Diagnostics: height profiles of V, T, n (before vs during); TR upflow speed + Mach; **mass flux through the top** (what would fill a real corona); Doppler blueshift via `util/legacy/synth_doppler.py`.
 
 ### Code changes
 1. **Extend the C7 IC to 2.6 Mm** in `model_c7_ic` (prescribed TR ramp + reservoir above 2.153 Mm; recompute the top ghost).
@@ -69,8 +69,8 @@ All four phases are built and verified; commands catalogued in `docs/viz_catalog
 
 - **Phase 0 — heating term.** New `Grid` fields `enable_coronal_heating`, `coronal_heat_E0/_sH/_s0/_two_sided` and ramp fields `coronal_heat_t_on/_ramp/_enhance` ([chromosphere.hpp](../../../chromosphere.hpp)). `coronal_heating_rate(grid)` → W/m³ in [physics.hpp](../../../physics.hpp): `H(s)=E_H0·exp(−d(s)/s_H)·enhance(t)`, with `d(s)` the distance to the nearest footpoint (one-sided for open/half-loop, two-sided for a full loop). `apply_coronal_heating_stage()` ([src/integrators.cpp](../../../src/two_fluid/integrators.cpp)) mirrors the beam (electron pool when `enable_Te`, else heat-capacity-shared; TRAC-broadened; runs before cooling) plus a CFL guard. Default off ⇒ baseline byte-for-byte; **5950 tests pass** (added `test_coronal_heating_rate_profile`, `test_coronal_heating_partitions_by_heat_capacity`).
 - **Phase 1 — calibration.** `GENTLE=1` env overlay in [pfss_field_line.cpp](../../../scenarios/pfss_field_line.cpp) (alternative to `PFSS_FLARE`) inverts the RTV (1978) + Aschwanden & Schrijver (2002) scaling: `p₀=(T_max/1400)³/L_cm`, `E_unif=9.8e4·p₀^{7/6}·L_cm^{−5/6}`, `E_H0=E_unif·exp(½L/s_H)`, ×0.1→SI. Knobs `GENTLE_TMAX_MK` (2.0), `GENTLE_SH_FRAC` (0.4 — keep ≳ 0.3, the Serio/Martens static-existence limit), `GENTLE_E0/_S0_MM/_ENHANCE/_T_ON/_RAMP`. `data_file_parser` now reads `loop_half_length_m`. For L=25 Mm, T_max=2 MK ⇒ **E_H0≈6.0×10⁻⁴ W/m³, s_H=10 Mm**. `make_loop_dat.py` prints this auto-calibration.
-- **Phase 2 — relaxation.** New `util/check_relaxation.py` tracks `max|V|(t)`, ρ-weighted `mean|V|(t)`, `max|∂lnT/∂t|`, apex/coronal T. The closed L=25 Mm loop **converges**: ρ-weighted mean |V| → 112 m/s, `max|dlnT/dt|` → 1.7×10⁻³ /s, apex → 2.26 MK (`gentle_relax_convergence.png`). Residual ~10 km/s is a bounded TR cell, not a growing drift.
-- **Phase 3 — gentle evaporation.** Ramp ×3 over 200 s from the relaxed state (one combined run, ramp gated to `t_on=1000 s`). Result is textbook gentle/conduction-driven: coronal **EM ×2.6**, apex T **2.4→3.1 MK**, peak upflow **15.6 km/s at Mach 0.07** (subsonic ⇒ gentle, A&S 1978), TR burns down, corona fills (`gentle_evap_signature.png`, `gentle_evap_profiles.png`; diagnostics `util/gentle_evaporation_diag.py`, `util/gentle_evap_profiles.py`).
+- **Phase 2 — relaxation.** New `util/legacy/check_relaxation.py` tracks `max|V|(t)`, ρ-weighted `mean|V|(t)`, `max|∂lnT/∂t|`, apex/coronal T. The closed L=25 Mm loop **converges**: ρ-weighted mean |V| → 112 m/s, `max|dlnT/dt|` → 1.7×10⁻³ /s, apex → 2.26 MK (`gentle_relax_convergence.png`). Residual ~10 km/s is a bounded TR cell, not a growing drift.
+- **Phase 3 — gentle evaporation.** Ramp ×3 over 200 s from the relaxed state (one combined run, ramp gated to `t_on=1000 s`). Result is textbook gentle/conduction-driven: coronal **EM ×2.6**, apex T **2.4→3.1 MK**, peak upflow **15.6 km/s at Mach 0.07** (subsonic ⇒ gentle, A&S 1978), TR burns down, corona fills (`gentle_evap_signature.png`, `gentle_evap_profiles.png`; diagnostics `util/legacy/gentle_evaporation_diag.py`, `util/legacy/gentle_evap_profiles.py`).
 
 **Settled decisions:** (1) s_H = 0.4 L (not 0.2 L — static-existence margin). (2) E_H0 from the RTV/AS inversion above; T_max is the relaxed outcome (2.26 MK vs 2.0 target — acceptable). (3) Ramp ×3 over 200 s stays gentle (M≈0.07 ≪ 1).
 
@@ -84,11 +84,11 @@ All four phases are built and verified; commands catalogued in `docs/viz_catalog
 
 ## Background
 
-The project evolves a 1.5D field-aligned two-fluid (plus optional separate electron temperature) model of the solar atmosphere. The `model_c7` scenario ([scenarios/model_c7.cpp](../../../scenarios/model_c7.cpp)) initializes from the semi-empirical Model C7 atmosphere (Avrett & Loeser 2008, Table 26), covering the chromosphere up into the lower transition region (h ≈ 1003 → 2153 km, T ≈ 6225 → 23100 K). The `pfss_field_line` scenario ([scenarios/pfss_field_line.cpp](../../../scenarios/pfss_field_line.cpp)) runs the same physics on a PFSS-traced loop geometry and, via `util/make_loop_dat.py`, can extend the domain through a transition region into a resolved corona out to the loop apex.
+The project evolves a 1.5D field-aligned two-fluid (plus optional separate electron temperature) model of the solar atmosphere. The `model_c7` scenario ([scenarios/model_c7.cpp](../../../scenarios/model_c7.cpp)) initializes from the semi-empirical Model C7 atmosphere (Avrett & Loeser 2008, Table 26), covering the chromosphere up into the lower transition region (h ≈ 1003 → 2153 km, T ≈ 6225 → 23100 K). The `pfss_field_line` scenario ([scenarios/pfss_field_line.cpp](../../../scenarios/pfss_field_line.cpp)) runs the same physics on a PFSS-traced loop geometry and, via `util/legacy/make_loop_dat.py`, can extend the domain through a transition region into a resolved corona out to the loop apex.
 
 **Science goal (advisor's directive):** study **gentle, conduction-driven chromospheric evaporation** — the generic mechanism where a hot corona drives a downward conductive heat flux into the transition region and upper chromosphere, heating that material until it expands upward into the corona. This is explicitly **not** the electron-beam-induced *explosive* evaporation already implemented in `model_flare` (Fisher, Canfield & McClymont 1985; see [docs/studies/evaporation/explosive_evaporation_plan.md](explosive_evaporation_plan.md)). The relevant physics is the gentle/conductive regime of Antiochos & Sturrock (1978).
 
-**Conventions** (for whoever reads the output): arc length / height `s` increases upward, so **negative velocity = downflow**. Output columns are `[RHO_I, RHO_N, MOM_I, MOM_N, E_I, E_N]` (+`E_E` when `ENABLE_TE=1`); `v` = ion velocity, `u` = neutral velocity (see `util/plot_output.py::primitives`).
+**Conventions** (for whoever reads the output): arc length / height `s` increases upward, so **negative velocity = downflow**. Output columns are `[RHO_I, RHO_N, MOM_I, MOM_N, E_I, E_N]` (+`E_E` when `ENABLE_TE=1`); `v` = ion velocity, `u` = neutral velocity (see `util/legacy/plot_output.py::primitives`).
 
 ---
 
@@ -110,7 +110,7 @@ So "the IC doesn't matter because it reaches steady state" is only partly true: 
 
 ### 3. A resolved corona still needs an IC — and the code can't currently make a steady one
 
-The advisor's gentle-evaporation mechanism (hot corona → conductive flux → evaporation) needs the corona *inside* the domain (so evaporated plasma has somewhere to go, and so coronal heating is where it physically belongs, rather than imposed as a boundary `q(T)` crutch). `util/make_loop_dat.py` already builds such a domain: C7 chromosphere + cosine-ramp TR + **hydrostatic** corona at a prescribed apex temperature (default `--apex-T-MK 2.0`), with `util/check_loop_ic.py` checking the HSE residual.
+The advisor's gentle-evaporation mechanism (hot corona → conductive flux → evaporation) needs the corona *inside* the domain (so evaporated plasma has somewhere to go, and so coronal heating is where it physically belongs, rather than imposed as a boundary `q(T)` crutch). `util/legacy/make_loop_dat.py` already builds such a domain: C7 chromosphere + cosine-ramp TR + **hydrostatic** corona at a prescribed apex temperature (default `--apex-T-MK 2.0`), with `util/legacy/check_loop_ic.py` checking the HSE residual.
 
 **Key finding:** that construction is *mechanical* equilibrium only — the coronal temperature is **prescribed**, not the result of an energy balance. The code has **no ambient coronal volumetric heating term** — only the flare beam (`apply_beam_heating_stage` in [src/integrators.cpp](../../../src/two_fluid/integrators.cpp)) and the boundary `q(T)` (a truncated-domain trick). A corona is not a static equilibrium on its own: it exists only because of continuous heating. With the corona resolved and no heating term, it radiates and conducts its energy away and drains/cools. **Therefore a steady chromosphere→TR→corona IC is impossible without adding a heating term.** The static loop equilibrium is the Rosner–Tucker–Vaiana (1978) balance:
 
@@ -141,14 +141,14 @@ Four phases. Phase 0's structure does not depend on the calibration numbers (Pha
 Pick a target apex temperature (quiet/AR `T_max ≈ 1.5–2 MK`) and loop half-length `L` from the PFSS trace, then invert the Aschwanden & Schrijver (2002) scaling `E_H0(L, s_H, T_max)` to set the magnitude; cross-check the absolute value against Klimchuk (2006). Start with `s_H ≈ 0.2 L` (footpoint-concentrated; Aschwanden et al. 2001 measured `s_H ≈ 12 ± 5 Mm`, `s_H/L ≈ 0.2 ± 0.1`) and a uniform-heating control. Literature magnitude anchor: `E_0 ≈ 10⁻² erg cm⁻³ s⁻¹ ≈ 10⁻³ W m⁻³` (Ishigami et al. 2024).
 
 ### Phase 2 — Relax to the steady preflare IC
-- **Initial guess:** `util/make_loop_dat.py` (C7 chromosphere + cosine TR + hydrostatic corona at `apex_T = target`).
+- **Initial guess:** `util/legacy/make_loop_dat.py` (C7 chromosphere + cosine TR + hydrostatic corona at `apex_T = target`).
 - **Run:** `pfss_field_line` scenario, **beam off**, with `enable_coronal_heating` + conduction + radiative cooling on; integrate until steady.
-- **Convergence criterion:** extend `util/check_loop_ic.py` to track `max|V|(t)` and `max|∂T/∂t|`; declare the fixed point when `max|V|` is far below the expected evaporation speed (target ≲ a few hundred m/s) and the profiles are stationary. Verify global energy balance `∫ H ds ≈ ∫ n²Λ ds + conductive losses`. Save the relaxed dump as the preflare IC.
+- **Convergence criterion:** extend `util/legacy/check_loop_ic.py` to track `max|V|(t)` and `max|∂T/∂t|`; declare the fixed point when `max|V|` is far below the expected evaporation speed (target ≲ a few hundred m/s) and the profiles are stationary. Verify global energy balance `∫ H ds ≈ ∫ n²Λ ds + conductive losses`. Save the relaxed dump as the preflare IC.
 
 ### Phase 3 — Drive gentle, conduction-driven evaporation
 - From the relaxed dump, **ramp `H(s)` up** (raise `E_H0`, or add a localized coronal heating enhancement) over a few seconds. Keep it **sub-threshold** so it stays gentle: per Antiochos & Sturrock (1978), gentle evaporation is the regime where conduction dominates radiation and `v ≪ c_s`; a large/fast jump tips into the Fisher (1985) explosive regime — avoid.
 - Use an outflow-permitting / resolved-corona configuration so the modest (~tens of km/s) upflow is not throttled by the Mach-0.05 cap.
-- **Diagnostics:** arc-length profiles with the split x-axis (see `CLAUDE.md` and `util/animate_loop_flare.py`), `V`, `T`, `n`, and coronal emission-measure rise (the classic gentle-evaporation signature); optionally feed `util/synth_doppler.py` for the blueshift.
+- **Diagnostics:** arc-length profiles with the split x-axis (see `CLAUDE.md` and `util/legacy/animate_loop_flare.py`), `V`, `T`, `n`, and coronal emission-measure rise (the classic gentle-evaporation signature); optionally feed `util/legacy/synth_doppler.py` for the blueshift.
 
 ### Decisions to settle once the papers are read
 1. **`s_H`** — footpoint (`~0.2 L`) vs. uniform (Martens 2010: `T(s)` barely cares, but density/stability do).
@@ -164,9 +164,9 @@ Pick a target apex temperature (quiet/AR `T_max ≈ 1.5–2 MK`) and loop half-l
 - [scenarios/scenario.cpp](../../../scenarios/scenario.cpp) — `apply_open_bcs` (zero-gradient outer ghost; reflecting variant).
 - [src/integrators.cpp](../../../src/two_fluid/integrators.cpp) — stage sequence in `advance_Euler_state`; `apply_beam_heating_stage` (template for the new heating stage); `apply_conduction_stage` (Stage D, where `q(T)` enters); `apply_radiative_cooling_stage` (Stage R).
 - [src/rhs.cpp](../../../src/two_fluid/rhs.cpp) — explicit MUSCL/Rusanov flux + gravity/pressure source; implicit drag/conduction RHS.
-- `util/make_loop_dat.py` — builds the chromosphere→TR→corona loop `.dat` (hydrostatic, prescribed-T). **Add an option to set the relaxation target / heating-consistent apex_T here.**
-- `util/check_loop_ic.py` — HSE-residual check. **Extend with `max|V|(t)` and `dT/dt` convergence monitors.**
-- `util/animate_loop_flare.py` — split-axis loop visualization (auto-detects half/full topology).
+- `util/legacy/make_loop_dat.py` — builds the chromosphere→TR→corona loop `.dat` (hydrostatic, prescribed-T). **Add an option to set the relaxation target / heating-consistent apex_T here.**
+- `util/legacy/check_loop_ic.py` — HSE-residual check. **Extend with `max|V|(t)` and `dT/dt` convergence monitors.**
+- `util/legacy/animate_loop_flare.py` — split-axis loop visualization (auto-detects half/full topology).
 
 ---
 

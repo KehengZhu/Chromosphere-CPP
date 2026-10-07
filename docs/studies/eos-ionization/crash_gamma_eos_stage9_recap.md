@@ -212,7 +212,7 @@ cmake -S . -B build
 cmake --build build -j4
 ctest --test-dir build --output-on-failure
 bash util/eos/build_and_run.sh
-python -m py_compile util/animate_gentle_column.py util/plot_eos_gamma.py
+python -m py_compile util/legacy/animate_gentle_column.py util/release/plot_eos_gamma.py
 bash -n util/eos/build_and_run.sh
 git diff --check
 ```

@@ -94,9 +94,9 @@ scripts/run_chromo_realtime.sh \
     outputs/model_column/lnp_godunov_N500_4000s_f64.txt \
     full no-ionization model_column - 20.0 no-cooling
 
-.venv/bin/python util/plot_precision_control.py \
+.venv/bin/python util/release/plot_precision_control.py \
     outputs/model_column/lnp_godunov_N500_4000s.txt \
     outputs/model_column/lnp_godunov_N500_4000s_f64.txt
 ```
 
-The six-panel comparison figure and the animation of the double-precision run are catalogued (as WITHDRAWN) in `docs/viz_catalog/_historical.md`. The float32 mechanism panel alone is also produced by `util/plot_base_mass_flux_diagnosis.py`.
+The six-panel comparison figure and the animation of the double-precision run are catalogued (as WITHDRAWN) in `docs/viz_catalog/_historical.md`. The float32 mechanism panel alone is also produced by `util/release/plot_base_mass_flux_diagnosis.py`.

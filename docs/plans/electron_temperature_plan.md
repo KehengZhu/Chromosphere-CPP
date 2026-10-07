@@ -60,7 +60,7 @@ The existing Stage C (`apply_temperature_stage`, [integrators.cpp:163](../src/in
 | conduction stage: route κ_e onto the new T_e row | small | `ghost_extended_T` per-species solve ([integrators.cpp:229](../src/integrators.cpp#L229)) |
 | Stage C: 2-temperature → 3-temperature relaxation (add ν_ei, ν_en) | small | the point-implicit T_i↔T_n solver |
 | re-apportion beam / radiation / ionization source terms to ε_e | medium (the physics) | — |
-| output 6→7 columns → update `util/animate_loop_flare.py`, `util/diag_two_fluid.py`, `util/compare_two_fluid.py` parsers | mechanical | — |
+| output 6→7 columns → update `util/legacy/animate_loop_flare.py`, `util/legacy/diag_two_fluid.py`, `util/legacy/compare_two_fluid.py` parsers | mechanical | — |
 
 Estimated ~1 focused day. Highest-risk piece is the source re-apportionment (3), not the plumbing.
 
@@ -77,7 +77,7 @@ Heat-capacity bookkeeping for exact reproduction: split `C_e = (3/2) n_e k_B`, `
 ## 5. Verification plan
 
 1. Build with `ENABLE_TE=0`, confirm it reproduces a current baseline run to round-off (closed `c05`, open `o00`).
-2. Turn `ENABLE_TE=1` and run the same lines; reuse `util/compare_two_fluid.py` (generalized for the T_e column) to map where/when T_e departs from T_i — expect the largest split at the impulsive onset (beam→electrons) and the low-density loop-top, small in the dense chromosphere.
+2. Turn `ENABLE_TE=1` and run the same lines; reuse `util/legacy/compare_two_fluid.py` (generalized for the T_e column) to map where/when T_e departs from T_i — expect the largest split at the impulsive onset (beam→electrons) and the low-density loop-top, small in the dense chromosphere.
 3. Energy-budget check: the beam energy must still close (now routed through electrons → equilibration → ions/neutrals), and total energy conserved across the 3-temperature relaxation stage.
 
 ## 6. Where it pays off / why build it

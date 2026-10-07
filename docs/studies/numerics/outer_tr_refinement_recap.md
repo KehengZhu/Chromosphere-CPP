@@ -36,7 +36,7 @@ The grade is now anchored the other way round: widths are `fine_ds·r^m` with `r
 - `scenarios/model_column.cpp` — **comment only**. It already routed through `refine_params_from_env` + `build_static_mesh_faces` + `Grid::resize`, so selecting the profile needed no code.
 - `tests/chromo_tests.cpp` — 3 new tests, 1 existing assertion updated (below).
 - `docs/studies/numerics/static_local_refinement.md` — `outer` profile, the transition-as-minimum semantics, and an explicit note that refinement does *not* reduce `numerical_diffusivity` inside the fine band.
-- `util/outer_refine_diag.py`, `docs/viz_catalog/_historical.md`, this recap.
+- `util/release/outer_refine_diag.py`, `docs/viz_catalog/_historical.md`, this recap.
 
 **No hydro, Rusanov, EOS, well-balancing, conduction stencil, boundary-condition or time-integration code was touched.**
 

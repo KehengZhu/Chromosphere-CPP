@@ -22,15 +22,15 @@ other solver-only terms.
 - `chromo_main.cpp` extends gamma sidecars from 9 to 10 columns. The stable
   physical-field prefix is followed by both `kappa_physical` and
   `kappa_solver`; the header names both explicitly.
-- `util/conductive_flux.py` is the single plotting implementation of the
+- `util/lib/conductive_flux.py` is the single plotting implementation of the
   conductivity components and cell-centred physical heat flux.
-- `util/animate_isentropic.py` and `util/animate_gentle_column.py` route both
+- `util/release/animate_isentropic.py` and `util/legacy/animate_gentle_column.py` route both
   closure modes through that helper and explicitly label the panel as physical
   flux with TRAC and numerical diffusion excluded. Legacy nine-column gamma
   sidecars remain plottable because physical conductivity is recomputed from
   `T`, `n_e`, and `n_HI`, rather than interpreting their old last column as
   physical.
-- `util/plot_physical_flux_compare.py` produces a matched-time, matched-grid
+- `util/release/plot_physical_flux_compare.py` produces a matched-time, matched-grid
   comparison and machine-readable metrics.
 - `cmake/check_gamma_output.cmake`, `tests/chromo_tests.cpp`, and
   `tests/test_conductive_flux.py` cover the new schema and solver-term

@@ -88,7 +88,7 @@ Only RHS moved; the conduction difference is run-to-run variance in a stage the 
 
 **Bit-level run parity.** Baseline (`93c32d8`, built in a clean worktree) and optimized binaries, identical configuration, both individually bit-reproducible run-to-run: outputs are **bit-identical through t = 20 s (3,556 steps)** and diverge only afterwards. At 100 s the divergence is 1.5e-5 of the column maximum in density and energy and 5e-3 in momentum — the smallest, most sensitive field, where N500-to-N1000 discretization error is ~3 %.
 
-**Production diagnostics**, N500 Roe lnP (`util/pressure_reconstruction_diag.py`), validated baseline vs optimized:
+**Production diagnostics**, N500 Roe lnP (`util/release/pressure_reconstruction_diag.py`), validated baseline vs optimized:
 
 | | 100 s base / opt | 1000 s base / opt | 4000 s base / opt |
 |---|---|---|---|
@@ -119,7 +119,7 @@ CHROMO_OUTER_COND_STRIDE=400 \
 scripts/run_chromo_realtime.sh outputs/model_column/lnp_roe_N500_4000s_opt.txt \
     full no-ionization model_column - 20.0 no-cooling
 
-.venv/bin/python util/pressure_reconstruction_diag.py --targets 100,500,1000,4000 \
+.venv/bin/python util/release/pressure_reconstruction_diag.py --targets 100,500,1000,4000 \
   --run "lnP-base=outputs/model_column/lnp_roe_N500_4000s.txt" \
   --run "lnP-opt=outputs/model_column/lnp_roe_N500_4000s_opt.txt"
 ```

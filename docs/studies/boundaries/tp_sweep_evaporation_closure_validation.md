@@ -50,9 +50,9 @@ A table at fixed $T_c = 6.7$ kK inherits the drift of point 3 from the release. 
 Evidence:
 - runs: `outputs/model_column/tp_sweep/` on the mac-mini (6.4 GB; `driver.log`, per-run console logs);
 - compact products, also copied locally: `tp_sweep_compare.json`, `tp_sweep_series.npz`, `compare.log`;
-- scripts: `util/run_tp_sweep.sh`, `util/tp_sweep_compare.py`, `util/plot_tp_sweep_vs_analytic.py`;
+- scripts: `util/run/run_tp_sweep.sh`, `util/release/tp_sweep_compare.py`, `util/release/plot_tp_sweep_vs_analytic.py`;
 - figures: `visualization/model_column/tp_sweep_sim_vs_analytic.png`, `tp_sweep_time_series.png`, `tp_sweep_flux_compare.png` (`docs/viz_catalog/model_column.md`);
-- corner follow-up: runs in `outputs/model_column/tp_sweep_corner/` on the mac-mini (`launch.sh`); `corner_test.json` copied locally; `util/tp_corner_test_compare.py`; `visualization/model_column/tp_corner_test.png`.
+- corner follow-up: runs in `outputs/model_column/tp_sweep_corner/` on the mac-mini (`launch.sh`); `corner_test.json` copied locally; `util/release/tp_corner_test_compare.py`; `visualization/model_column/tp_corner_test.png`.
 
 ## Setup
 
@@ -204,15 +204,15 @@ That share is the ionization energy of a chromosphere-top gas that is only 29 % 
 On the mac-mini (the runs are 6.4 GB and stay there):
 
 ```bash
-SWEEP_JOBS=4 SWEEP_THREADS=2 util/run_tp_sweep.sh outputs/model_column/tp_sweep 5000 10
-.venv/bin/python util/tp_sweep_compare.py --dir outputs/model_column/tp_sweep \
+SWEEP_JOBS=4 SWEEP_THREADS=2 util/run/run_tp_sweep.sh outputs/model_column/tp_sweep 5000 10
+.venv/bin/python util/release/tp_sweep_compare.py --dir outputs/model_column/tp_sweep \
     --out-dir visualization/model_column --workers 8 > outputs/model_column/tp_sweep/compare.log
 ```
 
 Anywhere `tp_sweep_compare.json` and `tp_sweep_series.npz` are (about 1.6 MB together):
 
 ```bash
-.venv/bin/python util/plot_tp_sweep_vs_analytic.py --dir outputs/model_column/tp_sweep
+.venv/bin/python util/release/plot_tp_sweep_vs_analytic.py --dir outputs/model_column/tp_sweep
 ```
 
 The sweep takes about 4 h 10 min on an M2 Pro, the comparison about 12 s with 8 workers, and the plots about 3 s.
@@ -221,7 +221,7 @@ Corner follow-up, on the mac-mini. It uses 4 + 2 + 2 threads and takes 30 min; t
 
 ```bash
 outputs/model_column/tp_sweep_corner/launch.sh
-.venv/bin/python util/tp_corner_test_compare.py
+.venv/bin/python util/release/tp_corner_test_compare.py
 ```
 
-`launch.sh` runs `util/run_tp_sweep.sh` three times. Each call has `SWEEP_CASES` set to the 70 kK, 0.08 Pa case at N=1000 or N=500, plus `CHROMO_CFL=0.25` or `ISO_REFINE_S_LO_KM=350` where the variant needs it, with `T_END=1500` and `FRAME_DT=10`.
+`launch.sh` runs `util/run/run_tp_sweep.sh` three times. Each call has `SWEEP_CASES` set to the 70 kK, 0.08 Pa case at N=1000 or N=500, plus `CHROMO_CFL=0.25` or `ISO_REFINE_S_LO_KM=350` where the variant needs it, with `T_END=1500` and `FRAME_DT=10`.

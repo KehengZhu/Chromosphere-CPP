@@ -22,7 +22,7 @@ cp visualization/events/event_20240801_c05_101Mm_Te.mp4 visualization/events/eve
 ```
 
 The linked movies are regenerated *near-lossless* (the stock encode is ~400 kbps and visibly soft);
-`animate_loop_flare.py` honours `ANIM_CRF` / `ANIM_PIX_FMT` / `ANIM_PRESET` (encode, see `util/_anim_parallel.py`),
+`animate_loop_flare.py` honours `ANIM_CRF` / `ANIM_PIX_FMT` / `ANIM_PRESET` (encode, see `util/lib/_anim_parallel.py`),
 `ANIM_FPS` / `ANIM_MAX_FRAMES` (playback rate / frame budget), `ANIM_UNIFORM_TIME=1`, and the per-phase
 speed-ups `ANIM_SPEED_PRE` / `ANIM_SPEED_POST`.
 
@@ -41,11 +41,11 @@ frame count doesn't grow the PDF); both clips run 16.7 s.
 ### `poster_c05_closed.jpg`, `poster_o00_open.jpg`  (+ regenerated `event_20240801_{c05_101Mm,o00_1040Mm}_Te.mp4`)
 ```bash
 # (0) 2x-length simulations (overshoot, capped at render time)
-.venv/bin/python util/run_ensemble.py --manifest outputs/events/event_te_2x_jobs.json --workers 2
+.venv/bin/python util/run/run_ensemble.py --manifest outputs/events/event_te_2x_jobs.json --workers 2
 # (1) render near-lossless, 0–100 s (t_cap), 60 fps, uniform-time, post-beam 2x (env inline — zsh won't word-split a var)
 ENV="FLARE_DELTA=4 FLARE_E_CUT=20 FLARE_T_ON=2 FLARE_DUR=10 ANIM_UNIFORM_TIME=1 ANIM_SPEED_PRE=1 ANIM_SPEED_POST=2 ANIM_FPS=60 ANIM_MAX_FRAMES=1000 ANIM_CRF=12 ANIM_PIX_FMT=yuv444p ANIM_PRESET=slow"
-env ${=ENV} .venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/events/event_te/c05_101Mm_te.txt  visualization/events/event_20240801_c05_101Mm_Te.mp4 100
-env ${=ENV} .venv/bin/python util/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/events/event_te/o00_1040Mm_te.txt visualization/events/event_20240801_o00_1040Mm_Te.mp4 100
+env ${=ENV} .venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/c05_101Mm.dat  outputs/events/event_te/c05_101Mm_te.txt  visualization/events/event_20240801_c05_101Mm_Te.mp4 100
+env ${=ENV} .venv/bin/python util/legacy/animate_loop_flare.py scenarios/data/event_ensemble/o00_1040Mm.dat outputs/events/event_te/o00_1040Mm_te.txt visualization/events/event_20240801_o00_1040Mm_Te.mp4 100
 # (2) extract the first-frame poster shown on each slide
 ffmpeg -y -i visualization/events/event_20240801_c05_101Mm_Te.mp4  -frames:v 1 -q:v 2 visualization/events/poster_c05_closed.jpg
 ffmpeg -y -i visualization/events/event_20240801_o00_1040Mm_Te.mp4 -frames:v 1 -q:v 2 visualization/events/poster_o00_open.jpg
@@ -66,7 +66,7 @@ cp visualization/reference/c7_ionization_profile_compare.png \
    docs/presentations/2026-08-17-group-meeting/figures/
 ```
 
-Note that `util/plot_c7_ionization_profile.py --mode compare` writes to
+Note that `util/release/plot_c7_ionization_profile.py --mode compare` writes to
 `visualization/eos_gamma/`, and the `visualization/reference/` copy was placed by hand;
 regenerating it also needs `outputs/eos_gamma/gamma_hydrogen_excitation.dat`, which is
 not in the tree (`bash util/eos/build_and_run.sh excitation`).

@@ -217,7 +217,7 @@ Bit-for-bit identical, including `V_last` (-15.85370 / +81.90920 / -31.60110). M
 ## 10. Files
 
 New:
-- [util/face_flux_diag.py](../../../util/face_flux_diag.py) — the analysis script (metric definitions in its docstring)
+- [util/release/face_flux_diag.py](../../../util/face_flux_diag.py) — the analysis script (metric definitions in its docstring)
 - `docs/studies/numerics/top_ripple_face_flux_diagnosis.md` — this document
 - `outputs/model_column/faceflux_{500,1000}s_hydroT{base,decoupled}.txt{,.faceflux,.gamma_diag}` + `.console.log`
 - `outputs/model_column/faceflux_500s_{lim_minmod,lim_first,cfl0125,cfl00625}.txt{,.faceflux,.gamma_diag}` + `.console.log`

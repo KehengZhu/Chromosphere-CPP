@@ -174,7 +174,7 @@ physical ionization.
   diagnostic sidecar output. The raw stream also declares `EOS_MODE=gamma_table`.
 - `CMakeLists.txt`: process-level rejection tests for incompatible gamma requests.
 - `tests/chromo_tests.cpp`: Stage 7 source/conduction and Stage 8 HSE/ghost/Euler tests.
-- `util/animate_gentle_column.py`: automatic gamma-sidecar ingestion and
+- `util/legacy/animate_gentle_column.py`: automatic gamma-sidecar ingestion and
   physical-composition, TRAC-aware solver-effective conductivity diagnostics.
 - `README.md`: activation contract and current regression coverage.
 

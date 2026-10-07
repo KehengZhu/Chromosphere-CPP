@@ -22,7 +22,7 @@ The grid is `T=3.2×10³–10⁸ K` (501 log points) by
 bash util/eos/build_and_run.sh
 
 # Generate all three figures below (project root as working directory).
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_eos_gamma.py
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/plot_eos_gamma.py
 ```
 
 ### `eos_gamma/gamma_hydrogen.png` — γ_E, Γ₁, and ionization vs T
@@ -47,7 +47,7 @@ is expanded and the extended corona compressed with a split height scale.
 ### `eos_gamma/c7_gamma_profile_classical_saha.png` — signed-off classical EOS along Model C7
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_c7_gamma_profile.py --classical-saha
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/plot_c7_gamma_profile.py --classical-saha
 ```
 
 Preserves the earlier `c7_gamma_profile.png` and generates a separately named
@@ -59,7 +59,7 @@ Model C7 temperature and density context used by the original figure.
 ### `eos_gamma/c7_ionization_profile.png` — Model C7 ionization degree
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_c7_ionization_profile.py
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/plot_c7_ionization_profile.py
 ```
 
 Model C7 hydrogen ionization degree `x=n_e/(n_HI+n_e)` vs height, alongside
@@ -68,7 +68,7 @@ the same temperature and mass-density context as `c7_gamma_profile.png`.
 ### `eos_gamma/c7_ionization_profile_classical_saha.png` — classical-Saha ionization degree
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_c7_ionization_profile.py
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/plot_c7_ionization_profile.py
 ```
 
 Classical pure-H Saha ionization degree evaluated at the local Model C7
@@ -77,7 +77,7 @@ temperature and hydrogen-nuclei density, plotted separately from the C7 curve.
 ### `eos_gamma/c7_ionization_profile_compare.png` — C7 vs classical-Saha vs excitation-enabled CRASH
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_c7_ionization_profile.py --mode compare
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/plot_c7_ionization_profile.py --mode compare
 ```
 
 Direct overlay of the Model C7 ionization degree, analytic equilibrium
@@ -97,7 +97,7 @@ The default plotting command writes all three ionization-profile figures.
 ### `eos_gamma/crash_excitation_full_table_c7.png` — full CRASH excitation comparison with C7 track
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_crash_excitation_full_table.py
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/plot_crash_excitation_full_table.py
 ```
 
 Three-panel view of the complete CRASH `(T,n_H)` grid: equilibrium hydrogen

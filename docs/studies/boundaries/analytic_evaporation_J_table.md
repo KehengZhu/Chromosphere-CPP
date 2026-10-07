@@ -15,7 +15,7 @@
 5. **At high $p$ and low $T_\mathrm{top}$, $J$ depends on how the TR base is defined.** There the Saha ionization zone moves into the TR: $x(7.5\ \mathrm{kK}) = 0.32$ at 1 Pa and 0.11 at 10 Pa. Raising the marker $T_1$ from 7.5 to 10 kK then removes 42–92 % of $J$ at 15–22 kK and 1–10 Pa. The steep rise of $J$ with $p$ at 15 kK in panel (b) is this effect. In that region, $J$ and $L_\mathrm{TR}$ are meaningful only as a matched pair defined at the same isotherm.
 
 Evidence:
-- script: `util/analytic_evaporation_table.py`
+- script: `util/release/analytic_evaporation_table.py`
 - table: `outputs/model_column/analytic_J_table/J_table.{npz,csv}`, `J_table_summary.json`
 - figure: `visualization/model_column/analytic_J_table.png` (`docs/viz_catalog/model_column.md`)
 
@@ -26,8 +26,8 @@ Post-processing only; no new run.
 $$J(T_\mathrm{top}, p_\mathrm{top}, T_c)=\int_{T_1}^{T_\mathrm{top}}\frac{\kappa(T,p_\mathrm{top})}{h(T,p_\mathrm{top})-h_c}\,dT,\qquad h_c=h_\mathrm{Saha}(T_c,p_\mathrm{top}),\quad T_1=7.5\ \mathrm{kK}.$$
 
 The ingredients are exactly those of the relaxation study:
-- the pure-hydrogen Saha EOS and `j_theory` of `util/twall_relaxation_diag.py`;
-- the Spitzer-plus-neutral $\kappa$ of `util/conductive_flux.py`.
+- the pure-hydrogen Saha EOS and `j_theory` of `util/release/twall_relaxation_diag.py`;
+- the Spitzer-plus-neutral $\kappa$ of `util/lib/conductive_flux.py`.
 
 The integral assumes the same things as there: steady, subsonic, isobaric, thin, no radiation, no heating, $q = 0$ at the chromosphere top. Evaluating $h_c$ at $p_\mathrm{top}$ rather than at the chromosphere-top pressure is part of the isobaric-TR assumption.
 
@@ -75,7 +75,7 @@ This is not an artefact of $T_c$ approaching the 7.5 kK marker. With $T_1 = 10$ 
 ## Reproduce
 
 ```bash
-.venv/bin/python util/analytic_evaporation_table.py
+.venv/bin/python util/release/analytic_evaporation_table.py
 ```
 
-This needs the sweep runs and `outputs/model_column/twall_sweep/twall_relaxation_metrics.json` from `util/twall_relaxation_diag.py`. Runtime is about 6 s.
+This needs the sweep runs and `outputs/model_column/twall_sweep/twall_relaxation_metrics.json` from `util/release/twall_relaxation_diag.py`. Runtime is about 6 s.

@@ -24,7 +24,7 @@ six-significant-digit header rounding tolerance).
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
-  util/plot_model_column_mesh_temperature.py \
+  util/release/plot_model_column_mesh_temperature.py \
   --run outputs/model_column/release_roe_lnp_N500_100s.txt \
   --ns-coarse 500 \
   --output visualization/model_column/model_column_N500_mesh_temperature_initial
@@ -74,12 +74,12 @@ Each run also gets a static last-frame `*_mass_flux_final.png` (same layout).
 
 ```bash
 # 4000 s Roe + (ln rho, V, ln p) N500 production run (358 captured records)
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_face_mass_flux.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_face_mass_flux.py \
   outputs/model_column/lnp_roe_N500_4000s.txt \
   visualization/model_column/lnp_roe_N500_4000s_mass_flux.mp4 --fps 20
 
 # current release configuration, 100 s smoke capture (11 records)
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_face_mass_flux.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_face_mass_flux.py \
   outputs/model_column/release_roe_lnp_N500_100s.txt \
   visualization/model_column/release_roe_lnp_N500_100s_mass_flux.mp4 --fps 4
 ```
@@ -108,7 +108,7 @@ resolution-consistent). Generated from existing runs only; no new production run
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-python util/plot_column_sloshing.py \
+python util/release/plot_column_sloshing.py \
   --run "Roe+lnP N1000=outputs/model_column/lnp_roe_N1000_4000s.txt.gamma_diag" \
   --run "Roe+lnP N500=outputs/model_column/lnp_roe_N500_4000s_opt.txt.gamma_diag" \
   --run "Rusanov+lnP N1000=outputs/model_column/acc_lnp_N1000.txt.gamma_diag" \
@@ -135,7 +135,7 @@ scripts/run_chromo_realtime.sh outputs/model_column/eqctl_lnp_roe_N1000_1000s.tx
 
 ### Mass-flux panel default changed
 
-`util/animate_isentropic.py` now plots the **conservative numerical face mass flux
+`util/release/animate_isentropic.py` now plots the **conservative numerical face mass flux
 `f_total`** from the `<run>.faceflux` sidecar in its mass-flux panel, at the face
 heights, whenever that sidecar exists. The cell-centred product `rho*V` is only a
 reconstruction of the flux: it carries the full cell-centred ripple and is
@@ -170,7 +170,7 @@ CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_STRIDE=3300 \
   > outputs/model_column/lnp_godunov_N500_4000s.console.log 2>&1
 
 ANIM_MAX_FRAMES=500 MPLCONFIGDIR=/tmp/chromosphere2026-mpl \
-.venv/bin/python util/animate_isentropic.py \
+.venv/bin/python util/release/animate_isentropic.py \
   outputs/model_column/lnp_godunov_N500_4000s.txt \
   visualization/model_column/lnp_godunov_N500_4000s_evolution.mp4 25
 ```
@@ -210,7 +210,7 @@ increment measured in float32 ULPs of `rho`. Findings, in order of size:
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
-  util/plot_base_mass_flux_diagnosis.py \
+  util/release/plot_base_mass_flux_diagnosis.py \
   "release Godunov (current code)=outputs/model_column/lnp_godunov_N500_4000s.txt" \
   "Roe, pre predictor-source fix=outputs/model_column/lnp_roe_N500_4000s.txt" \
   visualization/model_column/godunov_N500_4000s_base_mass_flux_diagnosis.png
@@ -287,7 +287,7 @@ Full record: `docs/studies/numerics/state_precision_release_cutover.md`.
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
-  util/plot_precision_control.py \
+  util/release/plot_precision_control.py \
   outputs/model_column/diag_float32_N500_4000s.txt \
   outputs/model_column/release_double_N500_4000s.txt \
   visualization/model_column/precision_cutover_N500_4000s.png
@@ -297,14 +297,14 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
 
 ## Upper-boundary conduction-wall temperature sensitivity (`docs/studies/boundaries/upper_wall_temperature_sensitivity_recap.md`)
 
-One-parameter sweep of the imposed conduction-wall temperature `ISO_T_TOP` at the 2153 km outer face, with the C7 IC and every other piece of release physics/numerics fixed and `ISO_HYDRO_T_DECOUPLE=1` (so only `Grid::outer_conduction_temperature` moves). Double-precision release build (`build_omp`), N=500/R4, 4000 s. All four figures come from one invocation of `util/twall_sweep_diag.py`.
+One-parameter sweep of the imposed conduction-wall temperature `ISO_T_TOP` at the 2153 km outer face, with the C7 IC and every other piece of release physics/numerics fixed and `ISO_HYDRO_T_DECOUPLE=1` (so only `Grid::outer_conduction_temperature` moves). Double-precision release build (`build_omp`), N=500/R4, 4000 s. All four figures come from one invocation of `util/release/twall_sweep_diag.py`.
 
 Prerequisite runs (about 3 h wall on 16 cores; ~260 MB of dumps under `outputs/model_column/twall_sweep/`):
 
 ```bash
-util/run_twall_sweep.sh          # broad log sweep 10,15,18,22,30,45,70,100 kK + 70 kK CFL control
+util/run/run_twall_sweep.sh          # broad log sweep 10,15,18,22,30,45,70,100 kK + 70 kK CFL control
 SWEEP_CASES="6000:0.50 8000:0.50 11000:0.50 12000:0.50 13000:0.50 14000:0.50" \
-    util/run_twall_sweep.sh      # refinement across the flow reversal
+    util/run/run_twall_sweep.sh      # refinement across the flow reversal
 ```
 
 The overlay movie's mass-flux panel additionally needs the conservative face flux, which is a separate opt-in because it costs ~230 kB per capture (~1.6 GB for the sweep at the default ~10 s cadence). `SWEEP_FACE_FLUX=1` adds `CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_STRIDE=1780` to every case; the 13 accepted walls only (6 kK aborts, and the 70 kK CFL 0.25 control is not animated). About 1 h wall — the 100 kK CFL 0.25 case runs ~3.1 M steps and is the long pole by a wide margin. Only the `.faceflux` sidecars are kept; the rest of the re-run is discarded after the byte-identity check below.
@@ -312,7 +312,7 @@ The overlay movie's mass-flux panel additionally needs the conservative face flu
 ```bash
 SWEEP_FACE_FLUX=1 SWEEP_CASES="8000:0.50 10000:0.50 11000:0.50 12000:0.50 \
 13000:0.50 14000:0.50 15000:0.50 18000:0.50 22000:0.50 30000:0.50 45000:0.50 \
-70000:0.50 100000:0.25" util/run_twall_sweep.sh outputs/model_column/twall_sweep_ff
+70000:0.50 100000:0.25" util/run/run_twall_sweep.sh outputs/model_column/twall_sweep_ff
 # the diagnostic must be inert -- verify, then keep only the new sidecars
 for f in outputs/model_column/twall_sweep_ff/*.txt.gamma_diag; do
     b=$(basename "$f")
@@ -329,7 +329,7 @@ Per-run colours are **rank-spaced** on `turbo` with a luminance cap, not log-val
 `V(t)` at 1800/2000/2100 km and the top cell (symlog, so the sub-m/s cold-wall cases stay visible next to the 3 km/s 100 kK transient); quasi-steady `V(h)` full column, resolved-TR zoom and symlog; the summary panel set (V, `rho V`, `q_wall`, `T_top`, log-log upflow branch with the local exponent `dlnV/dlnT`, and the steady enthalpy-flux budget); and the supporting `rho V(h)`, `T(h)` and column-mass-drift diagnostics. The 6 kK run is excluded automatically because it aborts at t≈380 s below the EOS temperature floor; the 100 kK point is supplied explicitly because it needed CFL 0.25.
 
 ```bash
-.venv/bin/python util/twall_sweep_diag.py --cfl 0.50 \
+.venv/bin/python util/release/twall_sweep_diag.py --cfl 0.50 \
     --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt \
     --heights 1800 2000 2100 --avg-window 500 \
     --out-dir visualization/model_column --prefix twall_sweep_N500_4000s \
@@ -338,9 +338,9 @@ Per-run colours are **rank-spaced** on `turbo` with a luminance cap, not log-val
 
 ### `twall_sweep_N500_4000s_overlay.mp4`
 
-The whole sweep animated: all 13 accepted wall temperatures overlaid on the **same six panels as `lnp_godunov_N500_4000s_f64_evolution.mp4`** — `T(h)`, `V(h)`, `q_parallel(h)` on the top row, `rho(h)`, `p(h)`, mass flux `(h)` on the bottom — so the sweep reads against the single-run release movie panel for panel. 201 frames (20 s cadence, 0–4000 s), 20 fps, 10 s. Runs are keyed by a **discrete colorbar with one equal-width band per run**, built from the actual line colours: `wall_colors()` spaces the colours by *rank* and caps their luminance, so a continuous `LogNorm` bar drawn from `turbo` would show colours no line has and place them at the wrong `T_wall`. Equal-width bands are the honest rendering of a rank-spaced assignment — the bar is a legend with an axis, and its width is deliberately not linear in `T_wall`. The 22 kK release baseline is drawn thicker and its tick label is bold. Run discovery, run acceptance (6 kK excluded on `termination != end_time`; 100 kK supplied explicitly because it needed CFL 0.25) and the rank-spaced `turbo` colours are imported from `util/twall_sweep_diag.py`, so the movie and the four static figures always describe the same set of runs.
+The whole sweep animated: all 13 accepted wall temperatures overlaid on the **same six panels as `lnp_godunov_N500_4000s_f64_evolution.mp4`** — `T(h)`, `V(h)`, `q_parallel(h)` on the top row, `rho(h)`, `p(h)`, mass flux `(h)` on the bottom — so the sweep reads against the single-run release movie panel for panel. 201 frames (20 s cadence, 0–4000 s), 20 fps, 10 s. Runs are keyed by a **discrete colorbar with one equal-width band per run**, built from the actual line colours: `wall_colors()` spaces the colours by *rank* and caps their luminance, so a continuous `LogNorm` bar drawn from `turbo` would show colours no line has and place them at the wrong `T_wall`. Equal-width bands are the honest rendering of a rank-spaced assignment — the bar is a legend with an axis, and its width is deliberately not linear in `T_wall`. The 22 kK release baseline is drawn thicker and its tick label is bold. Run discovery, run acceptance (6 kK excluded on `termination != end_time`; 100 kK supplied explicitly because it needed CFL 0.25) and the rank-spaced `turbo` colours are imported from `util/release/twall_sweep_diag.py`, so the movie and the four static figures always describe the same set of runs.
 
-**The mass-flux panel is the conservative numerical FACE flux `f_total`**, read from the `.faceflux` sidecars and plotted at the face heights — the quantity the continuity row is actually differenced from, as in `util/animate_isentropic.py`. Producing it required re-running the sweep with the read-only face-flux diagnostic (`SWEEP_FACE_FLUX=1`, new opt-in flag on `util/run_twall_sweep.sh`; see the prerequisite block above). Enabling the diagnostic changes no numerical result, and this was verified rather than assumed: **all 13 re-run `.gamma_diag` files are byte-identical to the original sweep's**, so the recap's metrics stand unchanged and the re-run doubles as an exact reproducibility check. Set `ANIM_MASS_FLUX=cell` to force the cell-centred `rho*V` panel instead; the panel title always states which one is drawn. The two grids do not coincide — the capture cadence is a fixed number of *steps* while snapshots are in *seconds*, and a hotter wall runs a shorter `dt`, so the per-run capture count ranges 253 (8 kK) to ~1700 (100 kK, CFL 0.25) — so the script picks the nearest capture per run per frame and prints the worst frame-to-capture mismatch (6.1 s, set by the 8 kK run's 15.8 s cadence).
+**The mass-flux panel is the conservative numerical FACE flux `f_total`**, read from the `.faceflux` sidecars and plotted at the face heights — the quantity the continuity row is actually differenced from, as in `util/release/animate_isentropic.py`. Producing it required re-running the sweep with the read-only face-flux diagnostic (`SWEEP_FACE_FLUX=1`, new opt-in flag on `util/run/run_twall_sweep.sh`; see the prerequisite block above). Enabling the diagnostic changes no numerical result, and this was verified rather than assumed: **all 13 re-run `.gamma_diag` files are byte-identical to the original sweep's**, so the recap's metrics stand unchanged and the re-run doubles as an exact reproducibility check. Set `ANIM_MASS_FLUX=cell` to force the cell-centred `rho*V` panel instead; the panel title always states which one is drawn. The two grids do not coincide — the capture cadence is a fixed number of *steps* while snapshots are in *seconds*, and a hotter wall runs a shorter `dt`, so the per-run capture count ranges 253 (8 kK) to ~1700 (100 kK, CFL 0.25) — so the script picks the nearest capture per run per frame and prints the worst frame-to-capture mismatch (6.1 s, set by the 8 kK run's 15.8 s cadence).
 
 **The pressure panel is `p(h,t)/p_22kK(h,t)`, pressure relative to the 22 kK release run, not `p` in Pa** — a linear axis with the release baseline as the flat unit reference line. Absolute `p` separates the sweep at *no* y scale, and this was measured rather than assumed: `p(h)` falls 6.6x over the column while the wall-to-wall spread is at most 12 % at any height (1.001 at 1600 km, peaking at 1.121 at 2104 km), so all 13 lines sit within a line width of each other on a log-Pa axis. Zooming y does not fix it — `p` falls that same 12 % in ~30 km, so a y zoom crops x with it and leaves the fan packed against the top of the domain with the lower 400 km off-scale. Dividing by the release run removes the shared stratification *and* the shared early acoustic transient, leaving a 0.90–1.10 fan separated over the whole 1600–2153 km: at 4000 s the 100 kK wall reaches 0.90 near 2100 km while the 8 kK wall peaks 1.6 % above it. Set `ANIM_P_PANEL=abs` for the old absolute log-Pa panel; the panel title always states which one is drawn.
 
@@ -359,7 +359,7 @@ Two things follow. First, the base-cell overshoot is **1.27–1.29 at every wall
 What the movie shows that the static figures do not: the 6.7 kK chromospheric plateau and the `rho` stratification below ~2100 km are visually identical across all 13 walls for the entire 4000 s — the *thermal* response is confined to the resolved TR above ~2115 km — while the hot-wall cases ring through a large early acoustic transient before settling onto the ordered, still slowly drifting quasi-steady fan. The relative-pressure panel is the one place where that "identical below the TR" reading is shown to be a limit of the log axis and not a fact: once the release run is divided out, the wall signal is visible as a smooth, monotone fan reaching down through the whole column (at 4000 s the 100 kK wall is 10.0 % below the release baseline at 2100 km, still 4.2 % below at 1900 km and 1.0 % below at 1700 km, pinned back to 0.08 % only at the 1600 km truncation face itself, where the reservoir closure fixes the state) — the boundary forcing is felt hydrostatically far below the TR, where the temperature is untouched.
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_twall_sweep.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_twall_sweep.py \
     --cfl 0.50 \
     --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt \
     --out visualization/model_column/twall_sweep_N500_4000s_overlay.mp4 --fps 20
@@ -370,7 +370,7 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_twall_sweep
 The same movie with the **absolute log-Pa pressure panel** (`ANIM_P_PANEL=abs`), kept alongside the relative-pressure version above. Identical in every other panel and in every frame. Keep it for two reasons: it is the only rendering that shows the actual pressure stratification of the sweep in physical units, and it is the control that makes the relative panel's case — the 13 walls are indistinguishable here, which is the measurement, not an artifact of a badly chosen y limit (see the numbers in the entry above). Use this one when the question is "what is the pressure", the relative one when the question is "how does the wall change the pressure".
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=abs .venv/bin/python util/animate_twall_sweep.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=abs .venv/bin/python util/release/animate_twall_sweep.py \
     --cfl 0.50 \
     --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt \
     --out visualization/model_column/twall_sweep_N500_4000s_overlay_p_abs.mp4 --fps 20
@@ -381,7 +381,7 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=abs .venv/bin/python util/an
 The same movie with the pressure panel **relative to the shared C7 initial condition**, `p(h,t)/p(h,0)` (`ANIM_P_PANEL=ic`), kept alongside the baseline-relative and absolute versions. Every other panel and every frame are identical. Since all runs start from the same IC, the denominator is the same for every run and none is privileged. The 22 kK release run is a curve like the others (about 1 % below its IC under the TR at 4000 s), and each run's bend sits at **its own** transition region. That is why this version exists. In the baseline-relative panel, the sharp turn near the top (0.90 at 2104 km for 100 kK) reads like an upper-boundary inconsistency, but it is a TR-height difference. The hot TR is nearly isobaric (scale height ≳ 10³ km against ~230 km in the chromosphere), and the 100 kK wall has moved its TR base from ~2138 km down to ~2104 km. At fixed height, that compares hot, flat plasma with the release run's still-stratified chromosphere. Compared at equal column mass instead of equal height, every wall from 8 to 100 kK matches the release pressure to within 0.16 %, and `(p − p_top)/(g·m)` is 1.000–1.004: the pressure is hydrostatic everywhere below the TR. The small ~0.2 % ripple on the 100 kK curve at 1650–1950 km also appears in its `V` and `f_total`, so it is a flow feature of that run, not something the normalization creates.
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=ic .venv/bin/python util/animate_twall_sweep.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=ic .venv/bin/python util/release/animate_twall_sweep.py \
     --cfl 0.50 \
     --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt \
     --out visualization/model_column/twall_sweep_N500_4000s_overlay_p_ic.mp4 --fps 20
@@ -392,7 +392,7 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=ic .venv/bin/python util/ani
 Absolute pressure in Pa, not normalized, for all 13 accepted walls at t = 2000 s, restricted to h ≥ 2100 km. Over the full column the walls sit within a line width of each other, but the top ~50 km carries the whole spread, so zooming in separates them without dividing by any reference. A dot marks each run's TR base (first cell with T > 7.5 kK). The dots show that the "kink" in the normalized panels is simply where each run's p(h) turns from the steep chromospheric slope (scale height ~230 km) to the nearly flat hot-TR slope: 2116 km for 100 kK, 2127 km for 70 kK, ~2139 km for the walls near the release. Every p(h) decreases monotonically with height apart from one feature: at the 70 and 100 kK TR base there is a 1–2e-5 Pa (~0.2 %) notch over two to three cells, where T rises 2.4x per 0.28 km cell. That is about 3x the run's whole momentum-flux budget `rho V^2` (6.7e-6 Pa at 100 kK), so it is a feature of the under-resolved thermal front, not the acceleration of the evaporating gas.
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/plot_twall_sweep_p_top.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/plot_twall_sweep_p_top.py \
     --time 2000 --hmin 2100 \
     --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt \
     --out visualization/model_column/twall_sweep_N500_p_abs_top_t2000.png
@@ -420,7 +420,7 @@ How the evaporation mass flux relaxes and then decays across the sweep, each sta
 Walls ≤ 14 kK sit at the flow reversal, where `F → 0` makes every ratio meaningless, so they are left out of the ratio panels and the timescale figure. Colours are the sweep's rank-spaced `wall_colors()`.
 
 ```bash
-.venv/bin/python util/twall_relaxation_diag.py \
+.venv/bin/python util/release/twall_relaxation_diag.py \
     --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt
 ```
 
@@ -459,14 +459,14 @@ done
 
 Four runs overlaid on the **same six panels as the release evolution movie** — `T(h)`, `V(h)`, `q_parallel(h)` on the top row, `rho(h)`, `p(h)`, `f_total(h)` on the bottom. 201 frames (20 s cadence, 0–4000 s), 20 fps, 10 s. Colours are assigned by position so a subset renders in the same colours as the full set: release dark grey and thick, `dp/ds = 0` red, `dp/ds = -rho g` blue, the `T`-pinned control thin grey drawn last so its coincidence with the release line is visible.
 
-Panels follow `util/animate_twall_sweep.py` with three deliberate differences, all forced by comparing *closures* instead of one parameter: runs are keyed by a **legend**, not a colorbar (all four share the 22 kK wall, so `T_wall` no longer identifies a line); **`p` is absolute log Pa**, not divided by the release run, because a closure swap moves `p` by factors of several and a ratio panel would only rescale that; and a run that did **not** reach `CHROMO_T_END` is kept rather than excluded, with its termination shown in the legend, because for a boundary-closure experiment an early abort is the result. Here all four reached 4000 s with zero Godunov fallbacks, so no legend carries a tag.
+Panels follow `util/release/animate_twall_sweep.py` with three deliberate differences, all forced by comparing *closures* instead of one parameter: runs are keyed by a **legend**, not a colorbar (all four share the 22 kK wall, so `T_wall` no longer identifies a line); **`p` is absolute log Pa**, not divided by the release run, because a closure swap moves `p` by factors of several and a ratio panel would only rescale that; and a run that did **not** reach `CHROMO_T_END` is kept rather than excluded, with its termination shown in the legend, because for a boundary-closure experiment an early abort is the result. Here all four reached 4000 s with zero Godunov fallbacks, so no legend carries a tag.
 
 The mass-flux panel is the conservative face flux `f_total` from the `.faceflux` sidecars (`ANIM_MASS_FLUX=cell` forces the cell-centred `rho*V`; the panel title always says which). Its symlog linear band is 10x wider than the sweep overlay's because the collapse run sits at ~1e-7 while the release sits at ~1e-10, and the tighter threshold collided the +/- decade labels around zero.
 
 What it shows: the `dp/ds = 0` run leaves the release solution within the first 60 s and never returns — by 200 s the transition region has marched down past 1900 km, and from ~700 s the whole domain is a stationary 23.7 kK fully ionized downdraft at the `ISO_VCAP` cap carrying `f_top = f_base = -4.13e-07` kg m⁻² s⁻¹, 1530x the release flux and pointing the wrong way, with half the column mass gone. The `dp/ds = -rho g` run instead tracks the release in `T` and `rho` for the whole 4000 s and fails quietly: its `p` creeps upward, its `f_total` sits an order of magnitude below the release's and disagrees in sign between the top and base faces. The control is the release line.
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_outer_bc_compare.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_outer_bc_compare.py \
     --out visualization/model_column/outer_bc_closure_swap_4000s.mp4 --fps 20
 ```
 
@@ -477,7 +477,7 @@ The release outer temperature BC (single T: one fixed 22 kK temperature in the h
 What it shows: the lines coincide in every panel. V_top is 4 % lower under single T at 20 s, and the gap settles to about 0.9 % from 400 s on (11.98 vs 12.10 m/s at 1500 s). T_top is 80–200 K cooler, because the conduction datum sits a full cell away instead of half a cell. T differences above 0.1 % are confined to the top ~13 km. Analysis: `docs/studies/boundaries/outer_temperature_bc_single_t_recap.md`.
 
 ```bash
-ANIM_WORKERS=14 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_outer_bc_compare.py \
+ANIM_WORKERS=14 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_outer_bc_compare.py \
     --preset singleT --t-max 1500 \
     --out visualization/model_column/outer_bc_singleT_vs_release_1500s.mp4 --fps 8
 ```
@@ -490,7 +490,7 @@ The mass-flux panel is the cell-centred `rho*V` here, not `f_total`: the 1 s-cad
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_MASS_FLUX=cell .venv/bin/python \
-  util/animate_outer_bc_compare.py \
+  util/release/animate_outer_bc_compare.py \
   --run 'release: fixed $p_{\rm ref}$, free $T_{\rm hydro}$=outputs/model_column/outer_bc_swap/release_probe200.txt' \
   --run 'swap: $T_{\rm hydro}$ pinned, $dp/ds=0$=outputs/model_column/outer_bc_swap/probe200.txt' \
   --run 'swap: $T_{\rm hydro}$ pinned, $dp/ds=-\rho g$=outputs/model_column/outer_bc_swap/hse_probe200.txt' \
@@ -518,15 +518,15 @@ done; wait
 **The PNG** is the time-domain half of the answer, which the profile movie cannot show: (a) `V_top(t)` symlog, (b) `p_top(t)/p_top(0)` — the level the release BC pins and this closure does not, (c) `M(t)/M(0)`, (d) quasi-steady `V(h)`. Colour carries `T_wall` and the dash pattern carries the closure, one visual channel per varied quantity, which a colour-only scheme cannot do for a 2x2. The legend is a single figure-level legend under all four panels: inside panel (a) it sits on top of the 100 kK curves the panel exists to show. Panel (b) is the point of the figure — +128 % and still rising linearly at 4000 s for the unanchored 100 kK case, against a flat 1.000 for both release runs.
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/outer_bc_twall_diag.py
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/outer_bc_twall_diag.py
 ```
 
-**The movie** puts the same four runs on the six evolution panels, 201 frames (20 s cadence, 0–4000 s), 20 fps, with the same colour/dash encoding. It uses the `twall` preset of `util/animate_outer_bc_compare.py`, which differs from the `closure` preset in two catalogued ways: the line styles above, and a 10x wider symlog linear band on the mass-flux panel (`f_linthresh_frac`), because the 100 kK release run reaches ~5e-9 while the 22 kK unanchored run works at ~1e-11 and the narrower band puts eight labelled decades on one short axis.
+**The movie** puts the same four runs on the six evolution panels, 201 frames (20 s cadence, 0–4000 s), 20 fps, with the same colour/dash encoding. It uses the `twall` preset of `util/release/animate_outer_bc_compare.py`, which differs from the `closure` preset in two catalogued ways: the line styles above, and a 10x wider symlog linear band on the mass-flux panel (`f_linthresh_frac`), because the 100 kK release run reaches ~5e-9 while the 22 kK unanchored run works at ~1e-11 and the narrower band puts eight labelled decades on one short axis.
 
 What it shows: the unanchored 100 kK run (red dashed) rings violently for the first ~250 s (`V_top` swinging ±1.5 km/s), then settles into a *two-cell* column — evaporation above ~1900 km, drainage below it — with the transition region parked at 1900 km instead of 2100 km and 1900 km heated from 6.5 kK to 21.9 kK. The release 100 kK run (red solid) keeps the same chromosphere as its 22 kK counterpart and puts the entire wall response into the TR above 2100 km.
 
 ```bash
-MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/animate_outer_bc_compare.py \
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_outer_bc_compare.py \
     --preset twall \
     --out visualization/model_column/outer_bc_twall_22kK_vs_100kK.mp4 --fps 20
 ```
@@ -546,14 +546,14 @@ The steady-TR invariant `J = F·L_TR = ∫ κ/(h − h_c) dT` of the release equ
 Post-processing only; reads the accepted sweep runs and `outputs/model_column/twall_sweep/twall_relaxation_metrics.json` for the end-to-end check. The table goes to `outputs/model_column/analytic_J_table/` (`J_table.npz`, `J_table.csv`, `J_table_summary.json`). Runtime ~6 s.
 
 ```bash
-.venv/bin/python util/analytic_evaporation_table.py
+.venv/bin/python util/release/analytic_evaporation_table.py
 ```
 
 ## (T_wall, p_top) evaporation sweep against the analytic closures (`docs/studies/boundaries/tp_sweep_evaporation_closure_validation.md`)
 
-The runs come from `util/run_tp_sweep.sh`: 5 wall temperatures (18–70 kK) × 6 pressures (0.003–0.08 Pa), each 5000 s, plus an N=1000 control. They live on the mac-mini (6.4 GB).
-- `util/tp_sweep_compare.py` runs there. It reduces them to `outputs/model_column/tp_sweep/tp_sweep_compare.json`, `tp_sweep_series.npz` and `compare.log`. Those three files are copied back.
-- `util/plot_tp_sweep_vs_analytic.py` redraws its two figures from the compact files alone.
+The runs come from `util/run/run_tp_sweep.sh`: 5 wall temperatures (18–70 kK) × 6 pressures (0.003–0.08 Pa), each 5000 s, plus an N=1000 control. They live on the mac-mini (6.4 GB).
+- `util/release/tp_sweep_compare.py` runs there. It reduces them to `outputs/model_column/tp_sweep/tp_sweep_compare.json`, `tp_sweep_series.npz` and `compare.log`. Those three files are copied back.
+- `util/release/plot_tp_sweep_vs_analytic.py` redraws its two figures from the compact files alone.
 
 ### `tp_sweep_sim_vs_analytic.png`
 
@@ -573,7 +573,7 @@ One column per `T_wall`, one colour per `p_top`. Three rows:
 - `std_t F(z)/|mean_t F(z)|` over faces after 1000 s, which locates the upper-chromosphere unsteadiness of the hot, high-pressure corner.
 
 ```bash
-.venv/bin/python util/plot_tp_sweep_vs_analytic.py --dir outputs/model_column/tp_sweep \
+.venv/bin/python util/release/plot_tp_sweep_vs_analytic.py --dir outputs/model_column/tp_sweep \
     --out-dir visualization/model_column
 ```
 
@@ -593,7 +593,7 @@ The panels:
 The runs are in `outputs/model_column/tp_sweep_corner/` on the mac-mini, launched by its `launch.sh`. The script reads the raw runs and also writes `corner_test.json`, so it is run there.
 
 ```bash
-.venv/bin/python util/tp_corner_test_compare.py
+.venv/bin/python util/release/tp_corner_test_compare.py
 ```
 
 ### `tp_sweep_flux_compare.png`
@@ -609,7 +609,7 @@ The same comparison as heat maps over the (T_wall, p_top) grid. Each run is read
 This script also writes `<dir>/tp_sweep_compare.json`, `<dir>/tp_sweep_series.npz` and, redirected, `compare.log`. It needs the raw runs, so it is run on the mac-mini.
 
 ```bash
-.venv/bin/python util/tp_sweep_compare.py --dir outputs/model_column/tp_sweep \
+.venv/bin/python util/release/tp_sweep_compare.py --dir outputs/model_column/tp_sweep \
     --out-dir visualization/model_column --workers 8 > outputs/model_column/tp_sweep/compare.log
 ```
 
@@ -627,7 +627,7 @@ What the steady-TR invariant `J = ∫_{T1}^{T_top} κ/(h − h_c) dT` is made of
 It also prints `J/J_Spitzer` and the share of `h_top − h_c` gained between 6.7 and 10 kK (0.13 / 0.21 / 0.32). No run needed; runtime ~2 s.
 
 ```bash
-.venv/bin/python util/plot_J_integrand.py
+.venv/bin/python util/release/plot_J_integrand.py
 ```
 
 ---
@@ -643,7 +643,7 @@ The raw runs are on the mac-mini, so the movies are rendered there (six in paral
 ```bash
 printf '%s\n' 0.003 0.005 0.0103 0.02 0.04 0.08 | xargs -P 6 -I{} env \
     MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=abs ANIM_MAX_FRAMES=251 ANIM_WORKERS=2 \
-    .venv/bin/python util/animate_twall_sweep.py --dir outputs/model_column/tp_sweep \
+    .venv/bin/python util/release/animate_twall_sweep.py --dir outputs/model_column/tp_sweep \
     --p-top {} --fps 20 \
     --out visualization/model_column/tp_sweep_movies/tp_sweep_p{}_N500_5000s_overlay_p_abs.mp4
 ```

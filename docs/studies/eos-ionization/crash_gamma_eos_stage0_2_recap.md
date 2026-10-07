@@ -11,7 +11,7 @@ structure/parser/interpolator with tests.
 
 ## Stage 0: diagnostics and gates
 
-`util/plot_eos_gamma.py` now fails closed before plotting. Over the entire raw
+`util/release/plot_eos_gamma.py` now fails closed before plotting. Over the entire raw
 table it verifies:
 
 - complete, finite, density-major rectangular axes;

@@ -23,7 +23,7 @@ Accepted production CFL: **0.50**, applied by `scripts/run_chromo_realtime.sh`. 
  M AGENTS.md
  M CLAUDE.md
  M docs/studies/conduction/local_mesh_scaled_numerical_conduction_recap.md
- M util/outer_refine_diag.py
+ M util/release/outer_refine_diag.py
  M visualize_commands.md
 ```
 
@@ -36,8 +36,8 @@ run_control.hpp                              (new)  step-cap + snapshot-cadence 
 chromo_main.cpp                                     wired the helpers into the driver loop
 tests/chromo_tests.cpp                              11 new run-control tests
 scripts/run_chromo_realtime.sh               (new)  long-run production launcher
-util/analyze_cfl_sweep.py                    (new)  sweep analysis
-util/run_cfl_sweep.sh                        (new)  sweep driver
+util/release/analyze_cfl_sweep.py                    (new)  sweep analysis
+util/run/run_cfl_sweep.sh                        (new)  sweep driver
 AGENTS.md, CLAUDE.md                                validated CFL + long-run controls
 docs/studies/validation/long_run_output_and_cfl_validation.md   (new)  this document
 ```
@@ -204,7 +204,7 @@ Region profile at the two endpoints (rep 2):
 
 ## 7. CFL sweep — accuracy
 
-Reference: CFL 0.125, 20 s, snapshots every physical second (`CHROMO_FRAME_DT=1`). Candidates compared at matched physical times by `util/analyze_cfl_sweep.py`, which parses the production snapshot file and its `.gamma_diag` sidecar directly. Relative-norm denominator floor: 1e-3 × the domain maximum of |reference| for that field and snapshot, reported per row.
+Reference: CFL 0.125, 20 s, snapshots every physical second (`CHROMO_FRAME_DT=1`). Candidates compared at matched physical times by `util/release/analyze_cfl_sweep.py`, which parses the production snapshot file and its `.gamma_diag` sidecar directly. Relative-norm denominator floor: 1e-3 × the domain maximum of |reference| for that field and snapshot, reported per row.
 
 ### 7.1 Hard-rejection gates — all candidates pass
 
@@ -443,12 +443,12 @@ cmake -S . -B build_cfl_audit -DCMAKE_BUILD_TYPE=Release \
       -DCHROMO_ENABLE_OPENMP=ON -DLIBOMP_ROOT="$(brew --prefix libomp)"
 cmake --build build_cfl_audit -j4
 
-util/run_cfl_sweep.sh acc  0.125 0.25 0.35 0.40 0.45 0.50   # 1 frame/s, 20 s
-util/run_cfl_sweep.sh perf 0.25 0.35 0.40 0.45 0.50         # 3 timed reps each
-util/run_cfl_sweep.sh med  100 5 0.125 0.25 0.45 0.50       # 100 s, 1 frame/5 s
+util/run/run_cfl_sweep.sh acc  0.125 0.25 0.35 0.40 0.45 0.50   # 1 frame/s, 20 s
+util/run/run_cfl_sweep.sh perf 0.25 0.35 0.40 0.45 0.50         # 3 timed reps each
+util/run/run_cfl_sweep.sh med  100 5 0.125 0.25 0.45 0.50       # 100 s, 1 frame/5 s
 
 D=outputs/model_column/cfl_sweep
-.venv/bin/python util/analyze_cfl_sweep.py \
+.venv/bin/python util/release/analyze_cfl_sweep.py \
     --reference $D/cfl_reference_0125_20s.txt --reference-label 0.125 \
     --candidate 0.25=$D/cfl025_20s.txt --candidate 0.35=$D/cfl035_20s.txt \
     --candidate 0.40=$D/cfl040_20s.txt --candidate 0.45=$D/cfl045_20s.txt \
@@ -456,7 +456,7 @@ D=outputs/model_column/cfl_sweep
     --fields rho,v,T,p,x_eq,mass_flux --out $D/cfl_accuracy_20s.md
 ```
 
-`util/run_cfl_sweep.sh` holds the production-shaped model configuration in one place, so only `CHROMO_CFL` and the output controls differ between runs. `util/analyze_cfl_sweep.py` parses the snapshot file and its `.gamma_diag` sidecar plus the stdout log; it reimplements none of the solver equations. Generated reports land in `outputs/model_column/cfl_sweep/` and are not committed.
+`util/run/run_cfl_sweep.sh` holds the production-shaped model configuration in one place, so only `CHROMO_CFL` and the output controls differ between runs. `util/release/analyze_cfl_sweep.py` parses the snapshot file and its `.gamma_diag` sidecar plus the stdout log; it reimplements none of the solver equations. Generated reports land in `outputs/model_column/cfl_sweep/` and are not committed.
 
 Sweep artifacts (~122 MB, gitignored) live in `outputs/model_column/cfl_sweep/`.
 

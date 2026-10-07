@@ -165,7 +165,7 @@ Verify each CSV has full snapshots bracketing ~100 s, then plot (the fit is agai
 the **interpolated local cell width at 250 km**, not the median domain spacing):
 
 ```bash
-.venv/bin/python util/plot_cond_hydro_diagnostic.py --time 100 \
+.venv/bin/python util/legacy/plot_cond_hydro_diagnostic.py --time 100 \
   --out visualization/iso_cond_hydro_local4_convergence_t100.png \
   outputs/iso_cond_hydro_local4_outer2000.csv \
   outputs/iso_cond_hydro_local4_outer3000.csv \

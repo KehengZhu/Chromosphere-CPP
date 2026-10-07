@@ -36,7 +36,7 @@ ISO_NS=1000 ISO_HEAT_FLUX=0 CHROMO_T_END=1000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=
 
 Console confirms `conduction.calls=0` and otherwise release defaults (`flux=roe-local reconstruction=lnrho-v-lnp limiter=mc3 beta=2`).
 
-New tooling: `util/column_spacetime.py` (cached `(n_t, n_cell)` loader + height/phase primitives for `.gamma_diag`), `util/plot_column_sloshing.py` (space-time / amplitude / evaporation figure). Figure: `visualization/model_column/roe_n1000_lower_chromosphere_sloshing.png`.
+New tooling: `util/release/column_spacetime.py` (cached `(n_t, n_cell)` loader + height/phase primitives for `.gamma_diag`), `util/release/plot_column_sloshing.py` (space-time / amplitude / evaporation figure). Figure: `visualization/model_column/roe_n1000_lower_chromosphere_sloshing.png`.
 
 Domain reminder: `model_column` spans **1600.55–2152.99 km** (552 km). The "low chromosphere" region 1739–1847 km is therefore ~140–250 km above the inner boundary, in the middle of the domain.
 
@@ -44,7 +44,7 @@ Domain reminder: `model_column` spans **1600.55–2152.99 km** (552 km). The "lo
 
 ## 1. What the animation is actually showing
 
-`util/animate_isentropic.py` plots `mflux = rho * V` from the `.gamma_diag` sidecar — a **cell-centred** diagnostic, not the finite-volume face flux that updates mass. Two separate effects inflate its visual impact:
+`util/release/animate_isentropic.py` plots `mflux = rho * V` from the `.gamma_diag` sidecar — a **cell-centred** diagnostic, not the finite-volume face flux that updates mass. Two separate effects inflate its visual impact:
 
 - **The mass-flux panel is the only panel without a fixed y-limit.** `ylims["mflux"]` is computed (line 249) but the `set_ylim` call is commented out (line 170), while `T`, `V`, `q`, `ρ`, `p` all use fixed global limits. The panel therefore rescales every frame.
 - A zero line is drawn (`axhline(0)`). N500's domain-wide `ρV` minimum stays positive at all times (+2.6e-10 … +4.5e-10 kg m⁻² s⁻¹), so its curve never touches that line; N1000 dips to −1.6e-10 at t ≈ 1000 s and −1.5e-10 at t ≈ 3000 s and visibly crosses it. The domain-wide `ρV` **span** is comparable in both runs (0.9–1.6e-9), so the difference the eye reads as "much larger variation" is largely the sign crossing plus per-frame rescaling.
@@ -262,4 +262,4 @@ Do **not** add artificial diffusion, change the reconstruction, tune Roe, or imp
 
 The `.faceflux` sidecar's **flux values** agree with cell-centred `ρV` (§1) and with the frozen `eq_wb` reference (§5), but its **divergence is inconsistent with the density evolution recorded in the same file**. Taking two adjacent records 5.6 s apart in `lnp_roe_N1000_partial2080s.txt.faceflux`, `−Δf_total/Δs − eq_residual_mass` exceeds the measured `Δρ_cell/Δt` by ~60× at 1700–1800 km, ~23× at 2000 km, ~7× at 2100 km, and ~0.6× at 2140 km — right sign, wrong magnitude, with a systematic height trend. The capture is taken from the corrector-stage `flux_iph` in `capture_gamma_face_flux` (`src/rhs.cpp:579`) and armed once per step in `chromo_main.cpp:502`, so it is *intended* to be the flux the update differences.
 
-This does not affect the present diagnosis — density and velocity were measured directly from the state, and the flux comparison in §1 uses flux *values*, not their divergence. But **`.faceflux` divergences (`R_total`, `R_eff` in `util/face_flux_diag.py`) should not be trusted quantitatively** until the capture's stage consistency is checked. Suggested separate bounded task: verify whether `advance_Euler_state` evaluates the RHS more than once per step, or whether the captured face index convention at the domain ends omits the boundary faces.
+This does not affect the present diagnosis — density and velocity were measured directly from the state, and the flux comparison in §1 uses flux *values*, not their divergence. But **`.faceflux` divergences (`R_total`, `R_eff` in `util/release/face_flux_diag.py`) should not be trusted quantitatively** until the capture's stage consistency is checked. Suggested separate bounded task: verify whether `advance_Euler_state` evaluates the RHS more than once per step, or whether the captured face index convention at the domain ends omits the boundary faces.

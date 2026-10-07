@@ -579,7 +579,7 @@
     \end{column}
   \end{columns}
   \vspace{8pt}
-  \scriptsize One case (\texttt{util/run\_tp\_sweep.sh} runs 4 at a time):\\[2pt]
+  \scriptsize One case (\texttt{util/run/run\_tp\_sweep.sh} runs 4 at a time):\\[2pt]
   \texttt{ISO\_T\_TOP=50000 ISO\_P\_TOP=0.02 CHROMO\_T\_END=5000 scripts/run\_chromo\_realtime.sh
     out.txt full no-ionization model\_column - 20.0 no-cooling}
 \end{frame}
@@ -1101,29 +1101,28 @@
     The sweep, the classes, the corner follow-up &
       \texttt{docs/studies/boundaries/tp\_sweep\_evaporation\_closure\_validation.md} \\
     $J$ quadrature, Saha EOS, measured $h_c$ and $\LTR$ &
-      \texttt{util/twall\_relaxation\_diag.py} (\texttt{j\_theory}, \texttt{analyse}) \\
-    Conductivity & \texttt{util/conductive\_flux.py} (matches \texttt{physics.hpp}) \\
-    Table & \texttt{util/analytic\_evaporation\_table.py} \\
+      \texttt{util/release/twall\_relaxation\_diag.py} (\texttt{j\_theory}, \texttt{analyse}) \\
+    Conductivity & \texttt{util/lib/conductive\_flux.py} (matches \texttt{physics.hpp}) \\
+    Table & \texttt{util/release/analytic\_evaporation\_table.py} \\
     \texttt{ISO\_P\_TOP} rebuild & \texttt{scenarios/model\_column.cpp};
       \texttt{docs/doxygen/pages/configuration.md} \\
-    Sweep driver and reduction & \texttt{util/run\_tp\_sweep.sh},
-      \texttt{util/tp\_sweep\_compare.py}, \\
-      & \texttt{util/plot\_tp\_sweep\_vs\_analytic.py} \\
-    Corner follow-up & \texttt{util/tp\_corner\_test\_compare.py};
+    Sweep driver and reduction & \texttt{util/run/run\_tp\_sweep.sh},
+      \texttt{util/release/tp\_sweep\_compare.py}, \\
+      & \texttt{util/release/plot\_tp\_sweep\_vs\_analytic.py} \\
+    Corner follow-up & \texttt{util/release/tp\_corner\_test\_compare.py};
       \texttt{outputs/model\_column/tp\_sweep\_corner/} \\
-    Integrand figure & \texttt{util/plot\_J\_integrand.py} \\
-    Figure provenance & \texttt{figures/README.md}; \texttt{visualize\_commands.md}
-      \S20--22 \\
+    Integrand figure & \texttt{util/release/plot\_J\_integrand.py} \\
+    Figure provenance & \texttt{figures/README.md}; \texttt{docs/viz\_catalog/} \\
     \bottomrule
   \end{tabular}
   \vspace{8pt}
 
   \textbf{Reproduce} (the 6.4\,GB of raw runs stay on the mac-mini):\\[2pt]
-  \texttt{SWEEP\_JOBS=4 SWEEP\_THREADS=2 util/run\_tp\_sweep.sh
+  \texttt{SWEEP\_JOBS=4 SWEEP\_THREADS=2 util/run/run\_tp\_sweep.sh
     outputs/model\_column/tp\_sweep 5000 10}\\
-  \texttt{.venv/bin/python util/tp\_sweep\_compare.py --dir
+  \texttt{.venv/bin/python util/release/tp\_sweep\_compare.py --dir
     outputs/model\_column/tp\_sweep --workers 8}\\
-  \texttt{.venv/bin/python util/plot\_tp\_sweep\_vs\_analytic.py --dir
+  \texttt{.venv/bin/python util/release/plot\_tp\_sweep\_vs\_analytic.py --dir
     outputs/model\_column/tp\_sweep}\\[4pt]
   Commits: \texttt{247a317} (\texttt{ISO\_P\_TOP}), \texttt{417d31a} (sweep
   comparison).

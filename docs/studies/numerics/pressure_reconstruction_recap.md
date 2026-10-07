@@ -29,7 +29,7 @@ Selector: `ISO_RECONSTRUCTION=lnrho-v-lnt` (default) | `lnrho-v-lnp`.
 
 ## Evidence
 
-All runs: `model_column`, physical conduction only, N500 = 661 cells / N1000 = 1320 cells, R4, CFL 0.50, 22,000 K physical conductive face, `ISO_RIEMANN=roe-local`. Analysis: `util/pressure_reconstruction_diag.py`. `eps_p` is the reconstructed corrector face-pressure mismatch `|p_R-p_L| / mean` over 2139.5–2143.5 km; `Q_V`/`Q_M` are the established roughness metrics over 2130–2150 km.
+All runs: `model_column`, physical conduction only, N500 = 661 cells / N1000 = 1320 cells, R4, CFL 0.50, 22,000 K physical conductive face, `ISO_RIEMANN=roe-local`. Analysis: `util/release/pressure_reconstruction_diag.py`. `eps_p` is the reconstructed corrector face-pressure mismatch `|p_R-p_L| / mean` over 2139.5–2143.5 km; `Q_V`/`Q_M` are the established roughness metrics over 2130–2150 km.
 
 ### t = 1000 s
 
@@ -88,7 +88,7 @@ CHROMO_OUTER_COND_STRIDE=400 \
 scripts/run_chromo_realtime.sh outputs/model_column/lnp_roe_N500_4000s.txt \
     full no-ionization model_column - 20.0 no-cooling
 
-python3 util/pressure_reconstruction_diag.py --targets 500,1000,4000 \
+python3 util/release/pressure_reconstruction_diag.py --targets 500,1000,4000 \
   --run "lnT-N500=outputs/model_column/lnt_roe_N500_4000s.txt" \
   --run "lnP-N500=outputs/model_column/lnp_roe_N500_4000s.txt"
 ```

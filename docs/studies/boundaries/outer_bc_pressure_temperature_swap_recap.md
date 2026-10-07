@@ -13,7 +13,7 @@
 
 The release closure is therefore retained. The value of the experiment is the mechanism: **the outer pressure closure has to be hydrostatically consistent first, and externally anchored second, and the two requirements fail differently.**
 
-Evidence: `outputs/model_column/outer_bc_swap/`, movie `visualization/model_column/outer_bc_closure_swap_4000s.mp4` (`util/animate_outer_bc_compare.py`, catalogued in `docs/viz_catalog/model_column.md`).
+Evidence: `outputs/model_column/outer_bc_swap/`, movie `visualization/model_column/outer_bc_closure_swap_4000s.mp4` (`util/release/animate_outer_bc_compare.py`, catalogued in `docs/viz_catalog/model_column.md`).
 
 ## What was varied, and what was not
 
@@ -115,7 +115,7 @@ Three readings:
 2. **The mass budget inverts.** Under the release closure the top and base face fluxes agree to 0.3 % (22 kK) and 8.6 % (100 kK): one coherent upward column. Under the unanchored closure they have *opposite signs* — a small evaporative flux leaves the top while a flux 15x to 7x larger drains out of the base. The column is not evaporating; it is emptying downward with an evaporative trickle on top, and at 100 kK it has lost **22.7 %** of its mass by 4000 s with no sign of stopping.
 3. **At 100 kK the chromosphere is destroyed, and this is a wall-temperature-dependent failure, not a constant offset.** With the pressure anchored, a 100 kK wall drives 792 m/s of evaporation while 1900 km stays at 6546 K — the thermal response is confined to the resolved TR, exactly as the sweep reported. With it unanchored, the transition region migrates *down* to about 1900 km and the temperature there reaches **21 931 K**. The pressure level runs away first (+128 % and still rising linearly at 4000 s, against +5.7 % at 22 kK), and the hot wall is what makes the runaway fast enough to matter over 4000 s.
 
-Figure: `visualization/model_column/outer_bc_twall_response.png` (`util/outer_bc_twall_diag.py`; metrics in `outputs/model_column/outer_bc_swap/outer_bc_twall_metrics.json`). Movie: `visualization/model_column/outer_bc_twall_22kK_vs_100kK.mp4` (`util/animate_outer_bc_compare.py --preset twall`), colour = wall temperature, dashed = unanchored pressure.
+Figure: `visualization/model_column/outer_bc_twall_response.png` (`util/release/outer_bc_twall_diag.py`; metrics in `outputs/model_column/outer_bc_swap/outer_bc_twall_metrics.json`). Movie: `visualization/model_column/outer_bc_twall_22kK_vs_100kK.mp4` (`util/release/animate_outer_bc_compare.py --preset twall`), colour = wall temperature, dashed = unanchored pressure.
 
 **Conclusion for anyone tempted to use this closure because it is "less imposed":** it is stable, it reproduces the qualitative wall-temperature scaling, and it will silently give you evaporation numbers ~20x too small against a pressure reference that is itself moving. The externally anchored back-pressure is not a convenience; it is what makes a wall-temperature measurement mean anything.
 

@@ -10,7 +10,7 @@ Supporting papers are in [`docs/supporting-papers/`](supporting-papers/): Krucke
 
 ## 0. The mapping at a glance
 
-Our code does **not** read the atmosphere off the magnetogram. The event supplies *geometry* (which loop) and *forcing* (the beam); the pre‑flare stratification is the standard C7 model atmosphere that [`util/make_loop_dat.py`](../../util/make_loop_dat.py) lays down. So every observable below feeds one of two things: **where/what loop** or **how it is hit**.
+Our code does **not** read the atmosphere off the magnetogram. The event supplies *geometry* (which loop) and *forcing* (the beam); the pre‑flare stratification is the standard C7 model atmosphere that [`util/legacy/make_loop_dat.py`](../../util/make_loop_dat.py) lays down. So every observable below feeds one of two things: **where/what loop** or **how it is hit**.
 
 | Code input (knob) | Physical meaning | Observable it comes from | Instrument |
 |---|---|---|---|
@@ -102,10 +102,10 @@ PFSS reconstructs the potential coronal field from the photospheric magnetogram.
 - **footpoint `|B|`** (field strength at the photospheric end),
 - the **3‑D path** (for the eventual 3‑D movie).
 
-That is what [`util/extract_event_loop.py`](../../util/extract_event_loop.py) does: it loads the ADAPT‑GONG map, reprojects it to the sine‑latitude (CEA) grid PFSS expects, converts the AR Stonyhurst position to Carrington, solves PFSS, traces a small cluster of seeds around the AR, and picks a representative **closed** loop. For this event it found **128.7 Mm total length (64.3 Mm half), footpoint |B| = 643 G**. Those two numbers feed straight into the loop builder:
+That is what [`util/legacy/extract_event_loop.py`](../../util/extract_event_loop.py) does: it loads the ADAPT‑GONG map, reprojects it to the sine‑latitude (CEA) grid PFSS expects, converts the AR Stonyhurst position to Carrington, solves PFSS, traces a small cluster of seeds around the AR, and picks a representative **closed** loop. For this event it found **128.7 Mm total length (64.3 Mm half), footpoint |B| = 643 G**. Those two numbers feed straight into the loop builder:
 
 ```bash
-python util/make_loop_dat.py --topology full \
+python util/legacy/make_loop_dat.py --topology full \
   --half-length-mm 64.3 --fp-B-G 643 --apex-T-MK 2.0 \
   --output scenarios/data/event_20240801_AR13768.dat
 ```

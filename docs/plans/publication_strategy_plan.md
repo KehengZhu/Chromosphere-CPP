@@ -690,7 +690,7 @@ evaluated per cell on the canonical release baseline — N=500/R4, 661 cells, CF
 precision, physical conduction only, 22 kK reservoir, t = 4000 s. `T`, `x` and `n_e` are read
 directly from the run's own `.gamma_diag` EOS diagnostics, so nothing re-derives Saha. NRL branch 1
 (lnΛ = 23 − ln(n_e^{1/2} Z T_e^{−3/2})) applies in every cell; lnΛ = 9.27–12.18, nowhere small or
-negative, so the formula is in regime throughout. Script `util/tau_ei_equilibration.py`; scalars in
+negative, so the formula is in regime throughout. Script `util/release/tau_ei_equilibration.py`; scalars in
 `outputs/model_column/tau_ei_equilibration.json`; figure
 `visualization/model_column/tau_ei_equilibration.png`. Cross-checked against a second independent
 double-precision run to four significant figures.
@@ -1679,7 +1679,7 @@ et al. (2021); Osborne et al. (2026).
 | ~~1a~~ | ~~Verify the §1.4 reservoir numbers in the primary PDFs~~ — **DONE 2026-09-06.** All four claims resolved against primary text; van der Holst (2014) established as the source, four competing rationales catalogued, two corrections applied (§1.4) | — | done |
 | ~~1b~~ | ~~Obtain Lionello, Linker & Mikić (2009)~~ — **DONE 2026-09-06**, filed and read. It *was* a finding in itself: factor-2 evidence base for a factor-10-to-250 extrapolation, and an explicit self-imposed validity floor at 500,000 K that excludes the region where the error is reported (§1.4 F1–F5). **This is now the second-strongest item in the Introduction after the reservoir itself** | — | done |
 | 2 | Add `vanderHolst2014` (**the §1.4 anchor**), `Sokolov2013`, `Sokolov2021` + Lionello/Downs + the §4 second-revision list to `reference.bib`; rewrite the Introduction around §1, leading with the §1.4 factor-of-ten reservoir and the inconsistent-rationale table, then quoting the §1.4 sentence | hours | everything |
-| ~~3~~ | ~~τ_eq(ρ,T) map of §2.7~~ — **DONE 2026-09-06**, `util/tau_ei_equilibration.py`; §2.7 now carries measured values and one claim was retracted. **Damköhler map (§6.3②) still outstanding** — same output, same kind of pass | days | §6 |
+| ~~3~~ | ~~τ_eq(ρ,T) map of §2.7~~ — **DONE 2026-09-06**, `util/release/tau_ei_equilibration.py`; §2.7 now carries measured values and one claim was retracted. **Damköhler map (§6.3②) still outstanding** — same output, same kind of pass | days | §6 |
 | ~~3a~~ | ~~Resolve the x = 0.273 flag~~ — **DONE 2026-09-06.** Code and IC both correct; LTE Saha reproduces Model C7's NLTE ionization at the domain base to 14 % (**new Angle A asset**). The "x ~ 10⁻²" was a mid-chromospheric figure misapplied in three places, now fixed. One headline weakened (assumption 6 is a 3–25 % error at T_ch, not orders of magnitude), one new Tier 0 quadrature gained (§2.7) | — | done |
 | 4 | Frozen-x bracketing run (τ_ion → ∞ bound) — **now mandatory** | days | §5.4 Tier 1, §6 |
 | **4b** | **Add an `ISO_OUTER_PREF` override so the outer pressure datum can be set explicitly (falls back to the present IC-derived capture when unset), then run a 3–5 point pressure sweep. Mandatory at Tier 1 for two independent reasons: the audit numbers need a sensitivity, and the Tier 2 recipe cannot be inverted from a single-value slice.** Do **not** loosen the boundary instead (§5.4) | **hours to add, ~1 h to sweep** | **§5.4 Tier 1 *and* Tier 2; the only unswept axis of the deliverable** |

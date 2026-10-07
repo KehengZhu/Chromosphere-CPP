@@ -7,7 +7,7 @@ import unittest
 
 import numpy as np
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "util"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "util" / "lib"))
 from conductive_flux import (  # noqa: E402
     conductivity_components,
     physical_conductivity,

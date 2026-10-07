@@ -160,7 +160,7 @@ for FLUX in roe-local swmf-godunov; do
       full no-ionization model_column - 20.0 no-cooling
 done
 
-.venv/bin/python util/pressure_reconstruction_diag.py \
+.venv/bin/python util/release/pressure_reconstruction_diag.py \
   --run roe=outputs/model_column/swmf_godunov/prod_roe-local.txt \
   --run godunov=outputs/model_column/swmf_godunov/prod_swmf-godunov.txt --targets 100
 ```

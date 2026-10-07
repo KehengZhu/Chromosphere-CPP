@@ -6,7 +6,7 @@
 
 **Answer.** Strongly nonlinear, with a flow reversal near $T_{\rm wall}\approx 10$ kK and **no saturation anywhere in the range tested**. On the upflow branch $V_{\rm top}$ follows an approximate power law $V\propto T_{\rm wall}^{3.1}$ whose *local* exponent falls monotonically from $\approx 12$ just above the reversal to $2.6$ at 100 kK. Over $10\to100$ kK the top-of-domain velocity spans $-0.10 \to +792$ m/s, i.e. **four decades of velocity for one decade of wall temperature**. The controlling quantity is the outer-face conductive flux $q_{\rm wall}$, and the response is quantitatively the Antiochos & Sturrock (1978) conduction-driven evaporation balance: the release has no radiative sink and no coronal heating, so a quasi-steady column must export $q_{\rm wall}$ as the enthalpy flux of the evaporating material.
 
-Evidence: `outputs/model_column/twall_sweep/`, metrics in `twall_sweep_metrics.json`, figures `visualization/model_column/twall_sweep_N500_4000s_{V_of_t,V_of_h,summary,support}.png`, and `visualization/model_column/twall_sweep_N500_4000s_overlay.mp4` — all 13 accepted walls overlaid on the same six panels as the release evolution movie (`util/animate_twall_sweep.py`; catalogued in `docs/viz_catalog/model_column.md`).
+Evidence: `outputs/model_column/twall_sweep/`, metrics in `twall_sweep_metrics.json`, figures `visualization/model_column/twall_sweep_N500_4000s_{V_of_t,V_of_h,summary,support}.png`, and `visualization/model_column/twall_sweep_N500_4000s_overlay.mp4` — all 13 accepted walls overlaid on the same six panels as the release evolution movie (`util/release/animate_twall_sweep.py`; catalogued in `docs/viz_catalog/model_column.md`).
 
 ## What was varied, and what was not
 
@@ -14,7 +14,7 @@ Evidence: `outputs/model_column/twall_sweep/`, metrics in `twall_sweep_metrics.j
 
 Everything else is the canonical release configuration: N=500/R4 (661 cells), `h_base = 1600` km, `dh = 553` km, production `Gamma1` table, SWMF exact-Riemann Godunov flux on $(\ln\rho, V, \ln p)$ with the MC3 limiter, physical conduction only, `CHROMO_CFL=0.50`, 4000 s, **double-precision state** (`build_omp`, `CHROMO_STATE_FLOAT32=OFF`). Every accepted run reported `termination=end_time` and `godunov.fallbacks=0`.
 
-Driver: `util/run_twall_sweep.sh`. Analysis and figures: `util/twall_sweep_diag.py`.
+Driver: `util/run/run_twall_sweep.sh`. Analysis and figures: `util/release/twall_sweep_diag.py`.
 
 "Quasi-steady" below means the mean over the last 500 s of the 4000 s run. That is not a true steady state — see *Time convergence* — so it is reported with its drift.
 
@@ -79,12 +79,12 @@ Measured against this one-line estimate, $V_{\rm measured}/V_{\rm predicted}$ = 
 
 ```bash
 # broad log sweep + refinement + the CFL control (about 3 h wall on 16 cores)
-util/run_twall_sweep.sh                                     # 10,15,18,22,30,45,70,100 kK
+util/run/run_twall_sweep.sh                                     # 10,15,18,22,30,45,70,100 kK
 SWEEP_CASES="6000:0.50 8000:0.50 11000:0.50 12000:0.50 13000:0.50 14000:0.50" \
-    util/run_twall_sweep.sh                                  # reversal refinement
+    util/run/run_twall_sweep.sh                                  # reversal refinement
 
 # figures + metrics
-.venv/bin/python util/twall_sweep_diag.py --cfl 0.50 \
+.venv/bin/python util/release/twall_sweep_diag.py --cfl 0.50 \
     --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt \
     --heights 1800 2000 2100 --avg-window 500 \
     --out-dir visualization/model_column --prefix twall_sweep_N500_4000s \

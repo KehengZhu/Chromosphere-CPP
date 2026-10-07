@@ -110,12 +110,11 @@ Simulation output goes under `outputs/`, organized per scenario.
 
 ## 5. Visualize
 
-Plotting scripts live in `util/` and default their output to `visualization/` (gitignored), organized in the same per-scenario subdirectories as `outputs/`.
+Plotting scripts live in `util/release/` (retired scenarios: `util/legacy/`) and default their output to `visualization/` (gitignored), organized in the same per-scenario subdirectories as `outputs/`.
 
 ```sh
-.venv/bin/python util/animate_gentle_column.py outputs/model_column/run.txt
-.venv/bin/python util/plot_output.py           outputs/model_c7/out.txt
-.venv/bin/python util/animate_loop_flare.py    outputs/loops/run.txt
+.venv/bin/python util/release/animate_isentropic.py \
+    outputs/model_column/run.txt visualization/model_column/run_evolution.mp4 20
 ```
 
 [`docs/viz_catalog/`](docs/viz_catalog/README.md) is the catalog of the exact command behind every file in `visualization/` — add an entry whenever you generate a new figure or movie.
@@ -136,7 +135,7 @@ src/two_fluid/                            historical two-fluid research solver
 scenarios/                                initial + boundary conditions, meshes, geometry
 chromo_main.cpp                           CLI driver
 tests/                                    test suite
-util/                                     Python plotting + PFSS extraction pipeline
+util/                                     Python diagnostics: release/ two_temp/ legacy/ run/ lib/ eos/
 docs/doxygen/                             code reference (config + narrative pages)
 docs/writeup-overleaf/                    write-up sources (separate Overleaf repo)
 docs/supporting-papers/                   reference PDFs

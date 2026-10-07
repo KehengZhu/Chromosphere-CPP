@@ -343,7 +343,7 @@
     \toprule
     Claim & Where it comes from \\
     \midrule
-    C7 vs Saha vs CRASH ionization & \texttt{util/plot\_c7\_ionization\_profile.py --mode compare} \\
+    C7 vs Saha vs CRASH ionization & \texttt{util/release/plot\_c7\_ionization\_profile.py --mode compare} \\
     1600\,km truncation & \texttt{docs/doxygen/pages/physics\_model.md}; \texttt{scenarios/model\_column.cpp} \\
     Relaxation timescales & Carlsson \& Stein 2002; Leenaarts et al.\ 2007; Leenaarts 2020 \\
     Toro tests, $E_0$ passivity, 0 fallbacks & \texttt{tests/chromo\_tests.cpp}; \\
@@ -351,8 +351,8 @@
     float32 vs float64 control & \texttt{docs/studies/numerics/float32\_precision\_control\_experiment.md}; \\
       & \texttt{docs/studies/numerics/state\_precision\_release\_cutover.md} \\
     Wall-temperature sweep & \texttt{docs/studies/boundaries/upper\_wall\_temperature\_sensitivity\_recap.md}; \\
-      & \texttt{util/run\_twall\_sweep.sh}, \texttt{util/twall\_sweep\_diag.py} \\
-    Figure provenance & \texttt{figures/README.md}; \texttt{visualize\_commands.md} \S14--16 \\
+      & \texttt{util/run/run\_twall\_sweep.sh}, \texttt{util/release/twall\_sweep\_diag.py} \\
+    Figure provenance & \texttt{figures/README.md}; \texttt{docs/viz\_catalog/} \\
     Test counts & \texttt{./build\_omp/chromo\_tests}, current tree \\
     \bottomrule
   \end{tabular}

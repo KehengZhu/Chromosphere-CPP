@@ -134,7 +134,7 @@ Two by-products correct existing documentation:
 - The "softening" of the local exponent of $V_\mathrm{top}(T_\mathrm{wall})$ in the sweep recap is mostly an artefact of reading every wall at the same 3500–4000 s.
 
 Evidence:
-- script: `util/twall_relaxation_diag.py`
+- script: `util/release/twall_relaxation_diag.py`
 - metrics: `outputs/model_column/twall_sweep/twall_relaxation_metrics.json`
 - figures: `visualization/model_column/twall_relaxation_{phases,spacetime,timescales}.png` (commands in `docs/viz_catalog/model_column.md`)
 
@@ -208,7 +208,7 @@ Three consequences:
 - **The energy balance at the top is $F(h_\mathrm{top} - h_c) = q_\mathrm{wall}$.** The sweep recap's one-line estimate used $h_c = 0$ and was off by 1.2–2$\times$. With $h_c$, the ratio $F(h_\mathrm{top} - h_c)/q_\mathrm{wall}$ is 0.89–1.0 once relaxed.
 - **$J$ is a function of the boundary state only.** For $T \gg \chi_H/5k_B$, $h \approx 5k_BT/m_H$ and $J \to (2\kappa_0 m_H/25k_B)\,T_\mathrm{top}^{5/2}$. The ionization term steepens it at lower $T$.
 
-**Verification.** $J$ is computed from first principles: Spitzer plus neutral $\kappa$ (`util/conductive_flux.py`) and the Saha $h$ at the run's $p_\mathrm{top}$, $T_\mathrm{top}$ and measured $h_c$. It is compared with the measured $F L$:
+**Verification.** $J$ is computed from first principles: Spitzer plus neutral $\kappa$ (`util/lib/conductive_flux.py`) and the Saha $h$ at the run's $p_\mathrm{top}$, $T_\mathrm{top}$ and measured $h_c$. It is compared with the measured $F L$:
 
 | $T_\mathrm{wall}$ [kK] | $F L/J$ at 300 s | 1000 s | 2000 s | 4000 s |
 |---:|---:|---:|---:|---:|
@@ -365,7 +365,7 @@ Recipe for the current C7 initial condition:
 ## Reproduce
 
 ```bash
-.venv/bin/python util/twall_relaxation_diag.py \
+.venv/bin/python util/release/twall_relaxation_diag.py \
     --run 100000=outputs/model_column/twall_sweep/twall_100kK_cfl0.25.txt
 ```
 

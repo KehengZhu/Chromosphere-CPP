@@ -47,7 +47,7 @@ The animation was decoded using
 
 ```bash
 ISO_GAMMA=1.05 \
-python util/animate_isentropic.py \
+python util/release/animate_isentropic.py \
   outputs/model_column/iso_t22k_ns2000_gamma105_bestwb_condon.txt \
   visualization/model_column/iso_t22k_evolution_ns2000_gamma105_bestwb.mp4
 ```

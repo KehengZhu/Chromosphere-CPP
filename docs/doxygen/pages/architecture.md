@@ -94,7 +94,7 @@ Selected only by the `model_column_2t` scenario. See @ref two_temp_solver for th
 | `scenarios/analytic_canopy.cpp` | The canopy recipe and its IC/BC. |
 | `scenarios/data_file_parser.hpp` | Parser interface for the tabulated `[META]` / `[CELLS]` / `[GHOSTS]` scenario data-file format. |
 | `scenarios/data_file_parser.cpp` | The parser. `[CELLS]` rows are `i ds_m B_imh_T B_iph_T phi_g_imh phi_g_iph ne_im3 nn_im3 T_K`; `[GHOSTS]` is exactly four rows tagged `outer_0`, `outer_1`, `inner_0`, `inner_1`. |
-| `scenarios/pfss_field_line.hpp` | PFSS field-line scenario driven by a tabulated data file from `util/extract_field_line.py`. |
+| `scenarios/pfss_field_line.hpp` | PFSS field-line scenario driven by a tabulated data file from `util/legacy/extract_field_line.py`. |
 | `scenarios/pfss_field_line.cpp` | Grid population from the parsed field-line table and its boundary update. |
 | `scenarios/data/` | Tracked field-line and loop input tables (PFSS lines, event ensembles, closed loops, SOL2014). Excluded from Doxygen. |
 
@@ -106,7 +106,7 @@ Selected only by the `model_column_2t` scenario. See @ref two_temp_solver for th
 | `tests/test_conductive_flux.py` | Python regression tests for the shared conductive-flux diagnostic; imports `util/`. |
 | `include/armadillo`, `include/armadillo_bits/` | Vendored header-only Armadillo, built with `ARMA_DONT_USE_LAPACK` / `ARMA_DONT_USE_BLAS`. Excluded from Doxygen; not ours. |
 | `data/eos/` | Versioned EOS runtime data: `gamma1_hydrogen_v1.dat` (the production `Gamma1` table) and its committed `.sha256`. |
-| `util/` | Python analysis and plotting scripts, the `util/eos/` table generator and validators, `util/extract_field_line.py`, and the venv setup. Figures default to `visualization/`. |
+| `util/` | Python analysis and plotting scripts — `util/release/` (release `model_column` diagnostics), `util/two_temp/` (`model_column_2t`), `util/legacy/` (retired scenarios, including `extract_field_line.py`), `util/run/` (sweep and ensemble drivers), `util/lib/` (shared modules) — plus the `util/eos/` table generator and validators and the venv setup. Figures default to `visualization/`; their commands are catalogued in `docs/viz_catalog/`. |
 | `fortran/` | Optional Fortran/SWMF coupling shim: `chromo_interface.cpp` (C interface over the Grid and solver), `ModChromoParams.f90`, `ModChromosphereCPP.f90`, `ModChromosphereTest.f90`, `chromo_main.f90`. Not part of the CMake build. |
 | `docs/` | Engineering recaps and plans, `supporting-papers/`, this Doxygen tree, and the separate Overleaf write-up worktree `docs/writeup-overleaf/`. |
 | `outputs/` | Code outputs: snapshots, sidecars, console logs, `output.log`. Organized into per-scenario subdirectories. |

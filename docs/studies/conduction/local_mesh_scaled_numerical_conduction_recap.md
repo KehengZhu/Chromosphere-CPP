@@ -210,7 +210,7 @@ refinement while `F_eff` moves only +2%.
 ### Outer thermal boundary layer
 
 One definition, applied identically at all three resolutions (new
-`outer_boundary_layer` helper in `util/outer_refine_diag.py`): with
+`outer_boundary_layer` helper in `util/release/outer_refine_diag.py`): with
 `G(h) = |dT/ds|` evaluated on the actual non-uniform cell centres, the layer is
 the contiguous run of top cells with `G >= 0.1 * max(G)`, and its thickness is
 measured from that edge to the outer cell centre.

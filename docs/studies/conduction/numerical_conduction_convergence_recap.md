@@ -119,7 +119,7 @@ Modified (4):
 - `chromo_main.cpp` — `CHROMO_OUTER_COND_DIAG` / `CHROMO_OUTER_COND_STRIDE`, `.outercond` sidecar
 
 New:
-- `util/numerical_conduction_diag.py` — reads `.outercond` and reuses `resolution_scan_diag.face_metrics` / `face_flux_diag.read_faceflux` for `mean(F_eff)`, so no metric is re-typed. Includes a tolerant face-flux reader for the sidecar the aborted run truncated.
+- `util/release/numerical_conduction_diag.py` — reads `.outercond` and reuses `resolution_scan_diag.face_metrics` / `face_flux_diag.read_faceflux` for `mean(F_eff)`, so no metric is re-typed. Includes a tolerant face-flux reader for the sidecar the aborted run truncated.
 - `tests/chromo_tests.cpp::test_outer_conduction_capture_matches_solver_face`
 - `docs/studies/conduction/numerical_conduction_convergence_recap.md` — this file
 

@@ -67,7 +67,7 @@ Everything else in the outer face is unchanged: `p_g0 = kOuterPRef` (fixed reser
 
 One diagnostic line was added at the `kOuterPRef` capture (stderr, once per capture) recording `kOuterPRef`, `p_top`, `T_top`, `T_hydro_g0`, `T_cond_wall` and the flag, so post-run analysis can form the pressure deficit `p_top − p_g0` without re-deriving the anchor.
 
-### `util/upper_bc_decouple_diag.py` (new)
+### `util/release/upper_bc_decouple_diag.py` (new)
 
 Reads the `.gamma_diag` sidecar and reports all twelve requested metrics. Metric definitions are documented in its docstring; the two non-obvious ones:
 

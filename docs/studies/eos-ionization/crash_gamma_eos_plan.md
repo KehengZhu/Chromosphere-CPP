@@ -44,7 +44,7 @@ This partition — neutral-H translational in `E_N`, proton+electron translation
 
 ### Stage 0 — Offline diagnostic (approved to run; no C++)
 
-Extend `util/plot_eos_gamma.py` to walk the C7 column and output `x_C7(h)` vs `x_Saha(h)`, `γ_E(h)`, `Γ₁(h)`, and `C_V,γ^eff(h)` vs `C_V,CRASH(h)`.
+Extend `util/release/plot_eos_gamma.py` to walk the C7 column and output `x_C7(h)` vs `x_Saha(h)`, `γ_E(h)`, `Γ₁(h)`, and `C_V,γ^eff(h)` vs `C_V,CRASH(h)`.
 
 The `C_V` panel is an **implementation-consistency verification, not a design fork.** With (i) the CRASH switches off, (ii) the C++ Saha identical to CRASH's, and (iii) the same energy zero-point, `e_γ(ρ,T) = p_Saha/(γ_E−1)` equals the CRASH internal energy *mathematically*, so `∂e_γ/∂T` must equal `C_V,CRASH`. A significant disagreement means a bug: inconsistent Saha, statistical weights, an uncopied CRASH low-T cutoff/floor, wrong units, a misused γ column, or an interpolation/numerical-derivative error. Compute `C_V^eff` by central difference in `ln T` and compare the normalized `C_V/(n_H k_B)` (the table's `Cv` is k_B per heavy particle; the conduction stage uses a volumetric heat capacity).
 

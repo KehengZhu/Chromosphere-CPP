@@ -26,7 +26,7 @@
 
 Radiation is **not** release physics: the release energy equation has no $Q$. Item 2 is the release result. Items 1, 4 and 5 are the general result, which reduces to item 2 at $Q = 0$.
 
-Numerical check: `util/tr_length_steady.py` (§8). Post-processing only; no simulation.
+Numerical check: `util/release/tr_length_steady.py` (§8). Post-processing only; no simulation.
 
 ---
 
@@ -297,7 +297,7 @@ The steady family is one-parameter in $F$, both with and without $Q$. Equations 
 
 ## 8. Numerical check
 
-`util/tr_length_steady.py` evaluates (8)–(23) with exactly the release closures: the Saha constants of `eos.hpp` and $\kappa$ from `util/conductive_flux.py`. Inputs: $T_\mathrm{top}=22$ kK, $p_\mathrm{top}=0.0103$ Pa, $T_c=6.7$ kK, $T_1=7.5$ kK.
+`util/release/tr_length_steady.py` evaluates (8)–(23) with exactly the release closures: the Saha constants of `eos.hpp` and $\kappa$ from `util/lib/conductive_flux.py`. Inputs: $T_\mathrm{top}=22$ kK, $p_\mathrm{top}=0.0103$ Pa, $T_c=6.7$ kK, $T_1=7.5$ kK.
 
 **1. ODE (8) against the closed form (23)** at $F=2.683\times10^{-10}$ kg m⁻² s⁻¹ (the measured 4000 s top mass flux of the single-T release): both give $L_\mathrm{TR}=16.389$ km (relative difference $1.4\times10^{-7}$). The measured release $L_\mathrm{TR}$ is 13–15 km. That is consistent with the measured $F L/J\approx0.92$ at 4000 s.
 

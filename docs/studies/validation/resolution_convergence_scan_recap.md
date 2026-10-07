@@ -54,7 +54,7 @@ The back-pressure anchor agrees to **0.03 %** across the scan, so the pressure b
 
 ## 2. Diagnostic provenance
 
-The production face-flux capture was reused unchanged: `Grid::capture_face_flux` / `GammaFaceFluxCapture` (`chromosphere.hpp:123`, `double` arrays throughout), filled by `capture_gamma_face_flux` in `src/rhs.cpp`, emitted by `chromo_main` under `CHROMO_FACE_FLUX_DIAG=1`. **No production C++ was touched this stage.** The only new code is the Python analysis script `util/resolution_scan_diag.py`, which imports its readers and the `roughness`/`relstd` definitions from the existing `util/face_flux_diag.py` and `util/upper_bc_decouple_diag.py` so the metric definitions are literally shared, not re-typed.
+The production face-flux capture was reused unchanged: `Grid::capture_face_flux` / `GammaFaceFluxCapture` (`chromosphere.hpp:123`, `double` arrays throughout), filled by `capture_gamma_face_flux` in `src/rhs.cpp`, emitted by `chromo_main` under `CHROMO_FACE_FLUX_DIAG=1`. **No production C++ was touched this stage.** The only new code is the Python analysis script `util/release/resolution_scan_diag.py`, which imports its readers and the `roughness`/`relstd` definitions from the existing `util/release/face_flux_diag.py` and `util/release/upper_bc_decouple_diag.py` so the metric definitions are literally shared, not re-typed.
 
 Per-record sanity checks, printed for every run and time:
 
@@ -190,7 +190,7 @@ The driver is visible in the boundary state, and it is the *thermal* boundary, n
 
 - **`T_top` converges toward the 22 000 K wall** (19 526 -> 20 695 -> 21 362) and the wall-to-top-cell gap collapses (2474 -> 1305 -> 638 K, i.e. ~`O(Delta h)`). That is the expected behaviour of a first-order Dirichlet boundary layer.
 - **The realized conductive input is therefore not resolution-converged either**: `E_cond` falls by 1.66x then 1.57x per halving. Since this is the *drive* for the evaporation, an unconverged drive guarantees an unconverged evaporation rate. Result D is a boundary-drive problem, not a continuity problem.
-  Caveat: `q_top` here uses the same first-order estimator as `util/upper_bc_decouple_diag.py` (`kappa_solver(top) * (T_wall - T_top)/Delta h`, cell conductivity because the sidecar lacks the ghost density), so its *absolute* value is diagnostic-grade; the resolution *trend* is what matters and it is unambiguous.
+  Caveat: `q_top` here uses the same first-order estimator as `util/release/upper_bc_decouple_diag.py` (`kappa_solver(top) * (T_wall - T_top)/Delta h`, cell conductivity because the sidecar lacks the ghost density), so its *absolute* value is diagnostic-grade; the resolution *trend* is what matters and it is unambiguous.
 - **Reassuringly, the top-cell anomaly converges away.** `V_top/V_{N-2}` = 1.269 -> 1.187 -> **1.004**: at ns=2000 the last cell simply continues the interior, so the residual last-cell excess left by the hydro-T decoupling stage was itself an `O(Delta h)` artefact. No velocity reversal at any resolution.
 - **No drainage, no pressure runaway, at any resolution.** `p_top` is constant to 4 digits across the scan, `M/M(0)-1` is `<= 7e-04` and *shrinks* with refinement, and all three runs are in the same physical regime (subsonic upward outflow at the top, positive mass flux throughout the window). Nothing fell into a different regime.
 
@@ -260,7 +260,7 @@ No change to the Rusanov flux, the limiter, the EOS, the well-balanced subtracti
 ## 11. Files
 
 New:
-- `util/resolution_scan_diag.py` — the analysis script (metric and mapping definitions in its docstring)
+- `util/release/resolution_scan_diag.py` — the analysis script (metric and mapping definitions in its docstring)
 - `docs/studies/validation/resolution_convergence_scan_recap.md` — this document
 - `outputs/model_column/resconv_ns{500,1000,2000}_dec_1000s.txt{,.faceflux,.gamma_diag}` + `.console.log`
 - `outputs/model_column/resconv_report.txt`, `outputs/model_column/resconv_metrics.json`

@@ -9,7 +9,7 @@
 #      ISO_RIEMANN=swmf-godunov ISO_RECONSTRUCTION=lnrho-v-lnp run bitwise (apart
 #      from the self-referential sidecar path written into the snapshot header);
 #   2. release smoke — N500 (661 actual cells), 100 s, with the face-flux and
-#      outer-conduction sidecars, analysed by util/pressure_reconstruction_diag.py
+#      outer-conduction sidecars, analysed by util/release/pressure_reconstruction_diag.py
 #      for eps_p, Q_V, Q_M, Q_eff, F_eff, T_top, p_top and negative-velocity count.
 #
 # Usage:  scripts/release_validation.sh [output_dir]
@@ -65,7 +65,7 @@ if ! grep -q '^godunov\.fallbacks=0 ' "${SMOKE%.txt}.console.log"; then
     exit 1
 fi
 
-"${PY}" util/pressure_reconstruction_diag.py \
+"${PY}" util/release/pressure_reconstruction_diag.py \
     --run release="${SMOKE}" --targets 100 \
     --json "${SMOKE%.txt}_metrics.json"
 

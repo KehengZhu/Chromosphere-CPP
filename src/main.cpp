@@ -12,7 +12,8 @@
  *     the Grid when it generates a locally refined mesh).
  *  3. A loaded `Gamma1` table selects the RELEASE single-fluid solver
  *     (mixture_advance()); without one the driver runs the historical
- *     two-fluid solver (advance_Euler_state() / advance_Euler_explicit_state()).
+ *     two-fluid solver (advance_Euler_state() / advance_Euler_explicit_state()),
+ *     which is compiled in only with -DCHROMO_ENABLE_LEGACY=ON.
  *     The release path rejects `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID`,
  *     `ISO_IONIZATION` and finite-rate ionization outright.
  *  4. Each step refreshes the boundary, computes the CFL timestep, advances,
@@ -27,7 +28,9 @@
 #include "core/chromosphere.hpp"
 #include "single_fluid/mixture.hpp"
 #include "two_temp/two_temp.hpp"
-#include "two_fluid/two_fluid.hpp"
+#ifdef CHROMO_ENABLE_LEGACY
+#include "legacy/two_fluid/two_fluid.hpp"
+#endif
 #include "core/physics.hpp"
 #include "core/profiling.hpp"
 #include "core/parallel.hpp"
@@ -137,8 +140,10 @@ int main(int argc, char** argv) {
     //   ionization:   "ionization" or "no-ionization" (default: no-ionization for
     //                 the default model_column release, ionization otherwise)
     //   scenario:     "model_column" (default — the single-fluid RELEASE column) |
+    //                 "model_column_2t" (experimental two-temperature) |
     //                 "model_gentle" | "model_c7" | "model_flare" |
-    //                 "pfss_field_line" | "analytic_canopy"  (all two-fluid)
+    //                 "pfss_field_line" | "analytic_canopy"  (all two-fluid;
+    //                 legacy, built only with -DCHROMO_ENABLE_LEGACY=ON)
     //   data_path:    required for tabulated scenarios (e.g. pfss_field_line);
     //                 ignored otherwise (pass "-" or "" for scenarios that don't use it)
     //   time_mult:    multiplier on the default total_time (default 1.0). Step
@@ -620,7 +625,15 @@ int main(int argc, char** argv) {
             mixture_decode_into(grid,xn,*decoded,state_generation,previous_decoded);
             dt = mixture_timestep(grid,xn,*decoded);
         } else {
+#ifdef CHROMO_ENABLE_LEGACY
             dt = cal_dt_i(grid,xn);
+#else
+            // Unreachable: make_scenario() rejects every two-fluid scenario in a
+            // build without the legacy code, and the Saha/Gamma1 scenarios
+            // always load a table.
+            throw std::logic_error("the two-fluid solver is not built; "
+                                   "reconfigure with -DCHROMO_ENABLE_LEGACY=ON");
+#endif
         }
         const Real dt_avg = arma::mean(dt);
         // Arm the read-only face-flux capture for THIS step's single RHS call. dt is
@@ -648,9 +661,15 @@ int main(int argc, char** argv) {
             two_temp_previous = two_temp_work.decoded;
         } else if (release_mode)
             xn = mixture_advance(grid,xn,dt,*decoded);
-        else
+        else {
+#ifdef CHROMO_ENABLE_LEGACY
             xn = explicit_only ? advance_Euler_explicit_state(grid,xn,dt)
                                : advance_Euler_state(grid,xn,dt);
+#else
+            throw std::logic_error("the two-fluid solver is not built; "
+                                   "reconfigure with -DCHROMO_ENABLE_LEGACY=ON");
+#endif
+        }
         if (grid.capture_face_flux) {
             write_face_record(time, step);   // t/step of the state the RHS was taken at
             grid.capture_face_flux = false;

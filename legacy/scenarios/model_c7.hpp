@@ -1,5 +1,5 @@
 /*!
- * @file scenarios/model_c7.hpp
+ * @file legacy/scenarios/model_c7.hpp
  * @brief Model C7 quiet-Sun chromosphere scenario and the Route-B photoionization closure.
  * @ingroup scenarios
  *
@@ -34,7 +34,7 @@
 #pragma once
 
 #include "core/chromosphere.hpp"
-#include "c7_profile.hpp"   // MODEL_C7 table, c7_full_profile, c7_full_temperature_pchip
+#include "scenarios/c7_profile.hpp"   // MODEL_C7 table, c7_full_profile, c7_full_temperature_pchip
 
 namespace chromosphere {
 

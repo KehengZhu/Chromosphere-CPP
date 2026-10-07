@@ -1,0 +1,889 @@
+/*!
+ * @file legacy/scenarios/model_gentle.cpp
+ * @brief LEGACY: `model_gentle`, the historical two-fluid field-aligned
+ *        chromosphere-to-corona column.
+ * @ingroup scenarios
+ *
+ * The two-fluid leg that used to live inside scenarios/model_column.cpp, moved
+ * here verbatim when the two-fluid solver went to legacy/. It is the same C7
+ * column, mesh and outer-face closure as the release `model_column`, but it
+ * never loads a Gamma1 table: it runs the seven-row two-fluid solver with a
+ * fixed adiabatic index, finite-rate ionization, a radiative sink, TRAC and the
+ * mesh-scaled artificial conduction term, and keeps the first-order inner ghost
+ * ladder and the frozen equilibrium reference (`Grid::eq_wb`). FROZEN: fix only
+ * what breaks the legacy build. Its log lines keep the historical
+ * "[model_column]" prefix so its output is unchanged.
+ */
+#include "model_gentle.hpp"
+#include "model_c7.hpp"                 // c7_route_b_photoionization
+#include "scenarios/c7_profile.hpp"     // c7_full_profile (C7 table)
+#include "scenarios/mesh.hpp"           // shared static local-refinement mesh builder
+
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace chromosphere {
+
+// ---------------------------------------------------------------------------
+// Module state captured by model_gentle_ic and reused by the boundary update.
+// The interior is single-fluid neutral-dominated hydrogen with a realistic
+// frozen ionization profile (neutral chromosphere, ionized corona).
+// ---------------------------------------------------------------------------
+namespace {
+Real kAjump       = 1.0f;      // top temperature jump: T_ghost1 = a·T_top
+Real kBjump       = 1.0f;      // T_ghost2 = b·T_ghost1
+// ---------------------------------------------------------------------------
+// Inner boundary — the LOWER TRUNCATION of the modeled domain at h_base
+// (1600 km by default). This is NOT the photosphere: it is a mid-chromospheric
+// cut chosen because the Saha/LTE equilibrium closure this solver uses is only
+// intended to be trusted from about that height upward. The real atmosphere
+// continues below it and is simply outside the model. Consequently the two
+// ghost cells are a NUMERICAL closure for the MUSCL stencil, not a claim that
+// the LTE model extends downward, and the physical content of the boundary is
+// exactly one thing: the lower chromosphere below the cut behaves, on the
+// timescales resolved here, as a quasi-static stratified reservoir.
+// ---------------------------------------------------------------------------
+Real kInnerRhoI   = 0.0f;      // base ion density (RHO slot ghost 0)
+Real kInnerRhoN   = 0.0f;
+// Two-fluid (non-release) ghost ladder: first-order p_0 + k ρ_0 g Δs with ρ ∝ p.
+Real kInnerPiGh   = 0.0f;      // ion ghost pressure   p_i,0 + ρ_i,0 g Δs
+Real kInnerPnGh   = 0.0f;      // neutral ghost pressure p_n,0 + ρ_n,0 g Δs
+Real kInnerPiGh2  = 0.0f;      // second inner ghost (2 Δs below): p_0 + 2ρgΔs
+Real kInnerPnGh2  = 0.0f;
+Real kInnerRhoIGh  = 0.0f;     // isothermal-hydrostatic ghost densities (ρ ∝ p at T₀):
+Real kInnerRhoNGh  = 0.0f;     //   ρ_{i,n},G0 = ρ_{i,n},0 · p_{i,n},G0 / p_{i,n},0
+Real kInnerRhoIGh2 = 0.0f;     //   ρ_{i,n},G1 = ρ_{i,n},0 · p_{i,n},G1 / p_{i,n},0
+Real kInnerRhoNGh2 = 0.0f;
+Real kTtopRef     = 0.0f;      // FIXED reference top temperature [K] for the jump
+bool  kTtopFixedAbs = false;    // ISO_T_TOP>0: kTtopRef is an ABSOLUTE imposed top T
+// FIXED reference outer ghost pressure [Pa] — the coronal reservoir back-pressure,
+// captured one-sided-hydrostatically from the IC top cell (and recaptured at the
+// relax→Stage-2 edge). Subsonic outflow admits exactly ONE incoming characteristic,
+// so exactly one condition may come from outside: this back-pressure. Anchoring it to
+// a FIXED reference rather than to a live interior cell is what makes the outer face
+// well posed — see the outer-face block for why both live-cell anchors fail.
+Real kOuterPRef    = 0.0f;
+bool  kOuterPRefSet = false;    // captured lazily on the first update_bc call
+Real kHeatFluxOn  = false;     // Stage 2 (conduction + jump) ⇒ open (Mach-capped) top
+Real kVcapMach    = 0.1f;      // outer outflow cap as a fraction of c_s
+bool  kInnerTNeumann = false;   // lower-BC conduction temperature: Dirichlet vs Neumann
+// Relaxation phase (ISO_RELAX_TIME > 0): Stage-1 adiabatic relaxation (heat flux off,
+// no jump, V=0 reservoir top) for sim_time < kRelaxTime, THEN Stage 2.
+Real kRelaxTime     = 0.0f;
+bool  kHeatFluxTarget = false;
+bool  kStage2Started  = true;   // false during relax; flips to recapture kTtopRef
+// Corona testbed (ISO_CORONA=1): resolved ~1 MK corona (needs Spitzer κ_e + TRAC).
+bool  kCorona = false;
+// Imposed Neumann coronal flux q(T) ramp (ISO_QFLUX*), the model_c7/RTV closure.
+bool  kQflux = false;
+// ISO_HYDRO_T_DECOUPLE=1: split the two roles the outer ghost temperature plays.
+// The HYDRO ghost temperature becomes a zero-gradient extrapolation of the live top
+// cell (T_hydro_g0 = T_hydro_g1 = T_top) instead of the fixed a·T_ref wall, while
+// CONDUCTION keeps seeing exactly the same fixed wall a·T_ref through
+// grid.outer_conduction_temperature. Subsonic outflow admits ONE incoming
+// characteristic and the fixed reservoir back-pressure kOuterPRef already supplies
+// it; the additional fixed hydro T pins the thermal/entropy state as well, which is
+// the suspected source of the ~20-30 km top boundary layer. This flag removes ONLY
+// that extra hydro constraint, holding the conductive energy input fixed.
+// Code default 0, and the release preset also sets 0: on the N=500/R4 mesh the top
+// cell relaxes to the wall in ~0.1 s, so the extra hydro constraint is inert
+// (V_top within 1 %) — see outer_temperature_bc_single_t_recap.md.
+bool  kHydroTDecouple = false;
+// ISO_OUTER_T_HYDRO_WALL=1 (decoupled mode only): the HYDRO ghost temperature is
+// PINNED to the same fixed wall the conduction rows see, T_hydro = T_cond = a·T_ref,
+// instead of zero-gradient-extrapolating the live top cell. The wall stays a
+// PHYSICAL-FACE conduction datum (unlike baseline decouple=0, where the wall reverts
+// to a ghost-CENTRE datum), so relative to decouple=1 this moves exactly one thing:
+// the thermal state the outer-face reconstruction and Riemann problem carry.
+bool  kOuterHydroTWall = false;
+// ISO_OUTER_P_NEUMANN: the outer ghost pressure stops being the FIXED reservoir
+// back-pressure kOuterPRef and is extrapolated off the LIVE top cell instead — a
+// Neumann pressure closure. Subsonic outflow admits exactly ONE incoming
+// characteristic, so exactly one condition may be imposed from outside; this swaps
+// WHICH variable carries it, from the back-pressure to the temperature, and is
+// therefore only well posed with a FIXED hydro ghost temperature
+// (ISO_OUTER_T_HYDRO_WALL=1, or baseline decouple=0). Two readings of "no imposed
+// pressure", both selectable because they are physically different statements:
+//   1 = dp/ds = 0            — p_g1 = p_g0 = p_top, the literal zero-gradient BC.
+//       Note this is NOT gravitationally consistent: the interior needs
+//       dp/ds = −ρg, so the ghost withholds the hydrostatic support of the top cell.
+//   2 = dp/ds = −ρg          — the same trapezoidal EOS-closed ladder the release
+//       uses (hse_rung), but ANCHORED ON THE LIVE TOP CELL instead of kOuterPRef.
+//       Hydrostatically consistent, and imposes no external pressure datum at all.
+int   kOuterPNeumann = 0;
+
+// Pack a LEGACY two-fluid ghost cell from explicit ion/neutral densities,
+// temperature, velocity and the gravitational potential (p_i = 2 n_i k T incl.
+// electrons, p_n = n_n k T, ε_e = 3/2 p_e ⇒ T_e = T_i). Taking (rho_i, rho_n)
+// explicitly lets each ghost carry the LOCAL ionization fraction (ionized corona
+// ↔ neutral chromosphere). The release solver packs its ghosts through
+// mixture_pack_ghost instead, which needs only the total density.
+void pack_ghost(Vec& ob, const Grid& grid, Real rho_i, Real rho_n, Real T, Real V, Real phi_g) {
+    const Real n_i = rho_i / grid.m_i;
+    const Real n_n = rho_n / grid.m_n;
+    const Real p_i = 2.0f * n_i * grid.k_b * T;   // protons + electrons
+    const Real p_n =        n_n * grid.k_b * T;
+    const Real p_e =        n_i * grid.k_b * T;   // ε_e = 3/2 p_e ⇒ T_e = T
+    ob(cons::RHO_I) = rho_i;
+    ob(cons::RHO_N) = rho_n;
+    ob(cons::MOM_I) = rho_i * V;
+    ob(cons::MOM_N) = rho_n * V;
+    ob(cons::E_I)   = grid.inv_gm1() * p_i + 0.5f * rho_i * V * V + rho_i * phi_g;
+    ob(cons::E_N)   = grid.inv_gm1() * p_n + 0.5f * rho_n * V * V + rho_n * phi_g;
+    ob(cons::E_E)   = grid.inv_gm1() * p_e;
+}
+
+// Per-cell (T, n_i, n_n) at height h_km from the real C7 atmosphere via
+// c7_full_profile (Avrett & Loeser Table 26): n_i = n_e (ionized), n_n = n_HI.
+void c7_cell(Real h_km, Real& T, Real& n_i, Real& n_n) {
+    Real n_e, n_HI;
+    c7_full_profile(h_km, T, n_e, n_HI);
+    n_i = n_e;
+    n_n = n_HI;
+}
+
+} // namespace
+
+Vec model_gentle_ic(Grid& grid) {
+    auto env_f = [](const char* key, Real fallback) -> Real {
+        if (const char* e = std::getenv(key)) {
+            try { return std::stof(std::string(e)); } catch (...) {}
+        }
+        return fallback;
+    };
+
+    // The two-fluid research solver never runs with a Gamma1 table: a loaded
+    // table selects the Saha/Gamma1 solvers (model_column / model_column_2t).
+    if (!grid.eos_gamma_table.empty())
+        throw std::logic_error("model_gentle_ic: model_gentle is the two-fluid "
+                               "solver and must not be given a Gamma1 table");
+
+    // --- IC mode ----------------------------------------------------------
+    // The IC is ALWAYS the real Model C7 profile with the density re-integrated
+    // hydrostatically (clean V≈0 start; the analytic-isentrope toy IC is retired).
+    // ISO_CORONA extends the top up into a resolved ~1 MK corona (to
+    // ISO_CORONA_TOP_KM) and turns on TRAC so the ionized corona conducts via
+    // Spitzer κ_e and can drive A&S78 conduction-driven evaporation.
+    kCorona = (env_f("ISO_CORONA", 0.0f) != 0.0f);
+
+    // --- parameters -------------------------------------------------------
+    // Lower truncation height of the modeled domain, in km measured from the
+    // photosphere (that is the HEIGHT GAUGE only -- the domain itself starts
+    // here, at 1600 km, well above it). See the inner-boundary block.
+    const Real h_base     = env_f("ISO_H_BASE", 0.0f);
+    const Real corona_top = env_f("ISO_CORONA_TOP_KM", 10000.0f);          // km, coronal top
+    Real       DH_km      = env_f("ISO_DH", kCorona ? (corona_top - h_base) : 1303.0f); // km
+    // Base (T, n_H) from the C7 profile at h_base.
+    Real T_base, ni_b, nn_b;
+    c7_cell(h_base, T_base, ni_b, nn_b);
+    const bool  heat_flux_on = (env_f("ISO_HEAT_FLUX", 0.0f) != 0.0f);
+    // Stage 2b radiative sink. Gentle evaporation is the competition between the
+    // downward conductive flux and radiative cooling (Antiochos & Sturrock 1978).
+    const bool  cooling_on = heat_flux_on && (env_f("ISO_COOLING", 0.0f) != 0.0f);
+    // Two-fluid research opt-ins.
+    const bool  two_fluid_on  = (env_f("ISO_TWO_FLUID", 0.0f) != 0.0f);
+    const bool  ionization_on = (env_f("ISO_IONIZATION", 0.0f) != 0.0f);
+    kHeatFluxOn        = heat_flux_on;
+    kAjump             = env_f("ISO_TJUMP_A", 1.0f);
+    kBjump             = env_f("ISO_TJUMP_B", 1.0f);
+    kVcapMach          = env_f("ISO_VCAP", 0.1f);
+    kInnerTNeumann     = (env_f("ISO_INNER_T_NEUMANN", 0.0f) != 0.0f);
+    // Upper-BC over-specification experiment: hydro ghost T free-floats (zero
+    // gradient), conduction wall unchanged. Default 0 ⇒ the release single-T BC.
+    kHydroTDecouple    = (env_f("ISO_HYDRO_T_DECOUPLE", 0.0f) != 0.0f);
+    // Outer-face closure variant: which ONE condition the subsonic-outflow face
+    // imposes. Release = fixed back-pressure + fixed ghost T (decouple=0). Setting
+    // both knobs is the swap: fixed hydro/conduction T + a Neumann pressure.
+    kOuterHydroTWall   = (env_f("ISO_OUTER_T_HYDRO_WALL", 0.0f) != 0.0f);
+    kOuterPNeumann     = static_cast<int>(env_f("ISO_OUTER_P_NEUMANN", 0.0f));
+    if (kOuterPNeumann < 0 || kOuterPNeumann > 2)
+        throw std::runtime_error(
+            "model_gentle_ic: ISO_OUTER_P_NEUMANN must be 0 (fixed reservoir "
+            "back-pressure, the release), 1 (dp/ds = 0) or 2 (dp/ds = -rho g, "
+            "anchored on the live top cell)");
+    if (kOuterPNeumann && kHydroTDecouple && !kOuterHydroTWall)
+        throw std::runtime_error(
+            "model_gentle_ic: a nonzero ISO_OUTER_P_NEUMANN removes the imposed "
+            "outer pressure, so the one condition the subsonic-outflow face admits "
+            "must come from the temperature. Combine it with "
+            "ISO_OUTER_T_HYDRO_WALL=1 (fixed hydro ghost T at the conduction wall) "
+            "or with ISO_HYDRO_T_DECOUPLE=0; with the decoupled extrapolated hydro "
+            "temperature the face would impose nothing and the column drains.");
+
+    // Adiabatic index. Default 5/3. ISO_GAMMA near 1 (e.g. 1.05) makes the gas
+    // nearly isothermal — a polytropic stand-in for the radiative thermostat the
+    // conduction-only experiment leaves out. Set BEFORE the IC/BC build.
+    grid.gamma_mono = env_f("ISO_GAMMA", grid.gamma_mono);
+    grid.single_fluid = !two_fluid_on;
+    grid.enable_ionization = ionization_on;
+    grid.enable_Te = false;
+
+    // --- geometry: straight field line, gravity on -----------------------
+    // Static local refinement (scenarios/mesh.hpp). peek_ns() sized the grid to the
+    // coarse-equivalent count (ISO_NS); ISO_REFINE_* ADD cells inside the refined band
+    // and grade smoothly to the coarse spacing outside it. ISO_REFINE_PROFILE picks
+    // which end the band is anchored to: `lower` (default, historical: fine [s_lo,s_hi]
+    // then grade back up to coarse) or `outer` (fine from s_lo to the domain TOP, with
+    // the grade in [s_lo−τ, s_lo]) — the latter targets the upper TR / outer boundary.
+    // The conduction solver uses these actual mesh metrics to form the face-local
+    // numerical diffusivity; ds_m remains useful only for uniform-grid geometry.
+    // Uniform mesh reproduced byte-for-byte.
+    const arma::uword ns_coarse = grid.ns;
+    const Real ds_m = (DH_km * 1000.0f) / static_cast<Real>(ns_coarse);   // coarse Δs [m]
+    const RefineParams rp = refine_params_from_env(/*iso_alias=*/true);
+
+    std::vector<double> face_m;   // canonical faces [m] from the inner face (empty ⇒ uniform)
+    if (rp.enabled()) {
+        face_m = build_static_mesh_faces(static_cast<double>(DH_km) * 1000.0, ns_coarse, rp);
+        grid.resize(static_cast<arma::uword>(face_m.size()) - 1);   // zeros the ns-sized arrays
+    }
+
+    // Set the field-line geometry AFTER any resize (resize reallocates/zeros these).
+    grid.B_i.ones();
+    grid.B_imh.ones();
+    grid.B_iph.ones();
+    grid.dinvB_ds_i.zeros();
+
+    Vec h_F(grid.ns + 1);                                   // face heights [km]
+    if (!face_m.empty()) {
+        for (arma::uword k = 0; k <= grid.ns; ++k)
+            h_F(k) = h_base + static_cast<Real>(face_m[k]) * 1.0e-3f;   // m -> km
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            grid.ds_i(i)      = static_cast<Real>(face_m[i + 1] - face_m[i]);
+            grid.phi_g_imh(i) = grid.g * (h_F(i)     - h_base) * 1000.0f;   // J/kg
+            grid.phi_g_iph(i) = grid.g * (h_F(i + 1) - h_base) * 1000.0f;
+        }
+    } else {
+        for (arma::uword k = 0; k <= grid.ns; ++k)
+            h_F(k) = h_base + DH_km * static_cast<Real>(k) / static_cast<Real>(grid.ns);
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            grid.ds_i(i)      = ds_m;
+            grid.phi_g_imh(i) = grid.g * (h_F(i)     - h_base) * 1000.0f;   // J/kg
+            grid.phi_g_iph(i) = grid.g * (h_F(i + 1) - h_base) * 1000.0f;
+        }
+    }
+
+    // --- finite-volume profile (T, n_i, n_n) -------------------------------
+    // Real C7 T(h) and ionization FRACTION with the total density re-integrated
+    // hydrostatically from the base (p(h)=p_base·exp(−∫ g/(R_s T) dh), R_s local),
+    // so V≈0 is a clean discrete fixed point and any flow is heat-flux driven.
+    // The production Gamma/Saha path stores a cell-average C7/PCHIP temperature
+    // rather than a centre point sample, so refinement represents the same
+    // continuum upper thermal profile instead of shifting the top-cell datum.
+    Vec  T_c(grid.ns), ni_c(grid.ns), nn_c(grid.ns);
+    // One hydrostatic integration from the base pressure exp(ln_p_base) with base
+    // ionization x_base: fills T_c/ni_c/nn_c and returns ln p of the top cell.
+    auto integrate_column = [&](double ln_p_base, double x_base) -> double {
+        double ln_p = ln_p_base, prev_h = h_base;
+        double prev_invH = grid.g*grid.m_i/((1.0+x_base)*grid.k_b*T_base);
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            const double h_c = 0.5 * (h_F(i) + h_F(i + 1));        // km
+            Real T, n_i, n_n;
+            c7_cell(static_cast<Real>(h_c), T, n_i, n_n);
+            const double dh_m = (h_c-prev_h)*1000.0;
+            double x = n_i/(n_i+n_n);
+            {
+                const double invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
+                ln_p -= 0.5*(prev_invH+invH)*dh_m;
+            }
+            const double n_tot = std::exp(ln_p)/((1.0+x)*grid.k_b*T);
+            n_i = x * n_tot;
+            n_n = (1.0-x)*n_tot;
+            prev_h = h_c;
+            prev_invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
+            T_c(i)  = T;
+            ni_c(i) = n_i;
+            nn_c(i) = n_n;
+        }
+        return ln_p;
+    };
+    {
+        const double nbase = static_cast<double>(ni_b)+nn_b;
+        const double xb = ni_b/nbase;
+        const double ln_p_c7 = std::log((1.0+xb)*nbase*grid.k_b*T_base);
+        integrate_column(ln_p_c7, xb);
+
+        // ISO_P_TOP (rebuild the column at a chosen top pressure) is a release
+        // (Gamma1-table) option only.
+        if (const char* e = std::getenv("ISO_P_TOP")) {
+            double target = std::numeric_limits<double>::quiet_NaN();
+            try { target = std::stod(e); } catch (...) {}
+            if (!(std::isfinite(target) && target > 0.0))
+                throw std::runtime_error(std::string("model_gentle_ic: ISO_P_TOP must be a "
+                    "positive pressure in Pa, got '") + e + "'");
+            throw std::runtime_error("model_gentle_ic: ISO_P_TOP is a release "
+                "(Gamma1-table) option only");
+        }
+    }
+
+    Vec xn = arma::zeros<Vec>(grid.n_state);
+    const auto sz = arma::size(grid.ns, num_of_eq);
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const Real T     = T_c(i);
+        const Real n_i   = ni_c(i);
+        const Real n_n   = nn_c(i);
+        const Real phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
+        const Real rho_i = n_i * grid.m_i;
+        const Real rho_n = n_n * grid.m_n;
+        const Real p_i   = 2.0f * n_i * grid.k_b * T;
+        const Real p_n   =        n_n * grid.k_b * T;
+        const Real p_e   =        n_i * grid.k_b * T;
+        xn(arma::sub2ind(sz, i, cons::RHO_I)) = rho_i;
+        xn(arma::sub2ind(sz, i, cons::RHO_N)) = rho_n;
+        xn(arma::sub2ind(sz, i, cons::MOM_I)) = 0.0f;
+        xn(arma::sub2ind(sz, i, cons::MOM_N)) = 0.0f;
+        xn(arma::sub2ind(sz, i, cons::E_I))   = grid.inv_gm1() * p_i + rho_i * phi_g;
+        xn(arma::sub2ind(sz, i, cons::E_N))   = grid.inv_gm1() * p_n + rho_n * phi_g;
+        xn(arma::sub2ind(sz, i, cons::E_E))   = grid.inv_gm1() * p_e;
+    }
+
+    // Reference top temperature for the imposed ghost jump (Stage 2), FIXED at the
+    // IC top value: the unresolved TR/corona above sits at ~constant T, so
+    // T_ghost = a·T_ref is a fixed hot reservoir and the downward conductive flux
+    // q ∝ (T_ghost − T_top) SELF-LIMITS as the chromosphere heats.
+    kTtopRef = T_c(grid.ns - 1);
+    // ISO_T_TOP>0: override with an ABSOLUTE fixed outer-boundary temperature [K]
+    // (e.g. 22000 = C7's TR-base T). Not re-anchored across a relax phase.
+    const Real t_top_abs = env_f("ISO_T_TOP", 0.0f);
+    kTtopFixedAbs = (t_top_abs > 0.0f);
+    if (kTtopFixedAbs) kTtopRef = t_top_abs;
+
+    // --- one-time IC coronal superheat (ISO_TBOOST > 1) -------------------
+    // Heat-flux-driven evaporation with NO heating ramp: raise the IC coronal
+    // temperature above its own conduction+radiation balance so its own Spitzer
+    // flux conducts down the TR and drives evaporation from t=0 (Antiochos &
+    // Sturrock 1978). Switched on smoothly ABOVE the TR (tanh in T) so the
+    // chromosphere/TR base is untouched; density held fixed (heat raises p).
+    const Real T_boost = env_f("ISO_TBOOST", 1.0f);
+    if (T_boost > 1.0f) {
+        const Real Tc = env_f("ISO_TBOOST_TC", 3.0e5f);   // selector center [K]
+        const Real Tw = env_f("ISO_TBOOST_W",  1.0e5f);   // selector width  [K]
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            const Real rho_i = ni_c(i) * grid.m_i;
+            const Real rho_n = nn_c(i) * grid.m_n;
+            const Real phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
+            const Real n_i = rho_i / grid.m_i;
+            const Real n_n = rho_n / grid.m_n;
+            const Real T   = T_c(i);
+            const Real w   = 0.5f * (1.0f + std::tanh((T - Tc) / Tw));   // ~0 chromo → ~1 corona
+            const Real Tb  = (1.0f + (T_boost - 1.0f) * w) * T;
+            const Real p_i_b = 2.0f * n_i * grid.k_b * Tb;               // protons + electrons
+            const Real p_n_b =        n_n * grid.k_b * Tb;
+            xn(arma::sub2ind(sz, i, cons::E_I)) = grid.inv_gm1() * p_i_b + rho_i * phi_g;
+            xn(arma::sub2ind(sz, i, cons::E_N)) = grid.inv_gm1() * p_n_b + rho_n * phi_g;
+            xn(arma::sub2ind(sz, i, cons::E_E)) = grid.inv_gm1() * n_i * grid.k_b * Tb;   // T_e = Tb
+        }
+    }
+
+    // --- lower truncation reservoir (h_base = 1600 km, NOT the photosphere) ---
+    // The ghosts sit one and two Δs below cell 0 and stand in for the unmodeled
+    // lower chromosphere, which on these timescales is a quasi-static stratified
+    // reservoir. This two-fluid ladder keeps the historical first-order form
+    // p_0 + kρ_0gΔs with ρ ∝ p (the release uses a trapezoidal, EOS-closed one).
+    {
+        const Real T0    = T_c(0);
+        const Real n_i0  = ni_c(0);
+        const Real n_n0  = nn_c(0);
+        kInnerRhoI = n_i0 * grid.m_i;
+        kInnerRhoN = n_n0 * grid.m_n;
+        const Real p_i0 = 2.0f * n_i0 * grid.k_b * T0;
+        const Real p_n0 =        n_n0 * grid.k_b * T0;
+        // Center-to-ghost distance = the BASE cell's own width (mirrored ghost). On a
+        // refined mesh cell 0 is a fine cell, so this is the fine Δs, NOT the coarse ds_m.
+        const Real ds_base = grid.ds_i(0);
+        kInnerPiGh  = p_i0 + kInnerRhoI * grid.g * ds_base;
+        kInnerPnGh  = p_n0 + kInnerRhoN * grid.g * ds_base;
+        kInnerPiGh2 = p_i0 + 2.0f * kInnerRhoI * grid.g * ds_base;
+        kInnerPnGh2 = p_n0 + 2.0f * kInnerRhoN * grid.g * ds_base;
+        // ρ ∝ p at fixed T₀ (isothermal-hydrostatic ghost densities).
+        kInnerRhoIGh  = kInnerRhoI * (kInnerPiGh  / p_i0);
+        kInnerRhoIGh2 = kInnerRhoI * (kInnerPiGh2 / p_i0);
+        kInnerRhoNGh  = kInnerRhoN * (kInnerPnGh  / p_n0);
+        kInnerRhoNGh2 = kInnerRhoN * (kInnerPnGh2 / p_n0);
+    }
+
+    // --- numerical scheme: the validated "bestwb" configuration (always on) ---
+    // well-balanced + log-space MUSCL + MC3/Koren (β=2) + equilibrium-reference
+    // δ-form well-balancing. These hold a hydrostatic column at V≈0 to round-off
+    // for any stratification (docs/studies/evaporation/gentle_evaporation_downflow.md). No toggles.
+    grid.out_base_km              = h_base;   // label output heights from the true base
+    grid.inner_conduction_neumann = kInnerTNeumann;
+    grid.well_balanced            = true;
+    grid.log_reconstruct          = true;
+    grid.mc3_limiter              = true;
+    grid.limiter_beta             = 2.0f;
+    // DIAGNOSTIC-ONLY reconstruction override for the scheme-comparison leg of the
+    // face-flux study (docs/studies/numerics/top_ripple_face_flux_diagnosis.md). Unset — the default
+    // — leaves the "bestwb" MC3(beta=2) configuration above completely untouched.
+    //   ISO_LIMITER=mc3    MC3/Koren, beta from ISO_MC3_BETA (default 2) [= default]
+    //   ISO_LIMITER=minmod symmetric minmod
+    //   ISO_LIMITER=first  beta=0 with MC3 ⇒ phi≡0 ⇒ piecewise-constant (1st order)
+    // Never set for a production run; it exists so the ripple can be attributed to
+    // (or cleared of) the limiter without hand-editing the scenario.
+    if (const char* lim = std::getenv("ISO_LIMITER")) {
+        const std::string choice(lim);
+        if (choice == "minmod") {
+            grid.mc3_limiter = false;
+        } else if (choice == "first") {
+            grid.mc3_limiter = true;
+            grid.limiter_beta = 0.0f;
+        } else if (choice == "mc3") {
+            grid.limiter_beta = env_f("ISO_MC3_BETA", 2.0f);
+        } else {
+            throw std::invalid_argument("ISO_LIMITER must be mc3, minmod or first");
+        }
+        std::cerr << "[model_column] DIAGNOSTIC reconstruction override: ISO_LIMITER="
+                  << choice << " mc3=" << grid.mc3_limiter
+                  << " beta=" << grid.limiter_beta << std::endl;
+    }
+    // --- numerical flux and MUSCL primitive set ------------------------------
+    // The two-fluid solver keeps Rusanov + (log rho, V, log T); the SWMF Godunov
+    // flux and the pressure-based reconstruction need the Saha/Gamma1 closure.
+    grid.swmf_godunov_flux       = false;
+    grid.pressure_reconstruct    = false;
+    grid.roe_characteristic_flux = false;
+    // Reference/debug overrides. ISO_RIEMANN=roe-local selects the mixture Roe
+    // characteristic flux — the equilibrium (Gamma1) linearization that was the
+    // previous release flux and is kept as the controlled comparison solver —
+    // ISO_RIEMANN=rusanov restores the local Lax-Friedrichs flux, and
+    // ISO_RECONSTRUCTION=lnrho-v-lnt the temperature-based primitive set; all are
+    // retained for regression and controlled numerical comparison only. None is
+    // needed for a production run. The three flux choices are mutually exclusive
+    // by construction here, so the face Riemann solver is the only variable they
+    // change — including the timestep, which mixture_timestep sizes from the
+    // signal speed of whichever flux is in force.
+    if (const char* riemann = std::getenv("ISO_RIEMANN")) {
+        const std::string choice(riemann);
+        if (choice == "rusanov") {
+            grid.roe_characteristic_flux = false;
+            grid.swmf_godunov_flux = false;
+        } else if (choice == "roe-local") {
+            throw std::invalid_argument("ISO_RIEMANN=roe-local requires Gamma/Saha mode");
+        } else if (choice == "swmf-godunov") {
+            throw std::invalid_argument(
+                "ISO_RIEMANN=swmf-godunov requires Gamma/Saha mode");
+        } else {
+            throw std::invalid_argument(
+                "ISO_RIEMANN must be rusanov, roe-local or swmf-godunov");
+        }
+        std::cerr << "[model_column] Riemann override: ISO_RIEMANN=" << choice
+                  << " (release default: swmf-godunov)" << std::endl;
+    }
+    if (const char* recon = std::getenv("ISO_RECONSTRUCTION")) {
+        const std::string choice(recon);
+        if (choice == "lnrho-v-lnt") {
+            grid.pressure_reconstruct = false;
+        } else if (choice == "lnrho-v-lnp") {
+            throw std::invalid_argument(
+                "ISO_RECONSTRUCTION=lnrho-v-lnp requires Gamma/Saha mode");
+        } else {
+            throw std::invalid_argument(
+                "ISO_RECONSTRUCTION must be lnrho-v-lnt or lnrho-v-lnp");
+        }
+        std::cerr << "[model_column] reconstruction override: ISO_RECONSTRUCTION="
+                  << choice << " (release default: lnrho-v-lnp)" << std::endl;
+    }
+    // One line naming the numerical method actually in force, so a run log always
+    // records it without having to enable the face-flux sidecar.
+    std::cerr << "[model_column] numerics: flux="
+              << (grid.swmf_godunov_flux ? "swmf-godunov"
+                  : grid.roe_characteristic_flux ? "roe-local" : "rusanov")
+              << " reconstruction="
+              << (grid.pressure_reconstruct ? "lnrho-v-lnp" : "lnrho-v-lnt")
+              << " limiter=" << (grid.mc3_limiter ? "mc3" : "minmod")
+              << " beta=" << grid.limiter_beta << std::endl;
+
+    // --- runtime physics toggles ------------------------------------------
+    // The optional two-fluid research stages: finite-rate ionization, the
+    // radiative sink, TRAC, the imposed q(T) flux and volumetric coronal heating.
+    grid.single_fluid             = !two_fluid_on;
+    grid.enable_ionization        = ionization_on;
+    grid.enable_radiative_cooling = cooling_on;
+    grid.enable_beam_heating      = false;
+    grid.enable_coronal_heating   = false;
+    grid.impose_outer_heat_flux   = false;   // default: heat enters via the ghost-T jump
+    grid.enable_Te                = false;    // two-fluid (ion/neutral), NOT three-temperature
+    {
+        // TRAC broadens the unresolved TR. ISO_TRAC force-enables it independent of
+        // cooling/corona (auto = cooling || corona). ISO_TRAC_TCHROM sets the region base
+        // T_b; ISO_TRAC_TCMAXFRAC lifts Johnston's 0.2·T_peak cap (needed on a capped
+        // low-T domain where 0.2·T_peak < T_b would pin T_c to the floor).
+        const Real iso_trac = env_f("ISO_TRAC", -1.0f);   // -1 = auto (cooling||corona)
+        grid.enable_trac         = (iso_trac >= 0.0f) ? (iso_trac != 0.0f)
+                                                      : (cooling_on || kCorona);
+        grid.trac_T_chrom        = env_f("ISO_TRAC_TCHROM", 2.0e4f);
+        grid.trac_Tc_max_frac    = env_f("ISO_TRAC_TCMAXFRAC", 0.2f);
+        grid.trac_cutoff_T       = grid.trac_T_chrom;
+        grid.enable_vacuum_floor = cooling_on || kCorona || ionization_on;
+    }
+
+    // --- Route-B photoionization closure (only when the network is on) ----
+    // Invert the local ionization-equilibrium balance of the active Stage-E network
+    // on the IC so the C7 chromosphere is a fixed point (shared C7-library helper).
+    if (ionization_on) {
+        Vec h_cell(grid.ns);
+        for (arma::uword i = 0; i < grid.ns; ++i)
+            h_cell(i) = 0.5f * (h_F(i) + h_F(i + 1));
+        grid.photoionization_rate_i = c7_route_b_photoionization(grid, T_c, ni_c, nn_c, h_cell);
+    }
+
+    // --- imposed Neumann coronal flux q(T) + ramp (ISO_QFLUX*) ------------
+    // Alternative to the ghost-T jump: impose the downward coronal conductive flux
+    // as a Stage-D Neumann outer BC (RTV 1978 / model_c7 closure), optionally ramped
+    // up to drive gentle evaporation (Antiochos & Sturrock 1978). The base is C7's
+    // own top-gradient flux q = κ₀ T^{5/2} dT/ds unless ISO_QFLUX0 overrides it.
+    kQflux = (env_f("ISO_QFLUX", 0.0f) != 0.0f);
+    if (kQflux) {
+        const Real kappa0 = 1.0e-11f;   // W m^-1 K^-7/2
+        const arma::uword nl = grid.ns - 1;
+        const Real T_top = T_c(nl);
+        const Real dTds  = (T_c(nl) - T_c(nl - 1))
+                          / (0.5f * (grid.ds_i(nl) + grid.ds_i(nl - 1)));   // K/m
+        const Real q_c7  = kappa0 * std::pow(T_top, 2.5f) * dTds;
+        const Real q_base = env_f("ISO_QFLUX0", q_c7);
+        grid.impose_outer_heat_flux   = true;
+        grid.outer_heat_flux_base     = q_base;
+        grid.outer_heat_flux          = q_base;
+        grid.outer_heat_flux_enhance  = env_f("ISO_QFLUX_ENHANCE", 1.0f);
+        grid.outer_heat_flux_t_on     = env_f("ISO_QFLUX_T_ON",  600.0f);
+        grid.outer_heat_flux_ramp     = env_f("ISO_QFLUX_RAMP",  120.0f);
+    }
+
+    // --- ambient volumetric coronal heating H(s) (ISO_CHEAT=1) ------------
+    // The RTV (1978) static-balance term the resolved corona otherwise lacks:
+    //   H(s) = E_H0 · exp(−(s−s0)/s_H)  [W/m³]  (Aschwanden & Schrijver 2002),
+    // deposited through the corona so it balances the radiative loss locally and
+    // pins V≈0; ramping it up (ISO_CHEAT_ENHANCE>1, slow) drives gentle evaporation.
+    // Calibration inverts the RTV/AS2002 static scaling for the E_H0 that relaxes a
+    // column of length L to apex temperature T_max. When on, the boundary q(T) is
+    // turned OFF (the corona is heated inside the domain; no double-heating).
+    if (env_f("ISO_CHEAT", 0.0f) != 0.0f) {
+        const Real L    = arma::sum(grid.ds_i);                 // column length [m]
+        const Real Tmax = env_f("ISO_CHEAT_TMAX_MK", 1.5f) * 1.0e6f;
+        const Real sHf  = env_f("ISO_CHEAT_SH_FRAC", 0.4f);
+        const Real s_H  = sHf * L;
+        const Real L_cm = L * 100.0f;
+        const Real p0   = std::pow(Tmax / 1400.0f, 3.0f) / L_cm;
+        const Real Eun  = 9.8e4f * std::pow(p0, 7.0f / 6.0f) * std::pow(L_cm, -5.0f / 6.0f);
+        const Real E0   = 0.1f * Eun * std::exp(0.5f * L / s_H);   // erg/cm³/s → W/m³
+
+        grid.enable_coronal_heating = true;
+        grid.coronal_heat_E0        = env_f("ISO_CHEAT_E0", E0);
+        grid.coronal_heat_sH        = s_H;
+        grid.coronal_heat_s0        = env_f("ISO_CHEAT_S0_MM", 0.0f) * 1.0e3f;
+        grid.coronal_heat_two_sided = false;                       // open column, base-anchored
+        grid.coronal_heat_enhance   = env_f("ISO_CHEAT_ENHANCE", 1.0f);
+        grid.coronal_heat_t_on      = env_f("ISO_CHEAT_T_ON",  0.0f);
+        grid.coronal_heat_ramp      = env_f("ISO_CHEAT_RAMP", 30.0f);
+        // Corona heated internally ⇒ drop the boundary q(T) crutch.
+        grid.impose_outer_heat_flux = false;
+        grid.outer_heat_flux_base   = 0.0f;
+        grid.outer_heat_flux        = 0.0f;
+        kQflux = false;
+    }
+
+    // Optional relaxation phase: run Stage-1 adiabatic relaxation (conduction off,
+    // no jump, V=0 reservoir) for sim_time < kRelaxTime so the C7 IC settles to a
+    // near-hydrostatic V≈0 equilibrium, THEN start Stage 2 (switched per step in
+    // model_gentle_update_bc off grid.sim_time).
+    kRelaxTime      = env_f("ISO_RELAX_TIME", 0.0f);
+    kHeatFluxTarget = heat_flux_on;
+    const bool relaxing0 = (kRelaxTime > 0.0f);
+    kStage2Started  = !relaxing0;   // recapture kTtopRef at the relax→Stage-2 edge
+    kOuterPRefSet   = false;        // fresh IC ⇒ recapture the outer back-pressure
+    kHeatFluxOn     = relaxing0 ? false : heat_flux_on;
+
+    // Stage 1: conduction OFF (adiabatic Euler steady state). Stage 2: ON, driven
+    // by the top T jump (or the imposed q(T) flux / coronal heating).
+    grid.enable_conduction        = relaxing0 ? false : heat_flux_on;
+    // The historical two-fluid Stage D folds a mesh-scaled artificial
+    // diffusivity into its conduction operator; keep it behind an explicit
+    // diagnostic multiplier for controlled legacy comparisons, but never enable
+    // it implicitly.
+    // ISO_NUMERICAL_DIFFUSIVITY_MULT=1 restores the historical C_num=2000 m/s
+    // (4x in the resolved-corona testbed); unset/0 is the two-fluid baseline.
+    {
+        const Real diff_mult = (kCorona ? 4.0f : 1.0f)
+                              * env_f("ISO_NUMERICAL_DIFFUSIVITY_MULT", 0.0f);
+        grid.numerical_diffusivity_per_length = heat_flux_on
+            ? (diff_mult * 2.0e3f) : 0.0f;
+    }
+
+    model_gentle_update_bc(grid, xn);
+    grid.broadcast();
+
+    // The two-fluid solver never received the release's MUSCL-Hancock predictor
+    // source term, so it keeps the frozen equilibrium reference: this (V=0, HSE)
+    // IC is frozen as grid.eq_state and its residual subtracted every step.
+    grid.eq_wb = true;
+    grid.eq_state = xn;
+    return xn;
+}
+
+void model_gentle_update_bc(Grid& grid, const Vec& xn) {
+    const auto  sz  = arma::size(grid.ns, num_of_eq);
+    const Real m_i = grid.m_i;
+    const Real m_n = grid.m_n;
+    const Real k_b = grid.k_b;
+    const Real g   = grid.g;
+
+    // Decode total density / pressure / temperature / velocity / ionization fraction
+    // x = ρ_i/ρ_tot of an interior cell (cons2prim convention). Single-fluid T uses
+    // the LOCAL ionization (p = (2 n_i + n_n) k T).
+    // Legacy two-fluid state (single-fluid T from the local ionization).
+    auto two_fluid_cell_state = [&](arma::uword i, Real& rho_tot, Real& p_tot,
+                                    Real& T, Real& V, Real& x,
+                                    Real& T_e, Real& T_i) {
+        const Real rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
+        const Real rho_n = xn(arma::sub2ind(sz, i, cons::RHO_N));
+        const Real momI  = xn(arma::sub2ind(sz, i, cons::MOM_I));
+        const Real momN  = xn(arma::sub2ind(sz, i, cons::MOM_N));
+        const Real E_i   = xn(arma::sub2ind(sz, i, cons::E_I));
+        const Real E_n   = xn(arma::sub2ind(sz, i, cons::E_N));
+        const Real phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
+        const Real Vi    = momI / rho_i;
+        const Real Un    = momN / rho_n;
+        const Real p_i   = grid.gm1() * E_i - grid.half_gm1() * rho_i * Vi * Vi - grid.gm1() * rho_i * phi_g;
+        const Real p_n   = grid.gm1() * E_n - grid.half_gm1() * rho_n * Un * Un - grid.gm1() * rho_n * phi_g;
+        const Real n_i   = rho_i / m_i;
+        const Real n_n   = rho_n / m_n;
+        rho_tot = rho_i + rho_n;
+        p_tot   = p_i + p_n;
+        T       = p_tot / ((2.0f * n_i + n_n) * k_b);   // single-fluid T, local ionization
+        V       = Vi;
+        x       = rho_i / rho_tot;                      // ionization fraction
+        T_e     = T; T_i = T;
+    };
+
+    auto cell_state = [&](arma::uword i, Real& rho_tot, Real& p_tot,
+                          Real& T, Real& V, Real& x,
+                          Real& T_e, Real& T_i) {
+        two_fluid_cell_state(i, rho_tot, p_tot, T, V, x, T_e, T_i);
+    };
+
+    // --- imposed q(T) flux ramp (ISO_QFLUX) --------------------------------
+    // q(T) = q_base · enhance(t): holds at 1 until t_on, then cosine-rises to
+    // outer_heat_flux_enhance over [t_on, t_on+ramp]. Applied to the Stage-D
+    // Neumann outer flux (impose_outer_heat_flux). No-op when kQflux is off.
+    if (kQflux && grid.outer_heat_flux_base > 0.0f) {
+        Real amp = 1.0f;
+        if (grid.outer_heat_flux_enhance != 1.0f) {
+            const Real t   = grid.sim_time;
+            const Real ton = grid.outer_heat_flux_t_on;
+            const Real r   = (grid.outer_heat_flux_ramp > 1.0e-6f) ? grid.outer_heat_flux_ramp : 1.0e-6f;
+            Real w;
+            if (t <= ton)          w = 0.0f;
+            else if (t >= ton + r) w = 1.0f;
+            else w = 0.5f * (1.0f - std::cos(static_cast<Real>(arma::datum::pi) * (t - ton) / r));
+            amp = 1.0f + (grid.outer_heat_flux_enhance - 1.0f) * w;
+        }
+        grid.outer_heat_flux = grid.outer_heat_flux_base * amp;
+    }
+
+    // --- relaxation → Stage-2 phase switch (off grid.sim_time) -------------
+    // While relaxing: conduction OFF, no jump, V=0 reservoir top. At the transition
+    // recapture kTtopRef from the RELAXED top cell (anchor the FIXED jump to the
+    // equilibrium), then run Stage 2 (conduction ON + jump + Mach-capped outflow).
+    const bool relaxing = (kRelaxTime > 0.0f) && (grid.sim_time < kRelaxTime);
+    kHeatFluxOn            = relaxing ? false : kHeatFluxTarget;
+    grid.enable_conduction = relaxing ? false : kHeatFluxTarget;
+    const Real a_live = relaxing ? 1.0f : kAjump;
+    const Real b_live = relaxing ? 1.0f : kBjump;
+    if (!relaxing && !kStage2Started) {
+        if (!kTtopFixedAbs) {           // an ABSOLUTE imposed top T (ISO_T_TOP) stays put
+            Real rho_t, p_t, T_t, V_t, x_t, Te_t, Ti_t;
+            cell_state(grid.ns - 1, rho_t, p_t, T_t, V_t, x_t, Te_t, Ti_t);
+            kTtopRef = T_t;             // else anchor the jump to the relaxed top T
+        }
+        kOuterPRefSet = false;          // re-anchor the back-pressure on the relaxed top
+        kStage2Started = true;
+    }
+
+    // ====================================================================
+    // Outer face — bottom of the transition region (new upper BC):
+    //   1. pressure    — hydrostatic, ONE-SIDED from the top cell (see below).
+    //   2. temperature — imposed jump T_ghost1 = a·T_ref, T_ghost2 = b·T_ghost1.
+    //   3. density     — from the EOS at (p_ghost, T_ghost).
+    // ====================================================================
+    {
+        const arma::uword nl = grid.ns - 1;
+        const Real ds       = grid.ds_i(nl);
+        const Real phi_g_out = grid.phi_g_iph(nl);   // ghost decode uses this gauge
+
+        Real rho_top, p_top, T_top, V_top, x_top, Te_top, Ti_top;
+        cell_state(nl, rho_top, p_top, T_top, V_top, x_top, Te_top, Ti_top);
+
+        // (2) temperature. TWO distinct roles, kept explicitly separate:
+        //   * T_cond_wall — the fixed hot wall that DRIVES Stage-D conduction, always
+        //     the imposed jump a·T_ref off the reference top T. With ISO_CORONA the
+        //     corona is resolved and a=b=1 (the ghost just extends it).
+        //   * T_hydro_g0/g1 — what the HYDRO ghost carries (its EOS density and
+        //     internal energy, hence the outer-face reconstruction and Riemann state).
+        // Baseline (default, and the release): the hydro ghost IS the wall,
+        // T_hydro = a·T_ref, b·a·T_ref — one ghost state serving both roles, so the
+        // outer face fixes pressure AND temperature. ISO_HYDRO_T_DECOUPLE=1: the hydro ghost instead zero-gradient-
+        // extrapolates the live top cell (T_hydro_g0 = T_hydro_g1 = T_top) and only the
+        // conduction rows keep the wall, via grid.outer_conduction_temperature.
+        // ISO_OUTER_T_HYDRO_WALL=1 (decoupled mode): the hydro ghost carries the wall
+        // value again, T_hydro = T_cond = a·T_ref, while the wall REMAINS a physical-
+        // face conduction datum — the fixed-T half of the pressure/temperature swap.
+        const Real T_cond_wall = a_live * kTtopRef;
+        const bool hydro_T_free = kHydroTDecouple && !kOuterHydroTWall;
+        const Real T_g0 = hydro_T_free ? T_top : T_cond_wall;
+        const Real T_g1 = kHydroTDecouple ? T_g0  : b_live * T_g0;
+        grid.outer_conduction_temperature_override = kHydroTDecouple;
+        grid.outer_conduction_temperature          = T_cond_wall;
+        // The two-fluid cell decode reports T_e = T_i = T, so these equal T_g0/T_g1.
+        const Real Te_g0 = hydro_T_free ? Te_top : T_cond_wall;
+        const Real Ti_g0 = hydro_T_free ? Ti_top : T_cond_wall;
+        const Real Te_g1 = kHydroTDecouple ? Te_g0 : b_live * Te_g0;
+        const Real Ti_g1 = kHydroTDecouple ? Ti_g0 : b_live * Ti_g0;
+
+        // (1)+(3) Hydrostatic ghost ladder: each rung one-sided on the rung below,
+        //   p_{k+1} = p_k − Δs·½(ρ_k + ρ_{k+1})·g,
+        // with ρ closed by the EOS at the imposed T. The ladder is ANCHORED on the
+        // fixed reservoir back-pressure kOuterPRef, NOT on a live interior cell.
+        //
+        // Both live-cell anchors are wrong, in opposite directions:
+        //   * p[ns-2] (the previous CENTERED form, p_g0 = p[ns-2] − 2Δs·ρ_top·g)
+        //     extrapolates ACROSS the very cell it bounds. That is well balanced only
+        //     while the interior satisfies the same discrete HSE; inside the transition
+        //     region it does not — the measured residual (dp/ds+ρg)/(ρg) runs +0.03 at
+        //     2140 km, +0.21 at 2145 km and −5.0 in the top cell — so the ghost landed
+        //     ABOVE p_top and INVERTED the pressure gradient across the outer face
+        //     (+4.1e-5 Pa where it should be −4.3e-6): a standing ~9 g downward push
+        //     that reversed the top-cell velocity and seeded a ~25 km boundary layer.
+        //   * p_top (a one-sided anchor) makes pressure zero-gradient. Combined with the
+        //     already-extrapolated V that leaves the outer face transmissive in EVERY
+        //     variable but T, so nothing sets the back-pressure and the column drains
+        //     out the top (measured: V → 1.9 km/s, p falling monotonically, crash at
+        //     t ≈ 12 s). Subsonic outflow has one incoming characteristic and therefore
+        //     needs exactly one externally imposed condition.
+        // A fixed reference back-pressure supplies that one condition, cannot invert
+        // against the interior, and is exactly hydrostatic at the V=0 IC by
+        // construction. Physically: a corona of fixed pressure and T sits above 2153 km.
+        // The ghost density inverts the two-fluid pressure closure at the frozen
+        // local ionization fraction of the top cell.
+        auto ghost_density = [&](Real p_gh, Real /*T_e_gh*/, Real T_i_gh) {
+            return p_gh*m_i/((1.0f+x_top)*k_b*T_i_gh);
+        };
+        // ρ_ghost depends on p_ghost, so take one fixed-point pass seeded with the
+        // rung below (the correction is O(Δs·Δρ/ρ) and converges in a single sweep).
+        auto hse_rung = [&](Real p_below, Real rho_below, Real T_e_gh, Real T_i_gh,
+                            Real& p_out, Real& rho_out) {
+            Real rho_gh = rho_below;
+            for (int it = 0; it < 2; ++it) {
+                p_out = p_below - ds * 0.5f * (rho_below + rho_gh) * g;
+                if (p_out < 1.0e-12f) p_out = 1.0e-12f;
+                rho_gh = ghost_density(p_out, T_e_gh, T_i_gh);
+            }
+            rho_out = rho_gh;
+        };
+        // Capture the reservoir back-pressure once, one-sided from the (hydrostatic,
+        // V=0) reference top cell. Recaptured at the relax→Stage-2 edge alongside
+        // kTtopRef so a Stage-1 relaxation re-anchors on the settled equilibrium.
+        // The capture uses the HYDRO ghost temperature T_g0 (not the conduction wall),
+        // so the ladder is exactly the hydrostatic one this BC will later reproduce:
+        // at the reference state T_g0 = T_top there, and BC(q_ref) = q_g,ref holds in
+        // decoupled mode exactly as it does in baseline mode.
+        if (!kOuterPRefSet) {
+            Real p_ref, rho_ref;
+            hse_rung(p_top, rho_top, Te_g0, Ti_g0, p_ref, rho_ref);
+            kOuterPRef    = p_ref;
+            kOuterPRefSet = true;
+            // The reservoir back-pressure is the one externally imposed condition at
+            // the outer face; log it (once per capture) so post-run diagnostics can
+            // form the top-cell pressure deficit p_top − p_g0 without re-deriving it.
+            std::cerr << "[model_column] outer BC anchor: kOuterPRef=" << kOuterPRef
+                      << " Pa  p_top=" << p_top << " Pa  T_top=" << T_top
+                      << " K  T_hydro_g0=" << T_g0 << " K  T_cond_wall="
+                      << T_cond_wall << " K  hydro_T_decouple="
+                      << (kHydroTDecouple ? 1 : 0)
+                      << "  hydro_T_wall=" << (kOuterHydroTWall ? 1 : 0)
+                      << "  p_neumann=" << kOuterPNeumann << std::endl;
+        }
+        // The outer ghost pressures. Mode 0 (release): the fixed reservoir back-
+        // pressure, then one hydrostatic rung up. Mode 1: dp/ds = 0, so the ghost pair
+        // is uniform in p and the reconstruction sees no imposed pressure slope either.
+        // Mode 2: the same hydrostatic ladder as mode 0, re-anchored on the live top
+        // cell. In modes 1 and 2 the externally imposed condition is T_g instead.
+        Real p_g0 = kOuterPNeumann == 1 ? p_top : kOuterPRef;
+        if (kOuterPNeumann == 2) {
+            Real rho_ladder;                      // ladder off the LIVE top cell
+            hse_rung(p_top, rho_top, Te_g0, Ti_g0, p_g0, rho_ladder);
+        }
+        if (p_g0 < 1.0e-12f) p_g0 = 1.0e-12f;
+        const Real rho_g0 = ghost_density(p_g0, Te_g0, Ti_g0);
+        Real p_g1, rho_g1;
+        if (kOuterPNeumann == 1) {
+            p_g1   = p_g0;
+            rho_g1 = ghost_density(p_g1, Te_g1, Ti_g1);
+        } else {
+            hse_rung(p_g0, rho_g0, Te_g1, Ti_g1, p_g1, rho_g1);
+        }
+
+        // Velocity. Stage 1 (relaxation): static reservoir V=0. Stage 2: Mach-capped
+        // OUTFLOW so the evaporation upflow can leave, while |V| ≤ kVcapMach·c_s
+        // prevents the ill-posed-inflow runaway.
+        Real V_g = 0.0f;
+        if (kHeatFluxOn) {
+            const Real c_s = std::sqrt(2.0f*grid.gamma_mono*k_b*T_top/m_i);
+            const Real vcap = kVcapMach * c_s;
+            V_g = V_top;
+            if (V_g >  vcap) V_g =  vcap;
+            if (V_g < -vcap) V_g = -vcap;
+        }
+        {
+            pack_ghost(grid.outer_boundary0_i, grid, x_top * rho_g0,
+                       (1.0f - x_top) * rho_g0, T_g0, V_g, phi_g_out);
+            pack_ghost(grid.outer_boundary1_i, grid, x_top * rho_g1,
+                       (1.0f - x_top) * rho_g1, T_g1, V_g, phi_g_out);
+        }
+    }
+
+    // ====================================================================
+    // Inner face — the LOWER TRUNCATION of the modeled domain at h_base
+    // (1600 km). Not the photosphere: it is the height below which this
+    // solver's Saha/LTE equilibrium closure is not intended to be trusted, so
+    // the atmosphere underneath is deliberately outside the model and the two
+    // ghosts are a numerical closure for the MUSCL stencil.
+    //
+    // The physical content is one statement: the lower chromosphere below the
+    // cut is a quasi-static stratified reservoir at temperature T₀. This
+    // two-fluid leg lays it out on the historical first-order ladder
+    // (kInnerPiGh/kInnerPnGh and the ρ ∝ p ghost densities) with V = U = 0.
+    //
+    // The lower-BC TEMPERATURE choice (Dirichlet vs Neumann/zero-flux) is a
+    // separate CONDUCTION boundary condition imposed inside the Stage-D solver
+    // (grid.inner_conduction_neumann); the hydro closure is independent of it.
+    // ====================================================================
+    {
+        const Real phi_g_in = grid.phi_g_imh(0);
+        Vec& ob0 = grid.inner_boundary0_i;
+        ob0(cons::RHO_I) = kInnerRhoIGh;
+        ob0(cons::RHO_N) = kInnerRhoNGh;
+        ob0(cons::MOM_I) = 0.0f;
+        ob0(cons::MOM_N) = 0.0f;
+        ob0(cons::E_I)   = grid.inv_gm1() * kInnerPiGh + kInnerRhoIGh * phi_g_in;
+        ob0(cons::E_N)   = grid.inv_gm1() * kInnerPnGh + kInnerRhoNGh * phi_g_in;
+        ob0(cons::E_E)   = 0.5f * grid.inv_gm1() * kInnerPiGh;   // p_e = ½ p_i ⇒ T_e = T_i
+
+        Vec& ob1 = grid.inner_boundary1_i;
+        ob1(cons::RHO_I) = kInnerRhoIGh2;
+        ob1(cons::RHO_N) = kInnerRhoNGh2;
+        ob1(cons::MOM_I) = 0.0f;
+        ob1(cons::MOM_N) = 0.0f;
+        ob1(cons::E_I)   = grid.inv_gm1() * kInnerPiGh2 + kInnerRhoIGh2 * phi_g_in;
+        ob1(cons::E_N)   = grid.inv_gm1() * kInnerPnGh2 + kInnerRhoNGh2 * phi_g_in;
+        ob1(cons::E_E)   = 0.5f * grid.inv_gm1() * kInnerPiGh2;
+    }
+
+    grid.broadcast();
+}
+
+} // namespace chromosphere

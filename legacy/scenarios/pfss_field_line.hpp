@@ -1,5 +1,5 @@
 /*!
- * @file scenarios/pfss_field_line.hpp
+ * @file legacy/scenarios/pfss_field_line.hpp
  * @brief PFSS field-line scenario driven by a tabulated field-line data file.
  * @ingroup scenarios
  *
@@ -11,7 +11,7 @@
  *
  * File format: see scenarios/data_file_parser.hpp.
  *
- * Boundary update delegates to `apply_open_bcs` (scenario.hpp): reflecting
+ * Boundary update delegates to `apply_open_bcs` (legacy_scenarios.hpp): reflecting
  * wall at the inner face, zero-gradient outflow at the outer face. The
  * [GHOSTS] section of the data file is therefore only used to seed the
  * pre-step ghost state in `pfss_ic`; the first `update_bc` call replaces it.

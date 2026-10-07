@@ -1,22 +1,23 @@
 /*!
  * @file scenarios/model_column.cpp
  * @brief The field-aligned chromosphere-to-corona column: the `model_column`
- *        RELEASE scenario and the `model_gentle` historical two-fluid preset.
+ *        RELEASE scenario and its EXPERIMENTAL `model_column_2t` twin.
  * @ingroup scenarios
  *
- * One IC/BC implementation, two scenarios that never cross solvers. In release
- * mode this file loads the production `Gamma1` table unconditionally, builds the
- * Saha-HSE initial column from the C7 temperature profile, sets the validated
- * release numerics (log-space MUSCL with the MC3/Koren limiter, the mixture Roe
+ * One IC/BC implementation for the two Saha/Gamma1 scenarios. It loads the
+ * production `Gamma1` table unconditionally, builds the Saha-HSE initial column
+ * from the C7 temperature profile, sets the validated release numerics
+ * (log-space MUSCL with the MC3/Koren limiter, the SWMF exact-Riemann Godunov
  * flux, the pressure-based reconstruction) and the 22,000 K external conductive
- * reservoir at the physical outer face — and rejects every historical two-fluid
- * knob. See scenarios/model_column.hpp for the full environment-variable list.
+ * reservoir at the outer face — and rejects every historical two-fluid knob.
+ * The historical fixed-gamma two-fluid column that used to share this file is
+ * the legacy `model_gentle` scenario (legacy/scenarios/model_gentle.cpp). See
+ * scenarios/model_column.hpp for the full environment-variable list.
  */
 #include "model_column.hpp"
 #include "single_fluid/mixture.hpp"
 #include "two_temp/two_temp.hpp"   // EXPERIMENTAL model_column_2t leg only
 #include "c7_profile.hpp"  // c7_full_profile + c7_full_temperature_pchip (C7 table)
-#include "model_c7.hpp"     // c7_route_b_photoionization (two-fluid leg only)
 #include "mesh.hpp"       // shared static local-refinement mesh builder
 
 #include <cmath>
@@ -48,20 +49,12 @@ Real kBjump       = 1.0f;      // T_ghost2 = b·T_ghost1
 // exactly one thing: the lower chromosphere below the cut behaves, on the
 // timescales resolved here, as a quasi-static stratified reservoir.
 // ---------------------------------------------------------------------------
-Real kInnerRhoI   = 0.0f;      // base ion density (RHO slot ghost 0)
-Real kInnerRhoN   = 0.0f;
-// Two-fluid (non-release) ghost ladder: first-order p_0 + k ρ_0 g Δs with ρ ∝ p.
-Real kInnerPiGh   = 0.0f;      // ion ghost pressure   p_i,0 + ρ_i,0 g Δs
-Real kInnerPnGh   = 0.0f;      // neutral ghost pressure p_n,0 + ρ_n,0 g Δs
-Real kInnerPiGh2  = 0.0f;      // second inner ghost (2 Δs below): p_0 + 2ρgΔs
-Real kInnerPnGh2  = 0.0f;
-Real kInnerRhoIGh  = 0.0f;     // isothermal-hydrostatic ghost densities (ρ ∝ p at T₀):
-Real kInnerRhoNGh  = 0.0f;     //   ρ_{i,n},G0 = ρ_{i,n},0 · p_{i,n},G0 / p_{i,n},0
-Real kInnerRhoIGh2 = 0.0f;     //   ρ_{i,n},G1 = ρ_{i,n},0 · p_{i,n},G1 / p_{i,n},0
-Real kInnerRhoNGh2 = 0.0f;
+Real kInnerRhoI   = 0.0f;      // base ionized-carrier density (C7 n_e m_i)
+Real kInnerRhoN   = 0.0f;      // base neutral-carrier density (C7 n_HI m_n)
 Real kInnerTRef     = 0.0f;     // reservoir temperature at the truncation
-// RELEASE lower reservoir, captured once at the IC base. Unlike the two-fluid
-// ladder above, each rung is the trapezoidal, EOS-closed hydrostatic step
+// RELEASE lower reservoir, captured once at the IC base. Unlike the historical
+// two-fluid first-order ladder (legacy model_gentle), each rung is the
+// trapezoidal, EOS-closed hydrostatic step
 // p_{k+1} = p_k + Δs·½(ρ_k + ρ_{k+1})·g with ρ_{k+1} = ρ_EOS(p_{k+1}, T₀),
 // iterated to a fixed point — the SAME construction the outer face already used
 // (hse_rung), so the two boundaries are now discretely consistent. The first-
@@ -89,10 +82,6 @@ bool  kInnerTNeumann = false;   // lower-BC conduction temperature: Dirichlet vs
 Real kRelaxTime     = 0.0f;
 bool  kHeatFluxTarget = false;
 bool  kStage2Started  = true;   // false during relax; flips to recapture kTtopRef
-// Corona testbed (ISO_CORONA=1): resolved ~1 MK corona (needs Spitzer κ_e + TRAC).
-bool  kCorona = false;
-// Imposed Neumann coronal flux q(T) ramp (ISO_QFLUX*), the model_c7/RTV closure.
-bool  kQflux = false;
 // ISO_HYDRO_T_DECOUPLE=1: split the two roles the outer ghost temperature plays.
 // The HYDRO ghost temperature becomes a zero-gradient extrapolation of the live top
 // cell (T_hydro_g0 = T_hydro_g1 = T_top) instead of the fixed a·T_ref wall, while
@@ -129,7 +118,7 @@ bool  kOuterHydroTWall = false;
 //       Hydrostatically consistent, and imposes no external pressure datum at all.
 int   kOuterPNeumann = 0;
 // EXPERIMENTAL two-temperature leg (`model_column_2t`). Set only by
-// model_column_2t_ic; leaves the release and two-fluid legs untouched.
+// model_column_2t_ic; leaves the release leg untouched.
 bool  kTwoTemperature = false;
 
 double gamma_density_from_pressure(const Grid& grid, double pressure, double temperature) {
@@ -170,27 +159,6 @@ void gamma_hse_rung_down(const Grid& grid, double p_anchor, double rho_anchor,
     rho_out = rho_gh;
 }
 
-// Pack a LEGACY two-fluid ghost cell from explicit ion/neutral densities,
-// temperature, velocity and the gravitational potential (p_i = 2 n_i k T incl.
-// electrons, p_n = n_n k T, ε_e = 3/2 p_e ⇒ T_e = T_i). Taking (rho_i, rho_n)
-// explicitly lets each ghost carry the LOCAL ionization fraction (ionized corona
-// ↔ neutral chromosphere). The release solver packs its ghosts through
-// mixture_pack_ghost instead, which needs only the total density.
-void pack_ghost(Vec& ob, const Grid& grid, Real rho_i, Real rho_n, Real T, Real V, Real phi_g) {
-    const Real n_i = rho_i / grid.m_i;
-    const Real n_n = rho_n / grid.m_n;
-    const Real p_i = 2.0f * n_i * grid.k_b * T;   // protons + electrons
-    const Real p_n =        n_n * grid.k_b * T;
-    const Real p_e =        n_i * grid.k_b * T;   // ε_e = 3/2 p_e ⇒ T_e = T
-    ob(cons::RHO_I) = rho_i;
-    ob(cons::RHO_N) = rho_n;
-    ob(cons::MOM_I) = rho_i * V;
-    ob(cons::MOM_N) = rho_n * V;
-    ob(cons::E_I)   = grid.inv_gm1() * p_i + 0.5f * rho_i * V * V + rho_i * phi_g;
-    ob(cons::E_N)   = grid.inv_gm1() * p_n + 0.5f * rho_n * V * V + rho_n * phi_g;
-    ob(cons::E_E)   = grid.inv_gm1() * p_e;
-}
-
 // Per-cell (T, n_i, n_n) at height h_km from the real C7 atmosphere via
 // c7_full_profile (Avrett & Loeser Table 26): n_i = n_e (ionized), n_n = n_HI.
 void c7_cell(Real h_km, Real& T, Real& n_i, Real& n_n) {
@@ -227,11 +195,16 @@ Vec model_column_ic(Grid& grid) {
             throw std::logic_error("GAMMA_TABLE and ISO_GAMMA are mutually exclusive");
         if (grid.eos_gamma_table.empty()) grid.eos_gamma_table = EosGammaTable::load(gamma_path);
     }
-    // A loaded Gamma1 table means the single-fluid RELEASE solver; an empty one
-    // means the historical two-fluid research solver (scenario `model_gentle`).
-    // `model_column` always supplies the table, so it always lands here as a
-    // release run.
-    const bool gamma_mode = !grid.eos_gamma_table.empty();
+    // A loaded Gamma1 table is what selects the Saha/Gamma1 solvers. `model_column`
+    // and `model_column_2t` always supply one, so an empty table here means the
+    // caller asked for the historical fixed-gamma two-fluid column, which is the
+    // separate legacy `model_gentle` scenario.
+    if (grid.eos_gamma_table.empty())
+        throw std::runtime_error(
+            "model_column_ic: no Gamma1 table is loaded. model_column and "
+            "model_column_2t always run a Saha/Gamma1 solver; the historical "
+            "fixed-gamma two-fluid column is the legacy model_gentle scenario "
+            "(build with -DCHROMO_ENABLE_LEGACY=ON)");
 
     // Release configuration surface. Everything below is historical two-fluid
     // research physics that the single-fluid release timestep does not contain:
@@ -241,7 +214,7 @@ Vec model_column_ic(Grid& grid) {
     // artificial conduction term. Rejecting them outright is what keeps
     // `model_column` a single unambiguous production identity — a release run
     // can never be silently reconfigured into something else.
-    if (gamma_mode) {
+    {
         static const char* const kNonReleaseKnobs[] = {
             "ISO_GAMMA", "ISO_TWO_FLUID", "ISO_IONIZATION", "ISO_COOLING",
             "ISO_TRAC", "ISO_CORONA", "ISO_CHEAT", "ISO_QFLUX", "ISO_TBOOST",
@@ -251,38 +224,26 @@ Vec model_column_ic(Grid& grid) {
                 throw std::runtime_error(
                     std::string(knob) + " is historical two-fluid research "
                     "configuration and has no meaning for the single-fluid "
-                    "release solver; run the model_gentle scenario for that path");
+                    "release solver; run the legacy model_gentle scenario for "
+                    "that path (build with -DCHROMO_ENABLE_LEGACY=ON)");
         }
     }
 
     // --- IC mode ----------------------------------------------------------
     // The IC is ALWAYS the real Model C7 profile with the density re-integrated
     // hydrostatically (clean V≈0 start; the analytic-isentrope toy IC is retired).
-    // ISO_CORONA extends the top up into a resolved ~1 MK corona (to
-    // ISO_CORONA_TOP_KM) and turns on TRAC so the ionized corona conducts via
-    // Spitzer κ_e and can drive A&S78 conduction-driven evaporation.
-    kCorona = (env_f("ISO_CORONA", 0.0f) != 0.0f);
 
     // --- parameters -------------------------------------------------------
     // Lower truncation height of the modeled domain, in km measured from the
     // photosphere (that is the HEIGHT GAUGE only -- the domain itself starts
     // here, at 1600 km, well above it). See the inner-boundary block.
     const Real h_base     = env_f("ISO_H_BASE", 0.0f);
-    const Real corona_top = env_f("ISO_CORONA_TOP_KM", 10000.0f);          // km, coronal top
-    Real       DH_km      = env_f("ISO_DH", kCorona ? (corona_top - h_base) : 1303.0f); // km
+    Real       DH_km      = env_f("ISO_DH", 1303.0f); // km
     // Base (T, n_H) from the C7 profile at h_base.
     Real T_base, ni_b, nn_b;
     c7_cell(h_base, T_base, ni_b, nn_b);
-    if (gamma_mode) T_base = static_cast<Real>(c7_full_temperature_pchip(h_base));
+    T_base = static_cast<Real>(c7_full_temperature_pchip(h_base));
     const bool  heat_flux_on = (env_f("ISO_HEAT_FLUX", 0.0f) != 0.0f);
-    // Stage 2b radiative sink. Gentle evaporation is the competition between the
-    // downward conductive flux and radiative cooling (Antiochos & Sturrock 1978).
-    const bool  cooling_on = heat_flux_on && (env_f("ISO_COOLING", 0.0f) != 0.0f);
-    // LEGACY two-fluid research opt-ins (model_gentle). They are read only when
-    // no Gamma1 table is loaded: the release solver is a single-fluid equilibrium
-    // mixture and has neither a neutral fluid nor a finite-rate ionization stage.
-    const bool  two_fluid_on  = !gamma_mode && (env_f("ISO_TWO_FLUID", 0.0f) != 0.0f);
-    const bool  ionization_on = !gamma_mode && (env_f("ISO_IONIZATION", 0.0f) != 0.0f);
     kHeatFluxOn        = heat_flux_on;
     kAjump             = env_f("ISO_TJUMP_A", 1.0f);
     kBjump             = env_f("ISO_TJUMP_B", 1.0f);
@@ -310,12 +271,9 @@ Vec model_column_ic(Grid& grid) {
             "or with ISO_HYDRO_T_DECOUPLE=0; with the decoupled extrapolated hydro "
             "temperature the face would impose nothing and the column drains.");
 
-    // Adiabatic index. Default 5/3. ISO_GAMMA near 1 (e.g. 1.05) makes the gas
-    // nearly isothermal — a polytropic stand-in for the radiative thermostat the
-    // conduction-only experiment leaves out. Set BEFORE the IC/BC build.
-    if (!gamma_mode) grid.gamma_mono = env_f("ISO_GAMMA", grid.gamma_mono);
-    grid.single_fluid = gamma_mode || !two_fluid_on;
-    grid.enable_ionization = ionization_on;
+    // The release is a single-fluid common-temperature equilibrium mixture.
+    grid.single_fluid = true;
+    grid.enable_ionization = false;
     grid.enable_Te = false;
 
     // --- geometry: straight field line, gravity on -----------------------
@@ -380,12 +338,10 @@ Vec model_column_ic(Grid& grid) {
             const double h_c = 0.5 * (h_F(i) + h_F(i + 1));        // km
             Real T, n_i, n_n;
             c7_cell(static_cast<Real>(h_c), T, n_i, n_n);
-            if (gamma_mode) {
-                T = static_cast<Real>(c7_temperature_cell_average(h_F(i), h_F(i+1)));
-            }
+            T = static_cast<Real>(c7_temperature_cell_average(h_F(i), h_F(i+1)));
             const double dh_m = (h_c-prev_h)*1000.0;
             double x = n_i/(n_i+n_n);
-            if (gamma_mode) {
+            {
                 const double previous_ln_p = ln_p;
                 double trial = ln_p-prev_invH*dh_m;
                 bool converged = false;
@@ -408,12 +364,9 @@ Vec model_column_ic(Grid& grid) {
                         +", T="+std::to_string(T)+", p="+std::to_string(std::exp(trial)));
                 }
                 ln_p = trial;
-            } else {
-                const double invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
-                ln_p -= 0.5*(prev_invH+invH)*dh_m;
             }
             const double n_tot = std::exp(ln_p)/((1.0+x)*grid.k_b*T);
-            if (gamma_mode) x = saha_ionization_fraction_n_h(n_tot, T);
+            x = saha_ionization_fraction_n_h(n_tot, T);
             n_i = x * n_tot;
             n_n = (1.0-x)*n_tot;
             prev_h = h_c;
@@ -426,8 +379,7 @@ Vec model_column_ic(Grid& grid) {
     };
     {
         const double nbase = static_cast<double>(ni_b)+nn_b;
-        const double xb = gamma_mode ? saha_ionization_fraction_n_h(nbase, T_base)
-                                     : ni_b/nbase;
+        const double xb = saha_ionization_fraction_n_h(nbase, T_base);
         const double ln_p_c7 = std::log((1.0+xb)*nbase*grid.k_b*T_base);
         const double ln_p_top_c7 = integrate_column(ln_p_c7, xb);
 
@@ -443,9 +395,6 @@ Vec model_column_ic(Grid& grid) {
             if (!(std::isfinite(target) && target > 0.0))
                 throw std::runtime_error(std::string("model_column_ic: ISO_P_TOP must be a "
                     "positive pressure in Pa, got '") + e + "'");
-            if (!gamma_mode)
-                throw std::runtime_error("model_column_ic: ISO_P_TOP is a release "
-                    "(Gamma1-table) option only");
             const double ln_target = std::log(target);
             auto base_x = [&](double ln_pb) {
                 const double rho_b = gamma_density_from_pressure(grid, std::exp(ln_pb), T_base);
@@ -471,9 +420,7 @@ Vec model_column_ic(Grid& grid) {
     }
 
     Vec xn = arma::zeros<Vec>(
-        kTwoTemperature ? grid.ns*num_of_two_temp_eq
-        : gamma_mode ? grid.n_mixture_state : grid.n_state);
-    const auto sz = arma::size(grid.ns, num_of_eq);
+        kTwoTemperature ? grid.ns*num_of_two_temp_eq : grid.n_mixture_state);
     for (arma::uword i = 0; i < grid.ns; ++i) {
         const Real T     = T_c(i);
         const Real n_i   = ni_c(i);
@@ -490,21 +437,8 @@ Vec model_column_ic(Grid& grid) {
                                0.0, T, T, phi_g);
             continue;
         }
-        if (gamma_mode) {
-            mixture_pack_cell(grid, xn, i, static_cast<double>(rho_i)+rho_n,
-                              0.0, T, phi_g);
-            continue;
-        }
-        const Real p_i   = 2.0f * n_i * grid.k_b * T;
-        const Real p_n   =        n_n * grid.k_b * T;
-        const Real p_e   =        n_i * grid.k_b * T;
-        xn(arma::sub2ind(sz, i, cons::RHO_I)) = rho_i;
-        xn(arma::sub2ind(sz, i, cons::RHO_N)) = rho_n;
-        xn(arma::sub2ind(sz, i, cons::MOM_I)) = 0.0f;
-        xn(arma::sub2ind(sz, i, cons::MOM_N)) = 0.0f;
-        xn(arma::sub2ind(sz, i, cons::E_I))   = grid.inv_gm1() * p_i + rho_i * phi_g;
-        xn(arma::sub2ind(sz, i, cons::E_N))   = grid.inv_gm1() * p_n + rho_n * phi_g;
-        xn(arma::sub2ind(sz, i, cons::E_E))   = grid.inv_gm1() * p_e;
+        mixture_pack_cell(grid, xn, i, static_cast<double>(rho_i)+rho_n,
+                          0.0, T, phi_g);
     }
 
     // Reference top temperature for the imposed ghost jump (Stage 2), FIXED at the
@@ -518,45 +452,12 @@ Vec model_column_ic(Grid& grid) {
     kTtopFixedAbs = (t_top_abs > 0.0f);
     if (kTtopFixedAbs) kTtopRef = t_top_abs;
 
-    // --- one-time IC coronal superheat (ISO_TBOOST > 1) -------------------
-    // HISTORICAL two-fluid option (rejected in release mode).
-    // Heat-flux-driven evaporation with NO heating ramp: raise the IC coronal
-    // temperature above its own conduction+radiation balance so its own Spitzer
-    // flux conducts down the TR and drives evaporation from t=0 (Antiochos &
-    // Sturrock 1978). Switched on smoothly ABOVE the TR (tanh in T) so the
-    // chromosphere/TR base is untouched; density held fixed (heat raises p).
-    const Real T_boost = env_f("ISO_TBOOST", 1.0f);
-    if (T_boost > 1.0f) {
-        const Real Tc = env_f("ISO_TBOOST_TC", 3.0e5f);   // selector center [K]
-        const Real Tw = env_f("ISO_TBOOST_W",  1.0e5f);   // selector width  [K]
-        for (arma::uword i = 0; i < grid.ns; ++i) {
-            const Real rho_i = ni_c(i) * grid.m_i;
-            const Real rho_n = nn_c(i) * grid.m_n;
-            const Real phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
-            const Real n_i = rho_i / grid.m_i;
-            const Real n_n = rho_n / grid.m_n;
-            const Real T   = T_c(i);
-            const Real w   = 0.5f * (1.0f + std::tanh((T - Tc) / Tw));   // ~0 chromo → ~1 corona
-            const Real Tb  = (1.0f + (T_boost - 1.0f) * w) * T;
-            if (gamma_mode) {
-                mixture_pack_cell(grid, xn, i, static_cast<double>(rho_i)+rho_n,
-                                  0.0, Tb, phi_g);
-                continue;
-            }
-            const Real p_i_b = 2.0f * n_i * grid.k_b * Tb;               // protons + electrons
-            const Real p_n_b =        n_n * grid.k_b * Tb;
-            xn(arma::sub2ind(sz, i, cons::E_I)) = grid.inv_gm1() * p_i_b + rho_i * phi_g;
-            xn(arma::sub2ind(sz, i, cons::E_N)) = grid.inv_gm1() * p_n_b + rho_n * phi_g;
-            xn(arma::sub2ind(sz, i, cons::E_E)) = grid.inv_gm1() * n_i * grid.k_b * Tb;   // T_e = Tb
-        }
-    }
-
     // --- lower truncation reservoir (h_base = 1600 km, NOT the photosphere) ---
     // The ghosts sit one and two Δs below cell 0 and stand in for the unmodeled
     // lower chromosphere, which on these timescales is a quasi-static stratified
-    // reservoir. The RELEASE ladder (gamma_mode) is trapezoidal and EOS-closed at
-    // the truncation temperature T₀; the legacy two-fluid ladder below it keeps
-    // the historical first-order form p_0 + kρ_0gΔs with ρ ∝ p.
+    // reservoir. The RELEASE ladder is trapezoidal and EOS-closed at the
+    // truncation temperature T₀ (the legacy two-fluid column, model_gentle, keeps
+    // the historical first-order form p_0 + kρ_0gΔs with ρ ∝ p).
     {
         const Real T0    = T_c(0);
         kInnerTRef = T0;
@@ -564,37 +465,17 @@ Vec model_column_ic(Grid& grid) {
         const Real n_n0  = nn_c(0);
         kInnerRhoI = n_i0 * grid.m_i;
         kInnerRhoN = n_n0 * grid.m_n;
-        const Real p_i0 = 2.0f * n_i0 * grid.k_b * T0;
-        const Real p_n0 =        n_n0 * grid.k_b * T0;
         // Center-to-ghost distance = the BASE cell's own width (mirrored ghost). On a
         // refined mesh cell 0 is a fine cell, so this is the fine Δs, NOT the coarse ds_m.
         const Real ds_base = grid.ds_i(0);
-        if (gamma_mode) {
-            const double rho0 = kInnerRhoI+kInnerRhoN;
-            const double p0 = (1.0+saha_ionization_fraction_n_h(
-                rho0/eos_constants::m_h, T0))*rho0/eos_constants::m_h*eos_constants::k_b*T0;
-            double pg0, rg0, pg1, rg1;
-            gamma_hse_rung_down(grid, p0,  rho0, T0, ds_base, pg0, rg0);
-            gamma_hse_rung_down(grid, pg0, rg0,  T0, ds_base, pg1, rg1);
-            kInnerPRes0 = pg0; kInnerRhoRes0 = rg0;
-            kInnerPRes1 = pg1; kInnerRhoRes1 = rg1;
-            kInnerPiGh = pg0; kInnerPnGh = 0.0f;
-            kInnerPiGh2 = pg1; kInnerPnGh2 = 0.0f;
-            kInnerRhoIGh = rg0;
-            kInnerRhoNGh = 0.0f;
-            kInnerRhoIGh2 = rg1;
-            kInnerRhoNGh2 = 0.0f;
-        } else {
-        kInnerPiGh  = p_i0 + kInnerRhoI * grid.g * ds_base;
-        kInnerPnGh  = p_n0 + kInnerRhoN * grid.g * ds_base;
-        kInnerPiGh2 = p_i0 + 2.0f * kInnerRhoI * grid.g * ds_base;
-        kInnerPnGh2 = p_n0 + 2.0f * kInnerRhoN * grid.g * ds_base;
-        // ρ ∝ p at fixed T₀ (isothermal-hydrostatic ghost densities).
-        kInnerRhoIGh  = kInnerRhoI * (kInnerPiGh  / p_i0);
-        kInnerRhoIGh2 = kInnerRhoI * (kInnerPiGh2 / p_i0);
-        kInnerRhoNGh  = kInnerRhoN * (kInnerPnGh  / p_n0);
-        kInnerRhoNGh2 = kInnerRhoN * (kInnerPnGh2 / p_n0);
-        }
+        const double rho0 = kInnerRhoI+kInnerRhoN;
+        const double p0 = (1.0+saha_ionization_fraction_n_h(
+            rho0/eos_constants::m_h, T0))*rho0/eos_constants::m_h*eos_constants::k_b*T0;
+        double pg0, rg0, pg1, rg1;
+        gamma_hse_rung_down(grid, p0,  rho0, T0, ds_base, pg0, rg0);
+        gamma_hse_rung_down(grid, pg0, rg0,  T0, ds_base, pg1, rg1);
+        kInnerPRes0 = pg0; kInnerRhoRes0 = rg0;
+        kInnerPRes1 = pg1; kInnerRhoRes1 = rg1;
     }
 
     // --- numerical scheme: the validated "bestwb" configuration (always on) ---
@@ -637,10 +518,10 @@ Vec model_column_ic(Grid& grid) {
     // the frozen-composition index gamma = 5/3 with the ionization energy carried
     // as SWMF's passive offset E0 — and limits (log rho, V, log p), recovering the
     // face temperature by inverting the same authoritative Saha closure. Both
-    // require the equilibrium-manifold face builder, so they are enabled only in
-    // gamma_mode; the legacy non-gamma path keeps Rusanov + (log rho, V, log T).
-    grid.swmf_godunov_flux       = gamma_mode;
-    grid.pressure_reconstruct    = gamma_mode;
+    // require the equilibrium-manifold face builder, which every Saha/Gamma1 run
+    // has (the legacy two-fluid column keeps Rusanov + (log rho, V, log T)).
+    grid.swmf_godunov_flux       = true;
+    grid.pressure_reconstruct    = true;
     grid.roe_characteristic_flux = false;
     // Reference/debug overrides. ISO_RIEMANN=roe-local selects the mixture Roe
     // characteristic flux — the equilibrium (Gamma1) linearization that was the
@@ -658,14 +539,9 @@ Vec model_column_ic(Grid& grid) {
             grid.roe_characteristic_flux = false;
             grid.swmf_godunov_flux = false;
         } else if (choice == "roe-local") {
-            if (!gamma_mode)
-                throw std::invalid_argument("ISO_RIEMANN=roe-local requires Gamma/Saha mode");
             grid.roe_characteristic_flux = true;
             grid.swmf_godunov_flux = false;
         } else if (choice == "swmf-godunov") {
-            if (!gamma_mode)
-                throw std::invalid_argument(
-                    "ISO_RIEMANN=swmf-godunov requires Gamma/Saha mode");
             grid.roe_characteristic_flux = false;
             grid.swmf_godunov_flux = true;
         } else {
@@ -680,9 +556,6 @@ Vec model_column_ic(Grid& grid) {
         if (choice == "lnrho-v-lnt") {
             grid.pressure_reconstruct = false;
         } else if (choice == "lnrho-v-lnp") {
-            if (!gamma_mode)
-                throw std::invalid_argument(
-                    "ISO_RECONSTRUCTION=lnrho-v-lnp requires Gamma/Saha mode");
             grid.pressure_reconstruct = true;
         } else {
             throw std::invalid_argument(
@@ -703,99 +576,19 @@ Vec model_column_ic(Grid& grid) {
 
     // --- runtime physics toggles ------------------------------------------
     // The RELEASE branch is deliberately a straight line: hydro plus physical
-    // conduction, nothing else. The optional stages below it exist only for the
-    // historical two-fluid research path, and the release rejects their env
-    // knobs above, so none of them can be reached from a model_column run.
-    grid.single_fluid             = gamma_mode || !two_fluid_on;
-    grid.enable_ionization        = ionization_on;
-    grid.enable_radiative_cooling = cooling_on;
+    // conduction, nothing else. The optional two-fluid research stages (finite-
+    // rate ionization, radiative sink, TRAC, imposed q(T) flux, volumetric coronal
+    // heating) live with the legacy model_gentle scenario, and the release
+    // rejects their env knobs above.
+    grid.single_fluid             = true;
+    grid.enable_ionization        = false;
+    grid.enable_radiative_cooling = false;
     grid.enable_beam_heating      = false;
     grid.enable_coronal_heating   = false;
-    grid.impose_outer_heat_flux   = false;   // default: heat enters via the ghost-T jump
-    grid.enable_Te                = false;    // two-fluid (ion/neutral), NOT three-temperature
-    if (gamma_mode) {
-        grid.enable_trac         = false;    // no TRAC stage in the release solver
-        grid.enable_vacuum_floor = false;
-    } else {
-        // TRAC broadens the unresolved TR. ISO_TRAC force-enables it independent of
-        // cooling/corona (auto = cooling || corona). ISO_TRAC_TCHROM sets the region base
-        // T_b; ISO_TRAC_TCMAXFRAC lifts Johnston's 0.2·T_peak cap (needed on a capped
-        // low-T domain where 0.2·T_peak < T_b would pin T_c to the floor).
-        const Real iso_trac = env_f("ISO_TRAC", -1.0f);   // -1 = auto (cooling||corona)
-        grid.enable_trac         = (iso_trac >= 0.0f) ? (iso_trac != 0.0f)
-                                                      : (cooling_on || kCorona);
-        grid.trac_T_chrom        = env_f("ISO_TRAC_TCHROM", 2.0e4f);
-        grid.trac_Tc_max_frac    = env_f("ISO_TRAC_TCMAXFRAC", 0.2f);
-        grid.trac_cutoff_T       = grid.trac_T_chrom;
-        grid.enable_vacuum_floor = cooling_on || kCorona || ionization_on;
-    }
-
-    // --- Route-B photoionization closure (only when the network is on) ----
-    // Invert the local ionization-equilibrium balance of the active Stage-E network
-    // on the IC so the C7 chromosphere is a fixed point (shared C7-library helper).
-    if (ionization_on) {
-        Vec h_cell(grid.ns);
-        for (arma::uword i = 0; i < grid.ns; ++i)
-            h_cell(i) = 0.5f * (h_F(i) + h_F(i + 1));
-        grid.photoionization_rate_i = c7_route_b_photoionization(grid, T_c, ni_c, nn_c, h_cell);
-    }
-
-    // --- imposed Neumann coronal flux q(T) + ramp (ISO_QFLUX*) ------------
-    // HISTORICAL two-fluid option (rejected in release mode).
-    // Alternative to the ghost-T jump: impose the downward coronal conductive flux
-    // as a Stage-D Neumann outer BC (RTV 1978 / model_c7 closure), optionally ramped
-    // up to drive gentle evaporation (Antiochos & Sturrock 1978). The base is C7's
-    // own top-gradient flux q = κ₀ T^{5/2} dT/ds unless ISO_QFLUX0 overrides it.
-    kQflux = (env_f("ISO_QFLUX", 0.0f) != 0.0f);
-    if (kQflux) {
-        const Real kappa0 = 1.0e-11f;   // W m^-1 K^-7/2
-        const arma::uword nl = grid.ns - 1;
-        const Real T_top = T_c(nl);
-        const Real dTds  = (T_c(nl) - T_c(nl - 1))
-                          / (0.5f * (grid.ds_i(nl) + grid.ds_i(nl - 1)));   // K/m
-        const Real q_c7  = kappa0 * std::pow(T_top, 2.5f) * dTds;
-        const Real q_base = env_f("ISO_QFLUX0", q_c7);
-        grid.impose_outer_heat_flux   = true;
-        grid.outer_heat_flux_base     = q_base;
-        grid.outer_heat_flux          = q_base;
-        grid.outer_heat_flux_enhance  = env_f("ISO_QFLUX_ENHANCE", 1.0f);
-        grid.outer_heat_flux_t_on     = env_f("ISO_QFLUX_T_ON",  600.0f);
-        grid.outer_heat_flux_ramp     = env_f("ISO_QFLUX_RAMP",  120.0f);
-    }
-
-    // --- ambient volumetric coronal heating H(s) (ISO_CHEAT=1) ------------
-    // HISTORICAL two-fluid option (rejected in release mode).
-    // The RTV (1978) static-balance term the resolved corona otherwise lacks:
-    //   H(s) = E_H0 · exp(−(s−s0)/s_H)  [W/m³]  (Aschwanden & Schrijver 2002),
-    // deposited through the corona so it balances the radiative loss locally and
-    // pins V≈0; ramping it up (ISO_CHEAT_ENHANCE>1, slow) drives gentle evaporation.
-    // Calibration inverts the RTV/AS2002 static scaling for the E_H0 that relaxes a
-    // column of length L to apex temperature T_max. When on, the boundary q(T) is
-    // turned OFF (the corona is heated inside the domain; no double-heating).
-    if (env_f("ISO_CHEAT", 0.0f) != 0.0f) {
-        const Real L    = arma::sum(grid.ds_i);                 // column length [m]
-        const Real Tmax = env_f("ISO_CHEAT_TMAX_MK", 1.5f) * 1.0e6f;
-        const Real sHf  = env_f("ISO_CHEAT_SH_FRAC", 0.4f);
-        const Real s_H  = sHf * L;
-        const Real L_cm = L * 100.0f;
-        const Real p0   = std::pow(Tmax / 1400.0f, 3.0f) / L_cm;
-        const Real Eun  = 9.8e4f * std::pow(p0, 7.0f / 6.0f) * std::pow(L_cm, -5.0f / 6.0f);
-        const Real E0   = 0.1f * Eun * std::exp(0.5f * L / s_H);   // erg/cm³/s → W/m³
-
-        grid.enable_coronal_heating = true;
-        grid.coronal_heat_E0        = env_f("ISO_CHEAT_E0", E0);
-        grid.coronal_heat_sH        = s_H;
-        grid.coronal_heat_s0        = env_f("ISO_CHEAT_S0_MM", 0.0f) * 1.0e3f;
-        grid.coronal_heat_two_sided = false;                       // open column, base-anchored
-        grid.coronal_heat_enhance   = env_f("ISO_CHEAT_ENHANCE", 1.0f);
-        grid.coronal_heat_t_on      = env_f("ISO_CHEAT_T_ON",  0.0f);
-        grid.coronal_heat_ramp      = env_f("ISO_CHEAT_RAMP", 30.0f);
-        // Corona heated internally ⇒ drop the boundary q(T) crutch.
-        grid.impose_outer_heat_flux = false;
-        grid.outer_heat_flux_base   = 0.0f;
-        grid.outer_heat_flux        = 0.0f;
-        kQflux = false;
-    }
+    grid.impose_outer_heat_flux   = false;   // heat enters via the ghost-T wall
+    grid.enable_Te                = false;
+    grid.enable_trac              = false;   // no TRAC stage in the release solver
+    grid.enable_vacuum_floor      = false;
 
     // Optional relaxation phase: run Stage-1 adiabatic relaxation (conduction off,
     // no jump, V=0 reservoir) for sim_time < kRelaxTime so the C7 IC settles to a
@@ -809,23 +602,12 @@ Vec model_column_ic(Grid& grid) {
     kHeatFluxOn     = relaxing0 ? false : heat_flux_on;
 
     // Stage 1: conduction OFF (adiabatic Euler steady state). Stage 2: ON, driven
-    // by the top T jump (or the imposed q(T) flux / coronal heating).
+    // by the top T wall.
     grid.enable_conduction        = relaxing0 ? false : heat_flux_on;
     // The release conduction operator is structurally physical-only and never
-    // reads this field. The historical two-fluid Stage D still folds a
-    // mesh-scaled artificial diffusivity into its conduction operator; keep it
-    // there behind an explicit diagnostic multiplier for controlled legacy
-    // comparisons, but never enable it implicitly.
-    // ISO_NUMERICAL_DIFFUSIVITY_MULT=1 restores the historical C_num=2000 m/s
-    // (4x in the resolved-corona testbed); unset/0 is the two-fluid baseline.
-    if (gamma_mode) {
-        grid.numerical_diffusivity_per_length = 0.0f;
-    } else {
-        const Real diff_mult = (kCorona ? 4.0f : 1.0f)
-                              * env_f("ISO_NUMERICAL_DIFFUSIVITY_MULT", 0.0f);
-        grid.numerical_diffusivity_per_length = heat_flux_on
-            ? (diff_mult * 2.0e3f) : 0.0f;
-    }
+    // reads this field; the mesh-scaled artificial diffusivity belongs to the
+    // historical two-fluid Stage D only.
+    grid.numerical_diffusivity_per_length = 0.0f;
 
     model_column_update_bc(grid, xn);
     grid.broadcast();
@@ -846,24 +628,18 @@ Vec model_column_ic(Grid& grid) {
     // float32 round-off floor" reading was a property of float32 storage.
     // Evidence: docs/studies/numerics/reference_free_release_recap.md.
     //
-    // The non-gamma (two-fluid) leg of this scenario is a different solver that
+    // The legacy two-fluid column (model_gentle) is a different solver that
     // never received the predictor source term, so it keeps the frozen
-    // reference exactly as before. eq_wb is now a two-fluid-only mechanism.
-    grid.eq_wb = !gamma_mode;
-    if (grid.eq_wb) grid.eq_state = xn;
+    // reference. eq_wb is a two-fluid-only mechanism.
+    grid.eq_wb = false;
     return xn;
 }
 
 void model_column_update_bc(Grid& grid, const Vec& xn) {
-    const auto  sz  = arma::size(grid.ns, num_of_eq);
-    const Real m_i = grid.m_i;
-    const Real m_n = grid.m_n;
-    const Real k_b = grid.k_b;
     const Real g   = grid.g;
 
-    // Decode total density / pressure / temperature / velocity / ionization fraction
-    // x = ρ_i/ρ_tot of an interior cell (cons2prim convention). Single-fluid T uses
-    // the LOCAL ionization (p = (2 n_i + n_n) k T).
+    // Decode total density / pressure / temperature / velocity / ionization
+    // fraction of an interior cell.
     // Release state: decode the mixture cell straight out of (rho, rho u, E).
     auto mixture_cell_state = [&](arma::uword i, Real& rho_tot, Real& p_tot,
                                   Real& T, Real& V, Real& x,
@@ -903,58 +679,14 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         T_e = th.T_e; T_i = th.T_i;
     };
 
-    // Legacy two-fluid state (single-fluid T from the local ionization).
-    auto two_fluid_cell_state = [&](arma::uword i, Real& rho_tot, Real& p_tot,
-                                    Real& T, Real& V, Real& x,
-                                    Real& T_e, Real& T_i) {
-        const Real rho_i = xn(arma::sub2ind(sz, i, cons::RHO_I));
-        const Real rho_n = xn(arma::sub2ind(sz, i, cons::RHO_N));
-        const Real momI  = xn(arma::sub2ind(sz, i, cons::MOM_I));
-        const Real momN  = xn(arma::sub2ind(sz, i, cons::MOM_N));
-        const Real E_i   = xn(arma::sub2ind(sz, i, cons::E_I));
-        const Real E_n   = xn(arma::sub2ind(sz, i, cons::E_N));
-        const Real phi_g = 0.5f * (grid.phi_g_imh(i) + grid.phi_g_iph(i));
-        const Real Vi    = momI / rho_i;
-        const Real Un    = momN / rho_n;
-        const Real p_i   = grid.gm1() * E_i - grid.half_gm1() * rho_i * Vi * Vi - grid.gm1() * rho_i * phi_g;
-        const Real p_n   = grid.gm1() * E_n - grid.half_gm1() * rho_n * Un * Un - grid.gm1() * rho_n * phi_g;
-        const Real n_i   = rho_i / m_i;
-        const Real n_n   = rho_n / m_n;
-        rho_tot = rho_i + rho_n;
-        p_tot   = p_i + p_n;
-        T       = p_tot / ((2.0f * n_i + n_n) * k_b);   // single-fluid T, local ionization
-        V       = Vi;
-        x       = rho_i / rho_tot;                      // ionization fraction
-        T_e     = T; T_i = T;
-    };
-
-    const bool release = !grid.eos_gamma_table.empty() && !kTwoTemperature;
+    // The release (common-temperature mixture) unless the EXPERIMENTAL
+    // two-temperature leg is active. model_column_ic guarantees a Gamma1 table.
     auto cell_state = [&](arma::uword i, Real& rho_tot, Real& p_tot,
                           Real& T, Real& V, Real& x,
                           Real& T_e, Real& T_i) {
         if (kTwoTemperature) two_temp_cell_state(i, rho_tot, p_tot, T, V, x, T_e, T_i);
-        else if (release)    mixture_cell_state(i, rho_tot, p_tot, T, V, x, T_e, T_i);
-        else                 two_fluid_cell_state(i, rho_tot, p_tot, T, V, x, T_e, T_i);
+        else                 mixture_cell_state(i, rho_tot, p_tot, T, V, x, T_e, T_i);
     };
-
-    // --- imposed q(T) flux ramp (ISO_QFLUX) --------------------------------
-    // q(T) = q_base · enhance(t): holds at 1 until t_on, then cosine-rises to
-    // outer_heat_flux_enhance over [t_on, t_on+ramp]. Applied to the Stage-D
-    // Neumann outer flux (impose_outer_heat_flux). No-op when kQflux is off.
-    if (kQflux && grid.outer_heat_flux_base > 0.0f) {
-        Real amp = 1.0f;
-        if (grid.outer_heat_flux_enhance != 1.0f) {
-            const Real t   = grid.sim_time;
-            const Real ton = grid.outer_heat_flux_t_on;
-            const Real r   = (grid.outer_heat_flux_ramp > 1.0e-6f) ? grid.outer_heat_flux_ramp : 1.0e-6f;
-            Real w;
-            if (t <= ton)          w = 0.0f;
-            else if (t >= ton + r) w = 1.0f;
-            else w = 0.5f * (1.0f - std::cos(static_cast<Real>(arma::datum::pi) * (t - ton) / r));
-            amp = 1.0f + (grid.outer_heat_flux_enhance - 1.0f) * w;
-        }
-        grid.outer_heat_flux = grid.outer_heat_flux_base * amp;
-    }
 
     // --- relaxation → Stage-2 phase switch (off grid.sim_time) -------------
     // While relaxing: conduction OFF, no jump, V=0 reservoir top. At the transition
@@ -1048,14 +780,12 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         // The ghost density inverts whichever pressure closure the active solver
         // uses at the imposed ghost temperature(s): the two-temperature closure
         // p = n_H k_B (T_i + x(n_H,T_e) T_e) on the experimental leg, the
-        // equilibrium Saha closure on the release leg, and the frozen local
-        // ionization fraction on the two-fluid leg.
+        // equilibrium Saha closure on the release leg.
         auto ghost_density = [&](Real p_gh, Real T_e_gh, Real T_i_gh) {
             if (kTwoTemperature)
                 return static_cast<Real>(two_temp_density_from_pressure(
                     grid.eos_gamma_table, p_gh, T_e_gh, T_i_gh));
-            return release ? gamma_density_from_pressure(grid, p_gh, T_i_gh)
-                           : p_gh*m_i/((1.0f+x_top)*k_b*T_i_gh);
+            return static_cast<Real>(gamma_density_from_pressure(grid, p_gh, T_i_gh));
         };
         // ρ_ghost depends on p_ghost, so take one fixed-point pass seeded with the
         // rung below (the correction is O(Δs·Δρ/ρ) and converges in a single sweep).
@@ -1122,10 +852,8 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
             // use — rather than the equilibrium Gamma1 speed of the release.
             const Real c_s = kTwoTemperature
                 ? std::sqrt((5.0/3.0)*p_top/rho_top)
-                : release
-                ? std::sqrt(gamma_state(grid.eos_gamma_table, rho_top, T_top,
-                                        grid.eos_gamma_debug_clamp).gamma_sound*p_top/rho_top)
-                : std::sqrt(2.0f*grid.gamma_mono*k_b*T_top/m_i);
+                : std::sqrt(gamma_state(grid.eos_gamma_table, rho_top, T_top,
+                                        grid.eos_gamma_debug_clamp).gamma_sound*p_top/rho_top);
             const Real vcap = kVcapMach * c_s;
             V_g = V_top;
             if (V_g >  vcap) V_g =  vcap;
@@ -1136,16 +864,11 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
                                 Te_g0, Ti_g0, phi_g_out);
             two_temp_pack_ghost(grid, grid.tt_outer_boundary1, rho_g1, V_g,
                                 Te_g1, Ti_g1, phi_g_out);
-        } else if (release) {
+        } else {
             mixture_pack_ghost(grid, grid.mix_outer_boundary0, rho_g0, V_g, T_g0,
                                phi_g_out);
             mixture_pack_ghost(grid, grid.mix_outer_boundary1, rho_g1, V_g, T_g1,
                                phi_g_out);
-        } else {
-            pack_ghost(grid.outer_boundary0_i, grid, x_top * rho_g0,
-                       (1.0f - x_top) * rho_g0, T_g0, V_g, phi_g_out);
-            pack_ghost(grid.outer_boundary1_i, grid, x_top * rho_g1,
-                       (1.0f - x_top) * rho_g1, T_g1, V_g, phi_g_out);
         }
     }
 
@@ -1188,34 +911,12 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
                                 kInnerTRef, kInnerTRef, phi_g_in);
             two_temp_pack_ghost(grid, grid.tt_inner_boundary1, kInnerRhoRes1, 0.0,
                                 kInnerTRef, kInnerTRef, phi_g_in);
-            grid.broadcast();
-            return;
-        }
-        if (release) {
+        } else {
             mixture_pack_ghost(grid, grid.mix_inner_boundary0, kInnerRhoRes0, 0.0,
                                kInnerTRef, phi_g_in);
             mixture_pack_ghost(grid, grid.mix_inner_boundary1, kInnerRhoRes1, 0.0,
                                kInnerTRef, phi_g_in);
-            grid.broadcast();
-            return;
         }
-        Vec& ob0 = grid.inner_boundary0_i;
-        ob0(cons::RHO_I) = kInnerRhoIGh;
-        ob0(cons::RHO_N) = kInnerRhoNGh;
-        ob0(cons::MOM_I) = 0.0f;
-        ob0(cons::MOM_N) = 0.0f;
-        ob0(cons::E_I)   = grid.inv_gm1() * kInnerPiGh + kInnerRhoIGh * phi_g_in;
-        ob0(cons::E_N)   = grid.inv_gm1() * kInnerPnGh + kInnerRhoNGh * phi_g_in;
-        ob0(cons::E_E)   = 0.5f * grid.inv_gm1() * kInnerPiGh;   // p_e = ½ p_i ⇒ T_e = T_i
-
-        Vec& ob1 = grid.inner_boundary1_i;
-        ob1(cons::RHO_I) = kInnerRhoIGh2;
-        ob1(cons::RHO_N) = kInnerRhoNGh2;
-        ob1(cons::MOM_I) = 0.0f;
-        ob1(cons::MOM_N) = 0.0f;
-        ob1(cons::E_I)   = grid.inv_gm1() * kInnerPiGh2 + kInnerRhoIGh2 * phi_g_in;
-        ob1(cons::E_N)   = grid.inv_gm1() * kInnerPnGh2 + kInnerRhoNGh2 * phi_g_in;
-        ob1(cons::E_E)   = 0.5f * grid.inv_gm1() * kInnerPiGh2;
     }
 
     grid.broadcast();

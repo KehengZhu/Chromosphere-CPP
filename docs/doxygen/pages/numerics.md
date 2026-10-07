@@ -169,7 +169,7 @@ This is also the point of the study: assigning the 22,000 K conductive reservoir
 
 ## The two-fluid scheme
 
-For contrast: the historical solver uses TVD-MUSCL with the symmetric minmod limiter, the Rusanov / local Lax-Friedrichs flux, and a semi-implicit operator-split driver with the stage sequence listed in `src/two_fluid/integrators.cpp`. Its implicit branch is currently disabled at the call site (see the known issue in @ref physics_model). Explicit RK4 is also available for the explicit-only path. Those are two-fluid entry points; the release timestep is `chromosphere::mixture_advance`.
+For contrast: the historical solver uses TVD-MUSCL with the symmetric minmod limiter, the Rusanov / local Lax-Friedrichs flux, and a semi-implicit operator-split driver with the stage sequence listed in `legacy/two_fluid/integrators.cpp`. Its implicit branch is currently disabled at the call site (see the known issue in @ref physics_model). Explicit RK4 is also available for the explicit-only path. Those are two-fluid entry points; the release timestep is `chromosphere::mixture_advance`.
 
 ## Rejected, and not to be reintroduced without new evidence
 

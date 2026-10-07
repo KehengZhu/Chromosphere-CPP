@@ -45,14 +45,17 @@ endif()
 # min/max, and sub2ind, which are all header-only.
 add_compile_definitions(ARMA_DONT_USE_LAPACK ARMA_DONT_USE_BLAS)
 
-# Two solvers, two source directories, one shared infrastructure layer.
+# Solvers by directory, over one shared infrastructure layer.
 #   src/core/             shared: Grid, EOS, profiling, OpenMP helpers, physics formulas
 #   src/single_fluid/     RELEASE: U = (rho, rho u, E) equilibrium mixture
 #   src/two_temp/         EXPERIMENTAL test study: U = (rho, rho u, E, E_e),
 #                         separate electron and heavy-particle temperatures.
 #                         Reuses only single_fluid/exact_rs.hpp (a standalone
 #                         port of the SWMF ideal-gas Riemann solver).
-#   src/two_fluid/        HISTORICAL research: seven-row carrier state
+#   scenarios/            model_column / model_column_2t IC+BC, mesh, C7 profile
+#   legacy/two_fluid/     HISTORICAL research: seven-row carrier state  (legacy only)
+#   legacy/scenarios/     its scenarios: model_c7, model_flare, model_gentle,
+#                         analytic_canopy, pfss_field_line            (legacy only)
 # No solver directory depends on another's solver code.
 add_library(chromosphere STATIC
     src/core/profiling.cpp
@@ -64,20 +67,33 @@ add_library(chromosphere STATIC
     src/two_temp/closure.cpp
     src/two_temp/hydro.cpp
     src/two_temp/conduction.cpp
-    src/two_fluid/state.cpp
-    src/two_fluid/flux.cpp
-    src/two_fluid/rhs.cpp
-    src/two_fluid/integrators.cpp
     scenarios/scenario.cpp
     scenarios/mesh.cpp
     scenarios/c7_profile.cpp
-    scenarios/model_c7.cpp
     scenarios/model_column.cpp
-    scenarios/model_flare.cpp
-    scenarios/analytic_canopy.cpp
     scenarios/data_file_parser.cpp
-    scenarios/pfss_field_line.cpp
 )
+
+# The frozen two-fluid solver and its scenarios (legacy/README.md). Off by
+# default, so a default build neither compiles nor links any of it; asking a
+# default build for a legacy scenario fails immediately with a message naming
+# this option.
+option(CHROMO_ENABLE_LEGACY "Build the frozen two-fluid solver and its scenarios" OFF)
+if(CHROMO_ENABLE_LEGACY)
+    target_sources(chromosphere PRIVATE
+        legacy/two_fluid/state.cpp
+        legacy/two_fluid/flux.cpp
+        legacy/two_fluid/rhs.cpp
+        legacy/two_fluid/integrators.cpp
+        legacy/scenarios/legacy_scenarios.cpp
+        legacy/scenarios/model_c7.cpp
+        legacy/scenarios/model_flare.cpp
+        legacy/scenarios/model_gentle.cpp
+        legacy/scenarios/analytic_canopy.cpp
+        legacy/scenarios/pfss_field_line.cpp
+    )
+    target_compile_definitions(chromosphere PUBLIC CHROMO_ENABLE_LEGACY=1)
+endif()
 target_include_directories(chromosphere PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -146,6 +162,14 @@ foreach(RELEASE_GUARD IN ITEMS enable_te single_fluid two_fluid ionization)
                      -DOUT=${CMAKE_CURRENT_BINARY_DIR}/release_guard_unused.dat
                      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_release_guard.cmake)
 endforeach()
+
+if(NOT CHROMO_ENABLE_LEGACY)
+    add_test(NAME legacy_scenario_disabled
+             COMMAND ${CMAKE_COMMAND}
+                     -DEXE=$<TARGET_FILE:chromo_main>
+                     -DOUT=${CMAKE_CURRENT_BINARY_DIR}/legacy_disabled_unused.dat
+                     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_legacy_disabled.cmake)
+endif()
 
 add_test(NAME release_output_sidecar
          COMMAND ${CMAKE_COMMAND}

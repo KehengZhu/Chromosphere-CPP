@@ -172,7 +172,7 @@ Two regimes, distinguished by how fast energy arrives:
 
 ## Known issue
 
-The write-up's semi-implicit Picard iteration is unstable for the implicit terms actually present here. At Model C7 conditions the drag is stiff, and Picard iteration converges only when `dt |R_I'| < 1`. The body of `chromosphere::rhs_implicit_state` is correct, but the call site in `src/two_fluid/integrators.cpp` keeps the residual zeroed, so the two-fluid step is effectively explicit Euler plus the point-implicit and tridiagonal stages until a real Newton solve on the `R_I` Jacobian replaces the Picard iteration.
+The write-up's semi-implicit Picard iteration is unstable for the implicit terms actually present here. At Model C7 conditions the drag is stiff, and Picard iteration converges only when `dt |R_I'| < 1`. The body of `chromosphere::rhs_implicit_state` is correct, but the call site in `legacy/two_fluid/integrators.cpp` keeps the residual zeroed, so the two-fluid step is effectively explicit Euler plus the point-implicit and tridiagonal stages until a real Newton solve on the `R_I` Jacobian replaces the Picard iteration.
 
 ## See also
 

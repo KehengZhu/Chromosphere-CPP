@@ -13,14 +13,17 @@ There are three solvers over one shared mesh. `src/core/chromosphere.hpp` (the G
                         |          |          |
             +-----------+     +----+----+     +-----------+
             |                 |                           |
-   src/single_fluid/     src/two_temp/            src/two_fluid/
-   RELEASE               EXPERIMENTAL             HISTORICAL research
+   src/single_fluid/     src/two_temp/            legacy/two_fluid/
+   RELEASE               EXPERIMENTAL             HISTORICAL research (frozen,
+                                                  -DCHROMO_ENABLE_LEGACY=ON)
    U = (rho, rho u, E)   U = (rho,rho u,E,E_e)    7-row carrier state
    3 conserved rows      4 conserved rows         ion/neutral/electron
    one temperature       T_e != T_i               three temperatures
 @endverbatim
 
-`src/single_fluid/mixture.hpp` does not include `two_fluid/two_fluid.hpp`, and `two_fluid/two_fluid.hpp` does not include `single_fluid/mixture.hpp`. No two of the three share a conserved-state width, a packing convention, a timestep function, or a boundary-ghost buffer. The only translation unit that includes all three headers is the driver `src/main.cpp`, which selects between them at run time. See @ref shared, @ref release_solver, @ref two_temp_solver and @ref two_fluid_solver.
+`src/single_fluid/mixture.hpp` does not include `legacy/two_fluid/two_fluid.hpp`, and `legacy/two_fluid/two_fluid.hpp` does not include `single_fluid/mixture.hpp`. No two of the three share a conserved-state width, a packing convention, a timestep function, or a boundary-ghost buffer. The only translation unit that includes all three headers is the driver `src/main.cpp`, which selects between them at run time; it includes the two-fluid header, and calls into it, only under `#ifdef CHROMO_ENABLE_LEGACY`.
+
+**Legacy code is not built by default.** The two-fluid solver (`legacy/two_fluid/`) and the five scenarios that run on it (`legacy/scenarios/`: `model_gentle`, `model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line`) are frozen and compiled only with `-DCHROMO_ENABLE_LEGACY=ON`. A default build neither compiles nor links them, and `make_scenario` rejects their names at once with a message naming the option. Outside `legacy/` they are reachable only through three `#ifdef CHROMO_ENABLE_LEGACY` sites: the driver's two-fluid timestep calls (`src/main.cpp`), the legacy-name dispatch in `scenarios/scenario.cpp`, and the legacy cases of `tests/chromo_tests.cpp`. `src/core/chromosphere.hpp` still carries the two-fluid `Grid` fields (`eq_wb`, `cons::`/`prim::`, the two-fluid ghost buffers); splitting `Grid` per solver is a separate task. See `legacy/README.md`. See @ref shared, @ref release_solver, @ref two_temp_solver and @ref two_fluid_solver.
 
 There is exactly one edge between solver directories, and it is deliberate: `src/two_temp/hydro.cpp` includes `single_fluid/exact_rs.hpp`. That header is the standalone port of the SWMF **ideal-gas** Riemann solver — a self-contained numerical routine, not release physics — and the two-temperature system's frozen-composition acoustics are identical to the release's (see @ref numerics), so re-porting it would have produced two copies of the same code to no benefit. Nothing else in `src/two_temp/` reaches into `src/single_fluid/`, and nothing in `src/single_fluid/` reaches into `src/two_temp/`, so the release path is unaffected by the experiment's presence.
 
@@ -61,38 +64,42 @@ Selected only by the `model_column_2t` scenario. See @ref two_temp_solver for th
 | `src/two_temp/hydro.cpp` | Explicit stage: MUSCL reconstruction of `(ln rho, u, ln p, ln T_e)`, the MUSCL-Hancock predictor, the SWMF exact-Riemann Godunov flux on the three release rows with face-local Rusanov fallback, the electron energy upwinded on the contact with the exact mass flux, and the geometric pressure/gravity plus electron-compression sources. |
 | `src/two_temp/conduction.cpp` | Coupled implicit backward-Euler `(T_e, T_i)` conduction and collisional exchange, solved by Newton on a 2x2-block tridiagonal Jacobian, plus the per-channel boundary closures. |
 
-### Historical two-fluid solver, `src/two_fluid/`
+### Historical two-fluid solver, `legacy/two_fluid/` (legacy build only)
 
 | Path | What it holds |
 | --- | --- |
-| `src/two_fluid/two_fluid.hpp` | Seven-row research-solver API. Every entry point rejects a Grid that carries a `Gamma1` table. |
-| `src/two_fluid/state.cpp` | Packed-state accessors, index shifts (`ip1`/`im1`/`ip2`/`im2`), `cons2prim` / `prim2cons`. |
-| `src/two_fluid/flux.cpp` | Cell-centred flux, spectral radius, pressure-area + gravity source. |
-| `src/two_fluid/rhs.cpp` | Explicit TVD-MUSCL + Rusanov RHS and the implicit drag / frictional-heating / conduction right-hand sides. |
-| `src/two_fluid/integrators.cpp` | `cal_dt_i`, `advance_Euler_state`, `advance_Euler_explicit_state`, `advance_RK4`, and the operator-split source Stages A–E plus beam, coronal heating, cooling and floors. |
+| `legacy/two_fluid/two_fluid.hpp` | Seven-row research-solver API. Every entry point rejects a Grid that carries a `Gamma1` table. |
+| `legacy/two_fluid/state.cpp` | Packed-state accessors, index shifts (`ip1`/`im1`/`ip2`/`im2`), `cons2prim` / `prim2cons`. |
+| `legacy/two_fluid/flux.cpp` | Cell-centred flux, spectral radius, pressure-area + gravity source. |
+| `legacy/two_fluid/rhs.cpp` | Explicit TVD-MUSCL + Rusanov RHS and the implicit drag / frictional-heating / conduction right-hand sides. |
+| `legacy/two_fluid/integrators.cpp` | `cal_dt_i`, `advance_Euler_state`, `advance_Euler_explicit_state`, `advance_RK4`, and the operator-split source Stages A–E plus beam, coronal heating, cooling and floors. |
 
 ### Scenarios, `scenarios/`
 
 | Path | What it holds |
 | --- | --- |
-| `scenarios/scenario.hpp` | chromosphere::Scenario (`peek_ns`, `ic`, `update_bc`, `name`), `make_scenario`, and the shared open-hyperbolic `apply_open_bcs`. |
-| `scenarios/scenario.cpp` | Name dispatch and the per-scenario override-preserving environment defaults, including the unconditional `GAMMA_TABLE` default that makes `model_column` the release scenario. |
+| `scenarios/scenario.hpp` | chromosphere::Scenario (`peek_ns`, `ic`, `update_bc`, `name`) and `make_scenario`. |
+| `scenarios/scenario.cpp` | Name dispatch and the override-preserving environment defaults of `model_column` and `model_column_2t`, including the unconditional `GAMMA_TABLE` default that makes `model_column` the release scenario. Legacy names go to `make_legacy_scenario` in a legacy build and are rejected otherwise. |
 | `scenarios/mesh.hpp` | Shared STATIC local-refinement face-grid construction (not AMR): generated once at IC time, never regridded. |
 | `scenarios/mesh.cpp` | Face-grid construction and its `ISO_REFINE_*` / `GRID_REFINE_*` environment parsing. |
-| `scenarios/model_column.hpp` | `model_column` (RELEASE) and `model_gentle` (historical two-fluid): one IC/BC implementation, two scenarios that never cross solvers. |
-| `scenarios/model_column.cpp` | The column IC and boundary closures, including the rejection of every historical two-fluid knob on a release run. |
+| `scenarios/model_column.hpp` | `model_column` (RELEASE) and `model_column_2t` (EXPERIMENTAL): one IC/BC implementation for the two Saha/`Gamma1` scenarios. |
+| `scenarios/model_column.cpp` | The column IC and boundary closures, including the rejection of every historical two-fluid knob and of a Grid without a `Gamma1` table. |
 | `scenarios/c7_profile.hpp` / `.cpp` | The shared C7 atmosphere library: the Avrett & Loeser (2008) Table 26 rows (`MODEL_C7` plus the photospheric rows), `c7_full_profile` and the PCHIP temperature `c7_full_temperature_pchip`. No solver or physics-rate dependency. |
-| `scenarios/model_c7.hpp` | Model C7 quiet-Sun chromosphere scenario and the Route-B photoionization closure. |
-| `scenarios/model_c7.cpp` | The `model_c7` IC and boundary closures and `c7_route_b_photoionization`. |
-| `scenarios/model_flare.hpp` | Explosive chromospheric evaporation scenario (Fisher, Canfield & McClymont 1985). |
-| `scenarios/model_flare.cpp` | Reuses the C7 column and adds the transient nonthermal-electron beam and its `FLARE_*` controls. |
-| `scenarios/analytic_canopy.hpp` | Exponential magnetic-canopy `B(z)` overlay on the C7 thermodynamic profile. |
-| `scenarios/analytic_canopy.cpp` | The canopy recipe and its IC/BC. |
 | `scenarios/data_file_parser.hpp` | Parser interface for the tabulated `[META]` / `[CELLS]` / `[GHOSTS]` scenario data-file format. |
 | `scenarios/data_file_parser.cpp` | The parser. `[CELLS]` rows are `i ds_m B_imh_T B_iph_T phi_g_imh phi_g_iph ne_im3 nn_im3 T_K`; `[GHOSTS]` is exactly four rows tagged `outer_0`, `outer_1`, `inner_0`, `inner_1`. |
-| `scenarios/pfss_field_line.hpp` | PFSS field-line scenario driven by a tabulated data file from `util/extract_field_line.py`. |
-| `scenarios/pfss_field_line.cpp` | Grid population from the parsed field-line table and its boundary update. |
 | `scenarios/data/` | Tracked field-line and loop input tables (PFSS lines, event ensembles, closed loops, SOL2014). Excluded from Doxygen. |
+
+### Legacy scenarios, `legacy/scenarios/` (legacy build only)
+
+| Path | What it holds |
+| --- | --- |
+| `legacy/scenarios/legacy_scenarios.hpp` / `.cpp` | `make_legacy_scenario` (name dispatch and environment presets of the five legacy scenarios) and the shared open-hyperbolic `apply_open_bcs`. |
+| `legacy/scenarios/model_gentle.hpp` / `.cpp` | `model_gentle`, the historical two-fluid C7 column: a frozen copy of the former two-fluid leg of `scenarios/model_column.cpp`. |
+| `legacy/scenarios/model_c7.hpp` / `.cpp` | Model C7 quiet-Sun chromosphere scenario, its IC and boundary closures, and the Route-B photoionization closure `c7_route_b_photoionization`. |
+| `legacy/scenarios/model_flare.hpp` / `.cpp` | Explosive chromospheric evaporation (Fisher, Canfield & McClymont 1985): reuses the C7 column and adds the transient nonthermal-electron beam and its `FLARE_*` controls. |
+| `legacy/scenarios/analytic_canopy.hpp` / `.cpp` | Exponential magnetic-canopy `B(z)` overlay on the C7 thermodynamic profile. |
+| `legacy/scenarios/pfss_field_line.hpp` / `.cpp` | PFSS field-line scenario driven by a tabulated data file from `util/extract_field_line.py`. |
+| `legacy/README.md` | What is frozen here and how to build it. |
 
 ### Everything else
 
@@ -108,7 +115,7 @@ Selected only by the `model_column_2t` scenario. See @ref two_temp_solver for th
 | `outputs/` | Code outputs: snapshots, sidecars, console logs, `output.log`. Organized into per-scenario subdirectories. |
 | `visualization/` | Generated figures and movies, per-scenario subdirectories. Gitignored. |
 | `scripts/` | `run_chromo_omp.sh` (generic OpenMP launcher), `run_chromo_realtime.sh` (long production runs), `release_validation.sh` (release checks). |
-| `cmake/` | CTest driver scripts: `check_eos_checksum.cmake`, `check_gamma_output.cmake`, `check_release_guard.cmake`. |
+| `cmake/` | CTest driver scripts: `check_eos_checksum.cmake`, `check_gamma_output.cmake`, `check_release_guard.cmake`, `check_legacy_disabled.cmake`. |
 
 ## State ownership
 
@@ -123,11 +130,11 @@ Multiple Grids can therefore coexist in one process, and `tests/chromo_tests.cpp
 
 ## Solver selection
 
-Selection is by **data**, not by a flag: a non-empty `Grid::eos_gamma_table` selects a Saha/`Gamma1` solver, and an empty one selects the historical two-fluid solver. *Which* Saha solver — the release single-fluid one or the experimental two-temperature one — is then decided by the scenario's IC, through `Grid::two_temperature`.
+Selection is by **data**, not by a flag: a non-empty `Grid::eos_gamma_table` selects a Saha/`Gamma1` solver, and an empty one selects the historical two-fluid solver (which exists only in a legacy build). *Which* Saha solver — the release single-fluid one or the experimental two-temperature one — is then decided by the scenario's IC, through `Grid::two_temperature`.
 
 The chain is:
 
-1. `make_scenario("model_column", ...)` in `scenarios/scenario.cpp` calls `set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat")` unconditionally, and rejects `ISO_GAMMA` outright. `model_column_2t` does the same. `model_gentle` and the other two-fluid scenarios never set it.
+1. `make_scenario("model_column", ...)` in `scenarios/scenario.cpp` calls `set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat")` unconditionally, and rejects `ISO_GAMMA` outright. `model_column_2t` does the same. `model_gentle` and the other two-fluid scenarios (legacy build only) never set it.
 2. The driver (`src/main.cpp`) reads `GAMMA_TABLE`, hashes the file and assigns `grid.eos_gamma_table = EosGammaTable::load(path)`. `gamma_mode` is then simply `!grid.eos_gamma_table.empty()`.
 3. `xn = sc.ic(grid)` runs. `model_column_2t_ic` sets `grid.two_temperature = true` and returns a four-row state; `model_column_ic` leaves the flag false and returns a three-row state. The driver then fixes `two_temp_mode = grid.two_temperature` and `release_mode = gamma_mode && !two_temp_mode`, and checks the returned state length against the width that choice implies (`grid.n_mixture_state` or `grid.ns*num_of_two_temp_eq`).
 4. Each solver guards its own entry points against the others' Grid, so a mismatch throws rather than silently computing nonsense:
@@ -137,11 +144,11 @@ The chain is:
 | `mixture_decode_into` (`src/single_fluid/mixture.cpp`) | `eos_gamma_table.empty()` | throws `"the mixture solver requires a Gamma1 table"` |
 | `mixture_advance` (`src/single_fluid/integrator.cpp`) | `eos_gamma_table.empty()` | throws `"the mixture solver requires a Gamma1 table"` |
 | `mixture_conduction_residual_max` (`src/single_fluid/integrator.cpp`) | `eos_gamma_table.empty()` | throws `"mixture conduction residual requires a Gamma1 table"` |
-| `rhs_explicit_state` (`src/two_fluid/rhs.cpp`) | `!eos_gamma_table.empty()` | throws; points at the release solver in `mixture.hpp` |
-| `cal_dt_i` (`src/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws; points at `mixture_timestep` |
-| `advance_Euler_state` (`src/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws; points at `mixture_advance` |
-| `advance_Euler_explicit_state` (`src/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws |
-| `advance_RK4` (`src/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws |
+| `rhs_explicit_state` (`legacy/two_fluid/rhs.cpp`) | `!eos_gamma_table.empty()` | throws; points at the release solver in `mixture.hpp` |
+| `cal_dt_i` (`legacy/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws; points at `mixture_timestep` |
+| `advance_Euler_state` (`legacy/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws; points at `mixture_advance` |
+| `advance_Euler_explicit_state` (`legacy/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws |
+| `advance_RK4` (`legacy/two_fluid/integrators.cpp`) | `!eos_gamma_table.empty()` | throws |
 | `two_temp_decode_into` (`src/two_temp/closure.cpp`) | `eos_gamma_table.empty()` | throws `"the two-temperature solver requires a Gamma1 table"` |
 
 The driver adds its own preconditions before the first step for either Saha solver: it rejects `explicit` mode, any scenario other than `model_column` or `model_column_2t`, a simultaneously supplied `ISO_GAMMA`, finite-rate `ionization`, and the legacy variables `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID` and `ISO_IONIZATION`. `ENABLE_TE` stays rejected specifically because it is the *historical two-fluid* three-temperature knob — the experimental two-temperature solver is selected by the scenario, never by a legacy flag on a release command line. The driver also checks that the scenario returned exactly the state width its solver expects.
@@ -177,11 +184,11 @@ The driver adds its own preconditions before the first step for either Saha solv
 
 ## Build layout
 
-One static library, five executables, and a CTest suite.
+One static library, five executables, and a CTest suite. `CHROMO_ENABLE_LEGACY` (option, default `OFF`) adds the `legacy/` sources to the library and defines `CHROMO_ENABLE_LEGACY=1` `PUBLIC`ly, so the driver and the test binary see it too.
 
 | Target | Sources | Purpose |
 | --- | --- | --- |
-| `chromosphere` (STATIC) | `src/core/*.cpp`, `src/single_fluid/*.cpp`, `src/two_temp/*.cpp`, `src/two_fluid/*.cpp`, `scenarios/*.cpp` | All three solvers, the shared layer, and all scenarios. `PUBLIC` include dirs: repository root, `src`, `include`. |
+| `chromosphere` (STATIC) | `src/core/*.cpp`, `src/single_fluid/*.cpp`, `src/two_temp/*.cpp`, `scenarios/*.cpp`; plus `legacy/two_fluid/*.cpp` and `legacy/scenarios/*.cpp` when `CHROMO_ENABLE_LEGACY=ON` | The shared layer, the release and experimental solvers, their scenarios, and (legacy build) the two-fluid solver and its scenarios. `PUBLIC` include dirs: repository root, `src`, `include`; sources include by explicit path (`core/...`, `single_fluid/...`, `scenarios/...`, `legacy/...`). |
 | `chromo_main` | `src/main.cpp` | The simulation driver. |
 | `chromo_tests` | `tests/chromo_tests.cpp` | The C++ test binary. |
 | `eos_validate_saha` | `util/eos/validate_saha.cpp` | Offline cross-check of every CRASH `zAv` row against the actual double/log-domain C++ Saha implementation. Built but not registered as a CTest. |
@@ -201,6 +208,7 @@ C++14, `-O3` in the default `Release` build type, `CMAKE_EXPORT_COMPILE_COMMANDS
 | `release_reject_single_fluid` | Same script, `GUARD=single_fluid`. |
 | `release_reject_two_fluid` | Same script, `GUARD=two_fluid`. |
 | `release_reject_ionization` | Same script, `GUARD=ionization`. |
+| `legacy_scenario_disabled` | `cmake/check_legacy_disabled.cmake` — registered only when `CHROMO_ENABLE_LEGACY` is `OFF`: every legacy scenario must exit non-zero and name `-DCHROMO_ENABLE_LEGACY=ON`. |
 | `release_output_sidecar` | `cmake/check_gamma_output.cmake` — a release run must produce the snapshot and its `.gamma_diag` sidecar. See @ref io_formats. |
 | `conductive_flux_python` | `tests/test_conductive_flux.py` under `.venv/bin/python`. Registered **only** when that interpreter exists. |
 

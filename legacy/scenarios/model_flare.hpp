@@ -1,5 +1,5 @@
 /*!
- * @file scenarios/model_flare.hpp
+ * @file legacy/scenarios/model_flare.hpp
  * @brief Explosive chromospheric evaporation scenario (nonthermal electron beam).
  * @ingroup scenarios
  *

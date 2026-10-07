@@ -98,7 +98,9 @@
  * This is NOT the release path. It keeps its own conserved-state width, its own
  * packing convention and its own timestep, and every entry point rejects a Grid
  * that carries a `Gamma1` table. Scenarios `model_gentle`, `model_c7`,
- * `model_flare`, `analytic_canopy` and `pfss_field_line` run on it.
+ * `model_flare`, `analytic_canopy` and `pfss_field_line` run on it. It and
+ * those scenarios live under `legacy/`, are frozen, and are compiled only with
+ * `-DCHROMO_ENABLE_LEGACY=ON`.
  */
 
 /*!

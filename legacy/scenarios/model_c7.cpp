@@ -1,5 +1,5 @@
 /*!
- * @file scenarios/model_c7.cpp
+ * @file legacy/scenarios/model_c7.cpp
  * @brief The quiet-Sun Model C7 scenario IC/BC and the Route-B photoionization
  *        closure.
  * @ingroup scenarios
@@ -11,7 +11,7 @@
  */
 #include "model_c7.hpp"
 #include "core/physics.hpp"
-#include "scenario.hpp"
+#include "legacy_scenarios.hpp"   // apply_open_bcs
 
 #include <algorithm>
 #include <cmath>

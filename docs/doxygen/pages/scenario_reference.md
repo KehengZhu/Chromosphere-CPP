@@ -4,17 +4,19 @@ A *scenario* is an initial-condition / boundary-condition pair plus the grid geo
 
 Which solver runs is decided by data, not by a flag: **a loaded `Gamma1` table selects a Saha/`Gamma1` solver**, and an empty one selects the @ref two_fluid_solver "historical two-fluid solver". Which Saha solver runs — the @ref release_solver "release single-fluid solver" or the @ref two_temp_solver "experimental two-temperature solver" — is then fixed by the scenario's IC through `Grid::two_temperature`. `model_column` and `model_column_2t` supply the production table unconditionally; every other scenario never loads one. Each solver rejects the others' `Grid`, so the choice cannot be made by accident.
 
+**Legacy scenarios.** The five historical two-fluid scenarios (`model_gentle`, `model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line`) and the two-fluid solver itself live under `legacy/` and are frozen. They are built only with `-DCHROMO_ENABLE_LEGACY=ON`; a default build rejects their names immediately with a message naming that option. See `legacy/README.md`.
+
 ## Comparison
 
 | Scenario | Solver | Field-line geometry | Initial condition source | What it is for |
 | --- | --- | --- | --- | --- |
 | `model_column` | **Release single fluid** (`src/single_fluid/`) | straight line, `B = 1`, gravity on; 1600 to 2153 km | Model C7 `T(h)` (PCHIP, cell-averaged) with the total density re-integrated hydrostatically through the Saha closure | **The release.** Conduction-driven chromosphere-to-corona evaporation, production runs. |
 | `model_column_2t` | **Experimental two temperature** (`src/two_temp/`) | identical to `model_column` | identical to `model_column`, with `T_e = T_i` at every cell and ghost | **Test study, not release.** How far do the electron and heavy-particle temperatures drift apart in the modelled column? |
-| `model_gentle` | Historical two fluid | straight line, `B = 1`, gravity on; 1003 km up into a resolved ~1 MK corona | same implementation as `model_column`, fixed adiabatic index instead of Saha/`Gamma1` | Historical full-physics research preset: two-fluid + finite-rate ionization + radiative sink + TRAC, gentle (Antiochos & Sturrock 1978) evaporation. |
-| `model_c7` | Historical two fluid | straight line, `B = 1`, gravity on; 1003 to 2153 km | Model C7 Table 26 `(n_e, n_HI, T)` taken *as tabulated*, spline-interpolated | Quiet-Sun chromosphere baseline. |
-| `model_flare` | Historical two fluid | inherited from `model_c7` | `model_c7_ic` | Explosive evaporation driven by a transient nonthermal electron beam (Fisher, Canfield & McClymont 1985). |
-| `analytic_canopy` | Historical two fluid | `model_c7` domain with an exponential canopy `B(z)` | `model_c7_ic` | Isolating the flux-tube expansion term: identical to `model_c7` except for `d(1/B)/ds`. |
-| `pfss_field_line` | Historical two fluid | traced PFSS field line read from a data file; `B(s)`, `ds`, `phi_g` all tabulated | the same data file | Running a real magnetogram's field-line topology and footpoint field strength; loop and event campaigns. |
+| `model_gentle` | Historical two fluid (legacy build) | straight line, `B = 1`, gravity on; 1003 km up into a resolved ~1 MK corona | frozen copy of the `model_column` IC/BC, fixed adiabatic index instead of Saha/`Gamma1` | Historical full-physics research preset: two-fluid + finite-rate ionization + radiative sink + TRAC, gentle (Antiochos & Sturrock 1978) evaporation. |
+| `model_c7` | Historical two fluid (legacy build) | straight line, `B = 1`, gravity on; 1003 to 2153 km | Model C7 Table 26 `(n_e, n_HI, T)` taken *as tabulated*, spline-interpolated | Quiet-Sun chromosphere baseline. |
+| `model_flare` | Historical two fluid (legacy build) | inherited from `model_c7` | `model_c7_ic` | Explosive evaporation driven by a transient nonthermal electron beam (Fisher, Canfield & McClymont 1985). |
+| `analytic_canopy` | Historical two fluid (legacy build) | `model_c7` domain with an exponential canopy `B(z)` | `model_c7_ic` | Isolating the flux-tube expansion term: identical to `model_c7` except for `d(1/B)/ds`. |
+| `pfss_field_line` | Historical two fluid (legacy build) | traced PFSS field line read from a data file; `B(s)`, `ds`, `phi_g` all tabulated | the same data file | Running a real magnetogram's field-line topology and footpoint field strength; loop and event campaigns. |
 
 The `model_isentropic` alias has been **retired** and no longer exists — `make_scenario` throws for it, and a test asserts that it does. The historical two-fluid column is `model_gentle`.
 
@@ -54,7 +56,7 @@ The `model_isentropic` alias has been **retired** and no longer exists — `make
 
 ## `model_gentle` — the historical two-fluid column
 
-`model_gentle` is the **historical two-fluid research preset on the same IC/BC implementation** as `model_column` — one file, `scenarios/model_column.cpp`, serves both. The two never cross solvers: `model_gentle` **never loads a `Gamma1` table**, so it always selects the seven-row two-fluid solver with a fixed adiabatic index, finite-rate ionization, a radiative sink and TRAC. Nothing a user can set moves either scenario across that line.
+`model_gentle` is the **historical two-fluid research preset of the same column** as `model_column`. It used to share `scenarios/model_column.cpp`; it is now a frozen copy of that IC/BC with only the two-fluid leg kept, `legacy/scenarios/model_gentle.cpp`, built only with `-DCHROMO_ENABLE_LEGACY=ON`. The two never cross solvers: `model_gentle` **never loads a `Gamma1` table**, so it always selects the seven-row two-fluid solver with a fixed adiabatic index, finite-rate ionization, a radiative sink and TRAC. Nothing a user can set moves either scenario across that line.
 
 **Geometry and domain.** Same straight field line, `B = 1`, gravity on. The preset sets `ISO_H_BASE = 1003` km — the `model_c7` validated floor — because the Stage-E `n^2` reaction channels and the radiative loss overflowed float32 at photospheric density under the storage precision this preset was validated in. `ISO_CORONA = 1` extends the top into a resolved ~1 MK corona (`ISO_CORONA_TOP_KM`, default 10,000 km), and `ISO_NS = 600`.
 
@@ -64,7 +66,7 @@ The `model_isentropic` alias has been **retired** and no longer exists — `make
 
 **Active physics.** Two-fluid ion/neutral evolution, the finite-rate Stage-E ionization/recombination network, the radiative sink, TRAC (automatically on because cooling is on, `trac_T_chrom = 2e4` K), the vacuum/positivity floor, and conduction. This path **keeps the frozen equilibrium reference**: `Grid::eq_wb` is true and `eq_state` is the initial condition, because the two-fluid solver never received the MUSCL-Hancock predictor source term. `eq_wb` exists in `chromosphere.hpp` for this solver only — never set it on a release Grid. The mesh-scaled artificial conduction term is available but **off unless `ISO_NUMERICAL_DIFFUSIVITY_MULT` is set**, which defaults to 0.
 
-**Source files.** `scenarios/model_column.hpp`, `scenarios/model_column.cpp`, and `src/two_fluid/`.
+**Source files.** `legacy/scenarios/model_gentle.hpp`, `legacy/scenarios/model_gentle.cpp`, its preset in `legacy/scenarios/legacy_scenarios.cpp`, `scenarios/c7_profile.cpp`, `scenarios/mesh.cpp`, and `legacy/two_fluid/`.
 
 ## `model_c7` — quiet-Sun baseline
 
@@ -83,7 +85,7 @@ Runs the @ref two_fluid_solver. The C7 table it reads (`MODEL_C7`) lives in the 
 
 **Active physics.** Conduction is on (the `Grid` default; `model_c7_ic` never touches it). Ionization and radiative cooling come from the command line and are **on unless `no-ionization` / `no-cooling` is passed**. `model_c7_ic` sets the isotropic grid-scaled numerical diffusivity `numerical_diffusivity_per_length = 2e3` m/s, TRAC gated on radiative cooling with `trac_T_chrom = 2e4` K, and the vacuum/positivity floor. The adiabatic index is the `Grid` default `gamma_mono = 5/3`. **`model_c7` never loads a `Gamma1` table**; the driver throws if `GAMMA_TABLE` is set for any scenario other than `model_column` or `model_column_2t`.
 
-**Source files.** `scenarios/model_c7.hpp`, `scenarios/model_c7.cpp`, `scenarios/c7_profile.cpp`, `scenarios/scenario.cpp` (the shared `apply_open_bcs`), and `src/two_fluid/`.
+**Source files.** `legacy/scenarios/model_c7.hpp`, `legacy/scenarios/model_c7.cpp`, `scenarios/c7_profile.cpp`, `legacy/scenarios/legacy_scenarios.cpp` (the shared `apply_open_bcs`), and `legacy/two_fluid/`.
 
 ## `model_flare` — explosive evaporation
 
@@ -95,7 +97,7 @@ Runs the @ref two_fluid_solver. It is `model_c7` plus a transient beam and an op
 
 **Active physics.** Everything `model_c7` has, plus the nonthermal-electron-beam volumetric heating source: `beam_flux` from `FLARE_BEAM_FLUX`, default `5e7` W m^-2 — the Fisher et al. (1985) middle explosive run, well above the threshold `F_crit ~ 7e6` W m^-2 — switching on at `t = 2` s after about one acoustic time, with a 10 s flat top, 1 s cosine ramps, and a deposition window from 1600 to 2000 km in the upper chromosphere below the transition region. `FLARE_DIFF_MULT` multiplies the inherited numerical diffusivity.
 
-**Source files.** `scenarios/model_flare.hpp`, `scenarios/model_flare.cpp`, `scenarios/model_c7.cpp`, `src/two_fluid/`.
+**Source files.** `legacy/scenarios/model_flare.hpp`, `legacy/scenarios/model_flare.cpp`, `legacy/scenarios/model_c7.cpp`, `legacy/two_fluid/`.
 
 ## `analytic_canopy` — exponential magnetic canopy
 
@@ -107,7 +109,7 @@ Runs the @ref two_fluid_solver. It is deliberately the **minimal** perturbation 
 B(z) = B_inf + (B_0 - B_inf) * exp(-(z - z_base) / H_B)
 ```
 
-with the defaults read from `scenarios/analytic_canopy.cpp`:
+with the defaults read from `legacy/scenarios/analytic_canopy.cpp`:
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
@@ -117,7 +119,7 @@ with the defaults read from `scenarios/analytic_canopy.cpp`:
 
 The field is vertical, so arc length `s` equals height above the C7 base. `B_imh` and `B_iph` are evaluated at the faces, `B_i` is their mean, and `d(1/B)/ds` is the corresponding face difference. `Grid::broadcast` is re-run so the packed caches stay in sync. The default cell count is 100. References for the parameter choices: Bellot Rubio & Orozco Suárez (2019), Kontar et al. (2008), Martínez-Sykora et al. (2019).
 
-**Source files.** `scenarios/analytic_canopy.hpp`, `scenarios/analytic_canopy.cpp`, `scenarios/model_c7.cpp`, `src/two_fluid/`.
+**Source files.** `legacy/scenarios/analytic_canopy.hpp`, `legacy/scenarios/analytic_canopy.cpp`, `legacy/scenarios/model_c7.cpp`, `legacy/two_fluid/`.
 
 ## `pfss_field_line` — traced potential-field line
 
@@ -136,4 +138,4 @@ Runs the @ref two_fluid_solver. This scenario requires a `data_path` — the fif
 - `PFSS_FLARE=1` overlays the `model_flare` physics on this geometry — forces ionization and radiative cooling, adds grid-scaled numerical diffusivity, TRAC and the RTV `q(T)`, and switches on the nonthermal beam. It shares the `FLARE_*` environment names with `model_flare`, and additionally defaults to the self-consistent thick-target beam (Emslie 1978), injecting at the loop apex and attenuating down each leg by collisional stopping.
 - `GENTLE=1` instead adds the steady footpoint-anchored ambient coronal heating `H(s)` that a prescribed-temperature loop otherwise lacks, calibrated by inverting the RTV (1978) / Aschwanden & Schrijver (2002) static scaling for the footpoint heating that relaxes a loop of half-length `L` to a target apex temperature. There is no beam: gentle evaporation is driven by a slow sub-threshold ramp of the heating. Because the corona is heated *inside* the domain, no boundary `q(T)` crutch is imposed.
 
-**Source files.** `scenarios/pfss_field_line.hpp`, `scenarios/pfss_field_line.cpp`, `scenarios/data_file_parser.hpp`, `scenarios/data_file_parser.cpp`, `scenarios/scenario.cpp` (`apply_open_bcs`), `util/extract_field_line.py`, and `src/two_fluid/`.
+**Source files.** `legacy/scenarios/pfss_field_line.hpp`, `legacy/scenarios/pfss_field_line.cpp`, `scenarios/data_file_parser.hpp`, `scenarios/data_file_parser.cpp`, `legacy/scenarios/legacy_scenarios.cpp` (`apply_open_bcs`), `util/extract_field_line.py`, and `legacy/two_fluid/`.

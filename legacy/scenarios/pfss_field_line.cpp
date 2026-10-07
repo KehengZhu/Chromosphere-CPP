@@ -1,12 +1,12 @@
 /*!
- * @file scenarios/pfss_field_line.cpp
+ * @file legacy/scenarios/pfss_field_line.cpp
  * @brief PFSS field-line scenario: build the Grid from a tabulated traced field
  *        line, with an optional flare-physics overlay.
  * @ingroup scenarios
  */
 #include "pfss_field_line.hpp"
-#include "data_file_parser.hpp"
-#include "scenario.hpp"
+#include "scenarios/data_file_parser.hpp"
+#include "legacy_scenarios.hpp"   // apply_open_bcs
 
 #include <cmath>
 #include <cstdlib>

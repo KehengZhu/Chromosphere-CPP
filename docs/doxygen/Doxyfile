@@ -23,7 +23,8 @@ OUTPUT_LANGUAGE        = English
 # Paths are relative to the repository root, which is where doxygen must be run.
 INPUT                  = docs/doxygen/pages \
                          src \
-                         scenarios
+                         scenarios \
+                         legacy
 
 FILE_PATTERNS          = *.hpp *.cpp *.md *.dox
 RECURSIVE              = YES
@@ -144,8 +145,11 @@ ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = NO
 EXPAND_ONLY_PREDEF     = NO
 SEARCH_INCLUDES        = NO
-# Document the OpenMP-enabled build: it is the production configuration.
-PREDEFINED             = CHROMO_USE_OPENMP=1
+# Document the OpenMP-enabled build: it is the production configuration. The
+# frozen legacy/ tree is documented too, so its #ifdef CHROMO_ENABLE_LEGACY
+# call sites are read as compiled in.
+PREDEFINED             = CHROMO_USE_OPENMP=1 \
+                         CHROMO_ENABLE_LEGACY=1
 
 #---------------------------------------------------------------------------
 # Diagrams

@@ -10,14 +10,14 @@ The project carries two solvers over one shared field-aligned mesh. They share o
 
 | | @ref release_solver "Release (single fluid)" | @ref two_fluid_solver "Historical two-fluid" |
 | --- | --- | --- |
-| Source | `src/single_fluid/` | `src/two_fluid/` |
+| Source | `src/single_fluid/` | `legacy/two_fluid/` (built only with `-DCHROMO_ENABLE_LEGACY=ON`) |
 | Conserved state | 3 rows: `(rho, rho u, E)` | 7 rows: ion / neutral / electron carriers |
 | Thermodynamics | Saha equilibrium + CRASH `Gamma1` | fixed adiabatic index |
 | Ionization | equilibrium (derived) | finite-rate network |
 | Temperatures | one | up to three (`T_e`, `T_i`, `T_n`) |
 | Timestep | hydro, then implicit physical conduction | operator-split Stages A–E, R, beam, heating |
 | Scenarios | `model_column` | `model_gentle`, `model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line` |
-| Status | production | research / historical |
+| Status | production | research / historical, frozen |
 
 Which solver runs is decided by data, not by a flag: **a loaded `Gamma1` table selects the release solver**, and the `model_column` scenario supplies the production table unconditionally. Each solver rejects the other's Grid, so the choice cannot be made by accident.
 

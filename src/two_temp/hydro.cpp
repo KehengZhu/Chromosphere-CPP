@@ -48,8 +48,8 @@
 
 #include "two_temp/two_temp.hpp"
 #include "single_fluid/exact_rs.hpp"
-#include "parallel.hpp"
-#include "profiling.hpp"
+#include "core/parallel.hpp"
+#include "core/profiling.hpp"
 
 #include <cmath>
 #include <limits>

@@ -1,5 +1,5 @@
 /*!
- * @file scenarios/analytic_canopy.hpp
+ * @file legacy/scenarios/analytic_canopy.hpp
  * @brief Exponential magnetic-canopy B(z) overlay on the C7 thermodynamic profile.
  * @ingroup scenarios
  *
@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "chromosphere.hpp"
+#include "core/chromosphere.hpp"
 
 namespace chromosphere {
 

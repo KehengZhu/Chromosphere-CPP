@@ -14,21 +14,29 @@
 //   - Mass exactly preserved by one explicit step on a uniform state (no source terms)
 //   - Uniform, motionless, gravity-free state is a fixed point of advance_Euler_state
 
-#include "../chromosphere.hpp"
-#include "../src/single_fluid/exact_rs.hpp"
-#include "../src/single_fluid/mixture.hpp"
-#include "../src/two_fluid/two_fluid.hpp"
-#include "../physics.hpp"
-#include "../profiling.hpp"
-#include "../parallel.hpp"
-#include "../run_control.hpp"
-#include "../scenarios/analytic_canopy.hpp"
-#include "../scenarios/data_file_parser.hpp"
-#include "../scenarios/mesh.hpp"
-#include "../scenarios/model_c7.hpp"
-#include "../scenarios/model_column.hpp"
-#include "../scenarios/pfss_field_line.hpp"
-#include "../scenarios/scenario.hpp"
+#include "core/chromosphere.hpp"
+#include "single_fluid/exact_rs.hpp"
+#include "single_fluid/mixture.hpp"
+#include "core/physics.hpp"
+#include "core/profiling.hpp"
+#include "core/parallel.hpp"
+#include "core/run_control.hpp"
+#include "scenarios/c7_profile.hpp"
+#include "scenarios/data_file_parser.hpp"
+#include "scenarios/mesh.hpp"
+#include "scenarios/model_column.hpp"
+#include "scenarios/scenario.hpp"
+// Tests of the frozen two-fluid solver and its scenarios (legacy/) are compiled
+// only in a -DCHROMO_ENABLE_LEGACY=ON build; each is wrapped in
+// #ifdef CHROMO_ENABLE_LEGACY below, together with its registration in main().
+#ifdef CHROMO_ENABLE_LEGACY
+#include "legacy/two_fluid/two_fluid.hpp"
+#include "legacy/scenarios/analytic_canopy.hpp"
+#include "legacy/scenarios/legacy_scenarios.hpp"
+#include "legacy/scenarios/model_c7.hpp"
+#include "legacy/scenarios/model_gentle.hpp"
+#include "legacy/scenarios/pfss_field_line.hpp"
+#endif
 
 #include <armadillo>
 #include <cmath>
@@ -95,6 +103,7 @@ static const char* g_current = "";
 // Set up an ns-cell uniform state with unit cell length, uniform B=1, no gravity.
 // Inner/outer ghost cells are pinned to the interior values so all boundary
 // fluxes match interior fluxes (true fixed point of the explicit scheme).
+#ifdef CHROMO_ENABLE_LEGACY
 static Vec setup_uniform(Grid& grid, arma::uword n_cells,
                          Real ni_val, Real nn_val,
                          Real Ti_val, Real Tn_val) {
@@ -135,12 +144,14 @@ static Vec setup_uniform(Grid& grid, arma::uword n_cells,
     }
     return cons;
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 
 // =========================================================================
 // Helper-function invariants
 // =========================================================================
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_scalar_to_get_scalar_inverse() {
     Grid grid;
     grid.init(8, 0.25f);
@@ -152,7 +163,9 @@ static void test_scalar_to_get_scalar_inverse() {
         for (arma::uword i = 0; i < grid.ns; ++i) EXPECT_NEAR(back(i), v(i), 1e-6);
     }
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_ip1_im1_interior_shift() {
     Grid grid;
     grid.init(10, 0.25f);
@@ -174,7 +187,9 @@ static void test_ip1_im1_interior_shift() {
         EXPECT_NEAR(xm(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, cons::RHO_I)),
                     xn(arma::sub2ind(arma::size(grid.ns, num_of_eq), i - 1, cons::RHO_I)), 1e-6);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_flux_lim_is_minmod() {
     // φ(r) = max(0, min(1, r))   (writeup eq 15)
     Vec r(6);
@@ -192,6 +207,7 @@ static void test_flux_lim_is_minmod() {
     EXPECT_NEAR(out(4), 1.0f, 1e-6);
     EXPECT_NEAR(out(5), 0.0f, 1e-6);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // =========================================================================
 // Stage 1/2: classical Saha closure and CRASH Gamma1 table loader
@@ -302,10 +318,18 @@ static void test_broadcast_static_metric_cache() {
     grid.broadcast();
 
     // Reference construction: the accumulate-scalar_to form broadcast() used to
-    // run. Must agree bit-for-bit with the direct fill.
+    // run. Must agree bit-for-bit with the direct fill. scalar_to_row is a copy of
+    // the two-fluid solver's scalar_to (legacy/two_fluid/state.cpp), so this core
+    // Grid test does not depend on the legacy build.
+    auto scalar_to_row = [&](const Vec& xn_i, arma::uword index) {
+        Vec xn_state = arma::zeros<Vec>(grid.n_state);
+        for (arma::uword i = 0; i < grid.ns; ++i)
+            xn_state(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, index)) = xn_i(i);
+        return xn_state;
+    };
     auto reference = [&](const Vec& src) {
         Vec dst(grid.n_state, arma::fill::zeros);
-        for (arma::uword k = 0; k < num_of_eq; ++k) dst += scalar_to(grid, src, k);
+        for (arma::uword k = 0; k < num_of_eq; ++k) dst += scalar_to_row(src, k);
         return dst;
     };
     auto bitwise_equal = [&](const Vec& a, const Vec& b) {
@@ -1032,6 +1056,7 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     // ...and the retired "model_isentropic" alias is gone entirely.
     EXPECT_TRUE(throws_any([&] { (void)make_scenario("model_isentropic", ""); }));
 
+#ifdef CHROMO_ENABLE_LEGACY
     // model_gentle stays available as the HISTORICAL two-fluid preset, and it
     // never loads a Gamma1 table, so it always selects the seven-row solver.
     clear_model_column_release_defaults_env();
@@ -1041,6 +1066,25 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     EXPECT_TRUE(std::string(std::getenv("ISO_TWO_FLUID")) == "1");
     EXPECT_TRUE(std::string(std::getenv("ISO_IONIZATION")) == "1");
     clear_model_column_release_defaults_env();
+#else
+    // Without the legacy build every two-fluid scenario is refused up front,
+    // before it can touch the environment.
+    clear_model_column_release_defaults_env();
+    for (const char* legacy : {"model_gentle", "model_c7", "model_flare",
+                               "analytic_canopy", "pfss_field_line"}) {
+        EXPECT_TRUE(throws_any([&] { (void)make_scenario(legacy, "unused.dat"); }));
+        EXPECT_TRUE(std::getenv("ISO_TWO_FLUID") == nullptr);
+    }
+#endif
+
+    // The release IC refuses a Grid without a Gamma1 table: the fixed-gamma
+    // two-fluid column is the separate legacy model_gentle scenario.
+    {
+        clear_model_column_release_defaults_env();
+        Grid no_table;
+        no_table.init(16, 0.25f);
+        EXPECT_TRUE(throws_any([&] { (void)model_column_ic(no_table); }));
+    }
 
     // Every rejected knob is rejected by the IC itself, not only by the preset.
     for (const char* knob : {"ISO_COOLING", "ISO_TRAC", "ISO_CORONA", "ISO_CHEAT",
@@ -1531,12 +1575,14 @@ static void test_mixture_integrator_path_and_guards() {
     grid.enable_conduction = true;
     const Vec conducted = mixture_advance(grid, state, dt, decoded);
     EXPECT_TRUE(!conducted.has_nan());
+#ifdef CHROMO_ENABLE_LEGACY
     // The legacy two-fluid entry points must refuse a release Grid outright.
     EXPECT_TRUE(throws_any([&] { advance_Euler_state(grid, state, dt); }));
     EXPECT_TRUE(throws_any([&] { advance_Euler_explicit_state(grid, state, dt); }));
     EXPECT_TRUE(throws_any([&] { advance_RK4(grid, state, dt); }));
     EXPECT_TRUE(throws_any([&] { cal_dt_i(grid, state); }));
     EXPECT_TRUE(throws_any([&] { rhs_explicit_state(grid, state); }));
+#endif
     std::remove(path.c_str());
 }
 
@@ -1698,6 +1744,7 @@ static void test_mixture_physical_conduction() {
 // through the two-fluid integrator, with the fixed-gamma index, the neutral
 // fluid, finite-rate ionization, the radiative sink, TRAC and the mesh-scaled
 // artificial conduction all reachable there and only there.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_model_gentle_two_fluid_path() {
     clear_model_column_release_defaults_env();
     setenv("ISO_NS", "40", 1);
@@ -1734,6 +1781,7 @@ static void test_model_gentle_two_fluid_path() {
     }
     clear_model_column_release_defaults_env();
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // The decoded field is a validated cache of one immutable state: it must equal
 // an independent direct decode at every stencil offset, and must refuse to be
@@ -2244,9 +2292,16 @@ static void test_model_column_release_numerics_defaults() {
         setenv("ISO_HEAT_FLUX","0",1);
         auto grid = std::make_unique<Grid>();
         grid->init(24,0.25f);
-        if (gamma_mode)
+        if (gamma_mode) {
             grid->eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
-        (void)model_column_ic(*grid);
+            (void)model_column_ic(*grid);
+        } else {
+#ifdef CHROMO_ENABLE_LEGACY
+            (void)model_gentle_ic(*grid);   // the historical two-fluid column
+#else
+            throw std::logic_error("the two-fluid column needs the legacy build");
+#endif
+        }
         return grid;
     };
     auto clear = [] {
@@ -2262,6 +2317,7 @@ static void test_model_column_release_numerics_defaults() {
         EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(grid->pressure_reconstruct);
     }
+#ifdef CHROMO_ENABLE_LEGACY
     {   // 6: the non-gamma path keeps Rusanov + (ln rho,V,ln T) — neither the Roe
         // linearization nor the Godunov flux may leak onto the two-fluid path.
         const auto grid = build(false);
@@ -2269,6 +2325,7 @@ static void test_model_column_release_numerics_defaults() {
         EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(!grid->pressure_reconstruct);
     }
+#endif
     {   // 3+4: the reference solver / reference primitive set stay reachable.
         setenv("ISO_RIEMANN","rusanov",1);
         setenv("ISO_RECONSTRUCTION","lnrho-v-lnt",1);
@@ -2301,12 +2358,14 @@ static void test_model_column_release_numerics_defaults() {
         EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(grid->swmf_godunov_flux);
     }
+#ifdef CHROMO_ENABLE_LEGACY
     {   // Both Gamma-path solvers need the equilibrium face builder.
         setenv("ISO_RIEMANN","swmf-godunov",1);
         EXPECT_TRUE(throws_any([&] { (void)build(false); }));
         setenv("ISO_RIEMANN","roe-local",1);
         EXPECT_TRUE(throws_any([&] { (void)build(false); }));
     }
+#endif
     {   // 5: invalid choices, and Gamma-only choices off the Gamma path, throw.
         setenv("ISO_RIEMANN","hll",1);
         setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
@@ -2314,9 +2373,11 @@ static void test_model_column_release_numerics_defaults() {
         setenv("ISO_RIEMANN","swmf-godunov",1);
         setenv("ISO_RECONSTRUCTION","lnrho-v-lnrho",1);
         EXPECT_TRUE(throws_any([&] { (void)build(true); }));
+#ifdef CHROMO_ENABLE_LEGACY
         unsetenv("ISO_RIEMANN");
         setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
         EXPECT_TRUE(throws_any([&] { (void)build(false); }));
+#endif
     }
     clear();
 }
@@ -2859,6 +2920,7 @@ static void test_model_column_gamma_ic_uses_cell_average_temperature() {
     clear_decoupling_env();
 }
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_flux_lim_mc3() {
     // MC3 / Koren limiter (BATSRUS 'mc3'), asymmetric third-order (β=2):
     //   φ₊(r) = max(0, min(2r, 2, (2r+1)/3))    ['+'/right-face terms]
@@ -2886,7 +2948,9 @@ static void test_flux_lim_mc3() {
     EXPECT_NEAR(m(5), 2.0f,        1e-6);   // β cap
     EXPECT_NEAR(m(6), 0.0f,        1e-6);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_cons_prim_roundtrip() {
     Grid grid;
     Vec cons = setup_uniform(grid, 8, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
@@ -2894,12 +2958,14 @@ static void test_cons_prim_roundtrip() {
     Vec cons2 = prim2cons(grid, prim);
     for (arma::uword j = 0; j < cons.n_elem; ++j) EXPECT_REL(cons2(j), cons(j), 1e-4);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 
 // =========================================================================
 // Physics formulas vs. writeup
 // =========================================================================
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_pressure_relation_eq38() {
     const Real Ti = 6500.0f, Tn = 6500.0f;
     const Real ni = 2.0e17f, nn = 1.0e19f;
@@ -2911,7 +2977,9 @@ static void test_pressure_relation_eq38() {
     EXPECT_REL(p_i, 2.0f * ni * grid.k_b * Ti, 1e-4);
     EXPECT_REL(p_n, 1.0f * nn * grid.k_b * Tn, 1e-4);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_spectral_radius_uniform_at_rest() {
     const Real Ti = 6500.0f, Tn = 6500.0f;
     const Real ni = 2.0e17f, nn = 1.0e19f;
@@ -2926,6 +2994,7 @@ static void test_spectral_radius_uniform_at_rest() {
     for (arma::uword i = 0; i < grid.ns; ++i)
         EXPECT_REL(spc(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, 0)), expected, 1e-3);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 static void test_nu_in_collision_formula() {
     Grid grid;
@@ -2988,6 +3057,7 @@ static void test_kappa_n_dominates_in_chromosphere() {
 // Numerical correctness
 // =========================================================================
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_cal_dt_respects_cfl() {
     Grid grid;
     Vec cons = setup_uniform(grid, 10, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
@@ -2998,7 +3068,9 @@ static void test_cal_dt_respects_cfl() {
     for (arma::uword i = 0; i < grid.ns; ++i)
         EXPECT_TRUE(dt(i) * maxv(i) / grid.ds_i(i) <= grid.CFL + 1e-6f);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_cal_max_v_matches_spectral_radius() {
     Grid grid;
     Vec cons = setup_uniform(grid, 5, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
@@ -3007,7 +3079,9 @@ static void test_cal_max_v_matches_spectral_radius() {
     for (arma::uword i = 0; i < grid.ns; ++i)
         EXPECT_NEAR(mv(i), spc(arma::sub2ind(arma::size(grid.ns, num_of_eq), i, 0)), 1e-6);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_uniform_state_is_fixed_point() {
     const Real Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
@@ -3019,7 +3093,9 @@ static void test_uniform_state_is_fixed_point() {
     for (arma::uword j = 0; j < cons.n_elem; ++j)
         EXPECT_REL(cons1(j), cons0(j), 1e-3);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_mass_conservation_on_uniform_state() {
     const Real ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
@@ -3036,7 +3112,9 @@ static void test_mass_conservation_on_uniform_state() {
     EXPECT_REL(mi1, mi0, 1e-4);
     EXPECT_REL(mn1, mn0, 1e-4);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_rk4_uniform_fixed_point() {
     const Real Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
@@ -3047,6 +3125,7 @@ static void test_rk4_uniform_fixed_point() {
     for (arma::uword j = 0; j < cons.n_elem; ++j)
         EXPECT_REL(cons1(j), cons0(j), 1e-3);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // =========================================================================
 // Ionization / recombination (writeup §5.3, §6.5)
@@ -3123,6 +3202,7 @@ static void test_photoionization_rate_default_uniform() {
 // Voronov S_i in the chromosphere, so the fixed point now depends on the full
 // network (and on n_e, via the three-body f³ term).
 // ----------------------------------------------------------------------------
+#ifdef CHROMO_ENABLE_LEGACY
 static Real network_dfdt(const Grid& grid, Real T, Real n_tot, Real f, Real P) {
     Vec Tv(1); Tv(0) = T;
     // Respect the same grid flags as apply_ionization_stage so the helper
@@ -3139,6 +3219,8 @@ static Real network_dfdt(const Grid& grid, Real T, Real n_tot, Real f, Real P) {
     return (1.0f - f) * P + f * (1.0f - f) * n_tot * Stot
          - f * f * n_tot * ar - (f * f * f) * n_tot * (n_tot * kc);
 }
+#endif  // CHROMO_ENABLE_LEGACY
+#ifdef CHROMO_ENABLE_LEGACY
 static Real network_equilibrium_f(const Grid& grid, Real T, Real n_tot, Real P) {
     // df/dt > 0 at f→0+ (when ionization can win) and < 0 at f=1, so the
     // physical equilibrium is bracketed by (ε, 1].
@@ -3149,6 +3231,7 @@ static Real network_equilibrium_f(const Grid& grid, Real T, Real n_tot, Real P) 
     }
     return 0.5f * (lo + hi);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // At chromospheric T_e (~6500 K) the direct Voronov S_i is exponentially
 // suppressed, but the multilevel collisional channel S_CR is NOT — so the gas
@@ -3156,6 +3239,7 @@ static Real network_equilibrium_f(const Grid& grid, Real T, Real n_tot, Real P) 
 // photoionization raises the equilibrium ionization fraction. Verify that
 // Stage E relaxes to the full-network equilibrium in both cases, and that the
 // photoionization-on equilibrium exceeds the photoionization-off one.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_stage_e_photoionization_drives_low_T_equilibrium() {
     const Real T = 6.5e3f;
     const Real n_tot_target = 1.0e19f;
@@ -3220,6 +3304,7 @@ static void test_stage_e_photoionization_drives_low_T_equilibrium() {
     EXPECT_REL(f_off, eq_off, 5e-2);
     EXPECT_TRUE(f_on > f_off);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // `model_c7_ic` populates `grid.photoionization_rate_i` with the Route B
 // closure (writeup §3.1; docs/studies/eos-ionization/photoionization_c7_inversion_plan.md): below
@@ -3233,6 +3318,7 @@ static void test_stage_e_photoionization_drives_low_T_equilibrium() {
 // rate; (c) Stage E on the C7 IC is a NEAR-FIXED-POINT in the deep equilibrium
 // region (h<1200 km, drift→0 by construction) and only a small bounded
 // relaxation in the NEQ region (h>1700 km) — no runaway anywhere.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_model_c7_photoionization_uses_route_b_closure() {
     Grid grid;
     grid.init(100, 0.25f);
@@ -3283,7 +3369,9 @@ static void test_model_c7_photoionization_uses_route_b_closure() {
         }
     }
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_stage_e_no_chi_H_drain_from_photoionization() {
     const Real T = 6.5e3f;
     const Real ni = 1.0e15f, nn = 1.0e19f;
@@ -3335,11 +3423,13 @@ static void test_stage_e_no_chi_H_drain_from_photoionization() {
     // photoionization rate). Absolute tolerance set well below |expected_dE_sum|.
     EXPECT_NEAR(delta_e_sum, expected_dE_sum, 1.0e-5f);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // Apply Stage E in isolation to a uniform, motionless box; check that
 //  (1) ρ_i + ρ_n is conserved to round-off
 //  (2) ρ_i V + ρ_n U remains identically zero (no velocity)
 //  (3) Δ(e_i + e_n) per step equals -Γ_ion·χ_H (the optically-thin Lyman loss)
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_stage_e_mass_momentum_chi_H_drain() {
     const Real ni = 2.0e17f, nn = 1.0e19f, T = 1.5e4f;  // high enough that S_i is non-negligible
     Grid grid;
@@ -3403,11 +3493,13 @@ static void test_stage_e_mass_momentum_chi_H_drain() {
     const Real expected_dE  = -(Gamma_coll + Gamma_mlvl - Gamma_3b) * chi;
     EXPECT_REL(delta_e_sum, expected_dE, 1e-2);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // Hold T_e fixed and evolve many steps with Stage E only (photoionization off).
 // The full Route B network relaxes to its own ionization equilibrium, where
 // ionization = recombination including the multilevel S_CR and three-body α_c
 // channels (no longer the two-coefficient f = S_i/(S_i+α_r)).
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_stage_e_kinetic_equilibrium() {
     const Real T = 3.0e4f;  // pick T so S_i/α_r is moderate (not tiny, not huge)
     const Real ni0 = 5.0e17f, nn0 = 5.0e18f;
@@ -3456,11 +3548,13 @@ static void test_stage_e_kinetic_equilibrium() {
     const Real f_eq_expected = network_equilibrium_f(grid, T, n_tot, 0.0f);
     EXPECT_REL(f_final, f_eq_expected, 1e-2);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // Fixed point: if the state starts at the full-network ionization equilibrium,
 // Stage E must leave (ρ_i, ρ_n) essentially unchanged. This stresses the cubic
 // solve at its algebraic root, where catastrophic cancellation would show up
 // if the safeguarded-Newton logic were wrong.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_stage_e_fixed_point_at_kinetic_equilibrium() {
     const Real T = 8.0e3f;   // moderate f_eq (~0.3), so both species are well
                               // resolved in float32 (avoids the 1-f≈0 minority
@@ -3500,9 +3594,11 @@ static void test_stage_e_fixed_point_at_kinetic_equilibrium() {
         EXPECT_REL(rho_n_a(i), rho_n_b(i), 1e-3);
     }
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // Numerical robustness: huge Δt should still produce a finite, in-range f.
 // Backward Euler is unconditionally stable, so f^{n+1} ∈ [0, 1] always.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_stage_e_large_dt_bounded() {
     Grid grid;
     Vec cons = setup_uniform(grid, 4, 1.0e17f, 1.0e19f, 5.0e4f, 5.0e4f);
@@ -3520,6 +3616,7 @@ static void test_stage_e_large_dt_bounded() {
         EXPECT_TRUE(std::isfinite(rho_n(i)) && rho_n(i) >= 0.0f);
     }
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // Stage E (ionization + recombination) conserves total hydrogen mass exactly
 // per cell: ρ_i + ρ_n is invariant because every event in the reaction
@@ -3530,6 +3627,7 @@ static void test_stage_e_large_dt_bounded() {
 // across every regime — ionization-dominated (hot, low f), recombination-
 // dominated (cool, high f), kinetic equilibrium, and absurd time steps. This
 // test sweeps the (T, f_old, dt) cube to catch any branch that breaks it.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_stage_e_conserves_rho_tot_per_cell() {
     const Real T_table[]    = {5.0e3f, 8.0e3f, 1.2e4f, 2.0e4f};      // K
     const Real f_old_table[] = {0.01f, 0.20f, 0.50f, 0.80f, 0.99f};   // ionization fraction
@@ -3629,10 +3727,12 @@ static void test_stage_e_conserves_rho_tot_per_cell() {
 
     for (Real dt : dt_table) run_one_dt(dt);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // End-to-end: enable Stage E and drive the Model C7 atmosphere for many steps.
 // Checks that ionization-on does not destabilize the integrator (no NaNs,
 // densities stay positive, temperatures stay in a generous physical band).
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_advance_euler_stable_under_model_c7_with_ionization() {
     Grid grid;
     grid.init(100, 0.25f);
@@ -3665,9 +3765,11 @@ static void test_advance_euler_stable_under_model_c7_with_ionization() {
     EXPECT_TRUE(arma::min(p_i) > 0.0f);
     EXPECT_TRUE(arma::min(p_n) > 0.0f);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // With ionization disabled, advance_Euler_state must be byte-identical to
 // the previous (pre-Stage E) behavior — a clean regression baseline.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_advance_euler_no_op_when_ionization_disabled() {
     const Real Ti = 6500.0f, Tn = 6500.0f, ni = 2.0e17f, nn = 1.0e19f;
     Grid grid;
@@ -3680,13 +3782,15 @@ static void test_advance_euler_no_op_when_ionization_disabled() {
     for (arma::uword j = 0; j < cons.n_elem; ++j)
         EXPECT_REL(cons1(j), cons(j), 1e-3);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 
 // Stability of advance_Euler_state under the Model C7 IC + BC driver. Runs
-// the same loop chromo_main.cpp executes, just for a fixed step budget, and
+// the same loop src/main.cpp executes, just for a fixed step budget, and
 // checks every step that all conserved variables remain finite, densities
 // stay positive, and ion/neutral temperatures stay within a generous band
 // of the chromospheric values (no runaway heating/cooling).
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_advance_euler_stable_under_model_c7() {
     Grid grid;
     grid.init(100, 0.25f);
@@ -3732,6 +3836,7 @@ static void test_advance_euler_stable_under_model_c7() {
     EXPECT_TRUE(arma::min(T_i) > 1.0e3f && arma::max(T_i) < 5.0e4f);
     EXPECT_TRUE(arma::min(T_n) > 1.0e3f && arma::max(T_n) < 5.0e4f);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 
 // =========================================================================
@@ -3783,6 +3888,7 @@ static void test_parser_reads_synthetic_file() {
     std::remove(path.c_str());
 }
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_pfss_ic_grid_invariants() {
     const auto path = write_synthetic_data_file();
     Grid grid;
@@ -3822,7 +3928,9 @@ static void test_pfss_ic_grid_invariants() {
     }
     std::remove(path.c_str());
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_pfss_advance_euler_stable() {
     const auto path = write_synthetic_data_file();
     Grid grid;
@@ -3838,7 +3946,9 @@ static void test_pfss_advance_euler_stable() {
     }
     std::remove(path.c_str());
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_analytic_canopy_B_profile() {
     Grid grid;
     grid.init(analytic_canopy_peek_ns(), 0.25f);
@@ -3863,6 +3973,7 @@ static void test_analytic_canopy_B_profile() {
         EXPECT_REL(grid.dinvB_ds_i(i), expected_d, 1e-5);
     }
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // Open-hyperbolic BC (reflecting inner wall + clamped outer outflow):
 //   * Inner ghosts mirror cells 0 and 1 with V flipped, ρ/T preserved → no
@@ -3872,6 +3983,7 @@ static void test_analytic_canopy_B_profile() {
 //   * Running it under a non-trivial flow state for many steps must keep the
 //     domain-integrated mass within a tight band: the reservoir artifact that
 //     drove the old C7 BC to ±27 % drift is gone.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_apply_open_bcs_mirrors_and_extrapolates() {
     Grid grid;
     grid.init(8, 0.25f);
@@ -3934,10 +4046,12 @@ static void test_apply_open_bcs_mirrors_and_extrapolates() {
     EXPECT_REL(ghost_V(grid.outer_boundary1_i), cell_V(grid.ns - 1), 1e-4);
     EXPECT_REL(ghost_U(grid.outer_boundary1_i), cell_U(grid.ns - 1), 1e-4);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // All four outer-ghost variables are Neumann: ρ, T, V, U copied from cell
 // ns-1 into both ghosts. The face has no jump → no Rusanov dissipation →
 // boundary is fully transparent.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_apply_open_bcs_outer_velocity_halving_pattern() {
     Grid grid;
     grid.init(8, 0.25f);
@@ -3974,6 +4088,7 @@ static void test_apply_open_bcs_outer_velocity_halving_pattern() {
     EXPECT_REL(V_g1, V_int, 1e-4);
     EXPECT_REL(U_g1, U_int, 1e-4);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // End-to-end stability check under the model_c7 BCs (photospheric inner BC
 // + V/2-impedance outer outflow). The photospheric Dirichlet ρ_n is an open
@@ -3982,6 +4097,7 @@ static void test_apply_open_bcs_outer_velocity_halving_pattern() {
 // photosphere. What this test does guarantee is the run stays well-posed:
 // no NaNs, ρ stays strictly positive in every cell, and the total mass
 // remains positive and finite for the whole run.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_open_bcs_stability_under_model_c7() {
     Grid grid;
     grid.init(100, 0.25f);
@@ -4015,12 +4131,14 @@ static void test_open_bcs_stability_under_model_c7() {
     const Real M_end = column_mass();
     EXPECT_TRUE(std::isfinite(M_end) && M_end > 0.0f);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // model_c7-specific inner BC: ρ_n, T_n and n_i are Dirichlet (ρ_n / T_n at
 // the photospheric snapshot from the IC; n_i at the constant 1e16 m^-3
 // reservoir). T_i, V, U are Neumann from cell 0. Perturbing cell 0 must
 // leave the three Dirichlet quantities at their pinned values and propagate
 // the three Neumann quantities to the ghost.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_model_c7_bc_discrete_hse_inner_mach_capped_outer() {
     Grid grid;
     grid.init(100, 0.25f);
@@ -4080,6 +4198,7 @@ static void test_model_c7_bc_discrete_hse_inner_mach_capped_outer() {
     // Outer ρ is Neumann (tracks cell ns-1).
     EXPECT_REL(grid.outer_boundary0_i(cons::RHO_I), rho_i_L, 1e-5);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // "New explanation" model_c7 upper BC, HYBRID form (tr_jump_bc=true,
 // docs/studies/evaporation/gentle_evaporation_downflow.md): turns on well_balanced and imposes at the
@@ -4088,6 +4207,7 @@ static void test_model_c7_bc_discrete_hse_inner_mach_capped_outer() {
 // heat keeps entering via the imposed Neumann flux q(T) (NOT a Dirichlet T-jump,
 // which over-conducts on the coarse grid), so impose_outer_heat_flux is left
 // tracking enable_radiative_cooling rather than forced off.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_model_c7_tr_jump_bc() {
     Grid grid;
     grid.init(100, 0.25f);
@@ -4144,6 +4264,7 @@ static void test_model_c7_tr_jump_bc() {
     // Electron energy packs T_e = T_i (ε_e = ¾ p_i).
     EXPECT_REL(grid.outer_boundary0_i(cons::E_E), 0.75f * p_i_g0, 1e-3);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // TRAC broadening factor ε(T): 1 outside [T_b, T_c), (T_c/T)^{5/2} inside, and
 // the conservation property κ'=κε is constant (=κ(T_c)) so κ'Λ' = κΛ.
@@ -4179,6 +4300,7 @@ static void test_trac_broadening_conserves_kappa_lambda() {
 // TRAC adaptive cutoff: returns the floor for a resolved profile, rises above it
 // for an under-resolved (steep) TR, bounded by 0.2 T_peak, and the per-step
 // limiter caps the rate of change.
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_trac_cutoff_detection_and_limiter() {
     Grid grid;
     grid.init(10, 0.25f);
@@ -4218,6 +4340,7 @@ static void test_trac_cutoff_detection_and_limiter() {
     EXPECT_TRUE(grid.trac_cutoff_T > 2.05e4f);                // TRAC engaged
     EXPECT_TRUE(grid.trac_cutoff_T <= 0.2f * 1.2e5f + 1.0f);  // bounded by 0.2 T_peak
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // Flare beam heating (physics.hpp::beam_heating_rate): the volumetric heating
 // is zero before onset, deposits only inside the height window during the
@@ -4261,6 +4384,7 @@ static void test_beam_heating_rate_profile() {
 // Flare beam heating stage shares the deposited energy by heat capacity so both
 // fluids gain the SAME ΔT (the weakly-ionized chromosphere would otherwise spike
 // T_e). Verifies ΔT_i == ΔT_n and that ΔT matches Δt·Q/(C_i + C_n).
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_beam_heating_partitions_by_heat_capacity() {
     Grid grid;
     grid.init(4, 0.25f);
@@ -4304,6 +4428,7 @@ static void test_beam_heating_partitions_by_heat_capacity() {
         EXPECT_REL(dTi, dt * Q(i) / C, 1e-3);                   // = Δt Q / (C_i+C_n)
     }
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // Ambient coronal heating: footpoint-anchored exponential H(s) = E0·exp(−d/s_H),
 // one-sided from the inner footpoint (open / half loop) or two-sided (full loop),
@@ -4351,6 +4476,7 @@ static void test_coronal_heating_rate_profile() {
 // Ambient coronal heating stage shares the deposited energy by heat capacity in
 // the single-T baseline so both fluids gain the SAME ΔT = Δt H / (C_i + C_n),
 // mirroring the beam-heating partition (apply_coronal_heating_stage).
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_coronal_heating_partitions_by_heat_capacity() {
     Grid grid;
     grid.init(4, 0.25f);
@@ -4388,6 +4514,7 @@ static void test_coronal_heating_partitions_by_heat_capacity() {
         EXPECT_REL(dTi, dt * Q(i) / C, 1e-3);                   // = Δt H / (C_i+C_n)
     }
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // =========================================================================
 // Static local-refinement mesh builder
@@ -4568,8 +4695,8 @@ static void test_refine_params_env_aliases() {
 // Build an ns-cell state on a non-uniform cell-width array. B = 1; gravity via a
 // constant g populating φ_g from arc length. Interior ρ,T uniform; ghosts pinned
 // to the matching end cell so a constant state is a discrete fixed point.
-static Vec setup_irregular(Grid& grid, const std::vector<Real>& ds,
-                           Real ni_val, Real nn_val, Real Ti_val, Real Tn_val) {
+// The mesh-only part (no conserved state), shared by the Grid metric tests.
+static void setup_irregular_mesh(Grid& grid, const std::vector<Real>& ds) {
     grid.init(static_cast<arma::uword>(ds.size()), 0.25f);
     grid.B_imh.fill(1.0f); grid.B_iph.fill(1.0f); grid.B_i.fill(1.0f);
     grid.dinvB_ds_i.zeros();
@@ -4581,6 +4708,12 @@ static Vec setup_irregular(Grid& grid, const std::vector<Real>& ds,
         s += ds[i];
     }
     grid.broadcast();
+}
+
+#ifdef CHROMO_ENABLE_LEGACY
+static Vec setup_irregular(Grid& grid, const std::vector<Real>& ds,
+                           Real ni_val, Real nn_val, Real Ti_val, Real Tn_val) {
+    setup_irregular_mesh(grid, ds);
 
     Vec prim(grid.n_state, arma::fill::zeros);
     const auto sz = arma::size(grid.ns, num_of_eq);
@@ -4600,6 +4733,7 @@ static Vec setup_irregular(Grid& grid, const std::vector<Real>& ds,
     }
     return cons;
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // A graded, strictly non-uniform width list (fine base → coarse top).
 static std::vector<Real> graded_widths() {
@@ -4612,7 +4746,7 @@ static std::vector<Real> graded_widths() {
 static void test_metric_caches_center_to_center() {
     Grid grid;
     const std::vector<Real> ds = graded_widths();
-    setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    setup_irregular_mesh(grid, ds);
     EXPECT_TRUE(!grid.uniform_mesh);
     // ds_iph_i / ds_imh_i = mean of adjacent widths, mirrored at the ends.
     for (arma::uword i = 0; i < grid.ns; ++i) {
@@ -4633,7 +4767,7 @@ static void test_metric_caches_center_to_center() {
 static void test_numerical_diffusivity_uniform_reduction() {
     Grid grid;
     const std::vector<Real> ds(6, 553.0f);
-    setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    setup_irregular_mesh(grid, ds);
     EXPECT_TRUE(grid.uniform_mesh);
     grid.numerical_diffusivity_per_length = 2.0e3f;
     const double old_uniform_chi = 2.0e3*553.0;
@@ -4653,7 +4787,7 @@ static void test_numerical_diffusivity_uniform_reduction() {
 static void test_numerical_diffusivity_nonuniform_face_scaling() {
     Grid grid;
     const std::vector<Real> ds = {8.0f, 8.0f, 5.0f, 2.0f, 2.0f};
-    setup_irregular(grid, ds, 2.0e17f, 1.0e19f, 6500.0f, 6500.0f);
+    setup_irregular_mesh(grid, ds);
     EXPECT_TRUE(!grid.uniform_mesh);
     grid.numerical_diffusivity_per_length = 2.0e3f;
 
@@ -4674,6 +4808,7 @@ static void test_numerical_diffusivity_nonuniform_face_scaling() {
     EXPECT_REL(chi_outer, 2.0e3*grid.ds_iph_i(4), 1e-12);
 }
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_irregular_uniform_state_preserved() {
     // A constant (V=0, uniform ρ,p, gravity-free) state has zero explicit RHS on
     // a non-uniform mesh — the metric MUSCL must reproduce constants exactly.
@@ -4684,7 +4819,9 @@ static void test_irregular_uniform_state_preserved() {
     EXPECT_TRUE(!R.has_nan());
     EXPECT_NEAR(arma::max(arma::abs(R)), 0.0, 1e-3);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_irregular_linear_pressure_gradient() {
     // Linear charged pressure p_i(s) = p0 + b·s, V=0, gravity-free, constant ρ.
     // The metric MUSCL reconstructs each face exactly, so the momentum RHS in the
@@ -4727,7 +4864,9 @@ static void test_irregular_linear_pressure_gradient() {
     for (arma::uword i = 3; i + 3 < grid.ns; ++i)
         EXPECT_REL(R(arma::sub2ind(sz, i, cons::MOM_I)), -b, 5e-3);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_irregular_cfl_selection() {
     Grid grid;
     const std::vector<Real> ds = graded_widths();
@@ -4741,7 +4880,9 @@ static void test_irregular_cfl_selection() {
     for (arma::uword i = 0; i < grid.ns; ++i)
         EXPECT_TRUE(dt(i) * maxv(i) / grid.ds_i(i) <= grid.CFL + 1e-6f);
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_irregular_conduction_conserves_energy() {
     // Non-uniform mesh, V=U=0, T_i=T_n a linear ramp, matched (flat) ghosts so
     // there is no boundary flux. The conservative conduction term then telescopes
@@ -4781,7 +4922,9 @@ static void test_irregular_conduction_conserves_energy() {
     EXPECT_TRUE(scale > 0.0f);                        // conduction actually active
     EXPECT_TRUE(std::fabs(net) <= 1e-4f * scale);     // conserved to round-off
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_irregular_boundary_hse() {
     // Boundary/interior HSE consistency on a REFINED (non-uniform) mesh: model_column
     // always uses equilibrium-reference well-balancing, so the hydrostatic C7 IC is an
@@ -4793,10 +4936,10 @@ static void test_irregular_boundary_hse() {
     setenv("ISO_REFINE_S_HI_KM", "700", 1);
     setenv("ISO_REFINE_TRANSITION_KM", "100", 1);
     Grid grid; grid.init(200, 0.25f);
-    Vec xn = model_column_ic(grid);
+    Vec xn = model_gentle_ic(grid);
     EXPECT_TRUE(!grid.uniform_mesh);
     Vec dt = cal_dt_i(grid, xn);
-    model_column_update_bc(grid, xn);
+    model_gentle_update_bc(grid, xn);
     Vec out = advance_Euler_state(grid, xn, dt);
     EXPECT_TRUE(!out.has_nan());
     const auto sz = arma::size(grid.ns, num_of_eq);
@@ -4809,7 +4952,9 @@ static void test_irregular_boundary_hse() {
     EXPECT_TRUE(vmax < 1.0e-2f);   // exact V=0 fixed point on the irregular mesh
     unsetenv("ISO_REFINE_FACTOR"); unsetenv("ISO_REFINE_S_HI_KM"); unsetenv("ISO_REFINE_TRANSITION_KM");
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_uniform_regression_refinement_unset() {
     // With refinement UNSET, model_column builds a uniform grid and the step is
     // bitwise-reproducible (deterministic) — the regression guard that the static-mesh
@@ -4817,9 +4962,9 @@ static void test_uniform_regression_refinement_unset() {
     unsetenv("ISO_REFINE_FACTOR"); unsetenv("GRID_REFINE_FACTOR");
     auto run_once = [&]() {
         Grid grid; grid.init(200, 0.25f);
-        Vec xn = model_column_ic(grid);
+        Vec xn = model_gentle_ic(grid);
         Vec dt = cal_dt_i(grid, xn);
-        model_column_update_bc(grid, xn);
+        model_gentle_update_bc(grid, xn);
         Vec out = advance_Euler_state(grid, xn, dt);
         return std::make_pair(grid.uniform_mesh, out);
     };
@@ -4830,7 +4975,9 @@ static void test_uniform_regression_refinement_unset() {
     EXPECT_TRUE(a.second.n_elem == b.second.n_elem);
     EXPECT_TRUE(arma::approx_equal(a.second, b.second, "absdiff", 0.0));  // bitwise identical
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_refined_mesh_ic_runs() {
     // End-to-end: model_column with the refinement profile builds a larger,
     // non-uniform grid (finer at the base), and a full semi-implicit step stays
@@ -4840,13 +4987,13 @@ static void test_refined_mesh_ic_runs() {
     setenv("ISO_REFINE_S_HI_KM", "700", 1);
     setenv("ISO_REFINE_TRANSITION_KM", "100", 1);
     Grid grid; grid.init(200, 0.25f);
-    Vec xn = model_column_ic(grid);
+    Vec xn = model_gentle_ic(grid);
     EXPECT_TRUE(grid.ns > 200);            // refinement added lower-domain cells
     EXPECT_TRUE(!grid.uniform_mesh);
     EXPECT_TRUE(grid.ds_i.min() > 0.0f);
     EXPECT_REL(arma::min(grid.ds_i), arma::max(grid.ds_i) / 4.0f, 0.05);  // fine ≈ coarse/4
     Vec dt = cal_dt_i(grid, xn);
-    model_column_update_bc(grid, xn);
+    model_gentle_update_bc(grid, xn);
     Vec out = advance_Euler_state(grid, xn, dt);
     EXPECT_TRUE(!out.has_nan());
     const auto sz = arma::size(grid.ns, num_of_eq);
@@ -4860,7 +5007,9 @@ static void test_refined_mesh_ic_runs() {
     unsetenv("ISO_REFINE_FACTOR");
     unsetenv("ISO_REFINE_S_LO_KM"); unsetenv("ISO_REFINE_S_HI_KM"); unsetenv("ISO_REFINE_TRANSITION_KM");
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
+#ifdef CHROMO_ENABLE_LEGACY
 static void test_outer_refined_mesh_ic_runs() {
     // End-to-end on the OUTER/TR profile over the truncated 1600–2153 km domain:
     // model_column builds a larger non-uniform grid whose FINEST cells sit at the
@@ -4870,9 +5019,9 @@ static void test_outer_refined_mesh_ic_runs() {
     setenv("ISO_H_BASE", "1600", 1);
     setenv("ISO_DH", "553", 1);
     auto dt_min_of = [&](Grid& grid) {
-        Vec xn = model_column_ic(grid);
+        Vec xn = model_gentle_ic(grid);
         Vec dt = cal_dt_i(grid, xn);
-        model_column_update_bc(grid, xn);
+        model_gentle_update_bc(grid, xn);
         Vec out = advance_Euler_state(grid, xn, dt);
         EXPECT_TRUE(!out.has_nan() && out.is_finite());
         const auto sz = arma::size(grid.ns, num_of_eq);
@@ -4921,6 +5070,7 @@ static void test_outer_refined_mesh_ic_runs() {
     unsetenv("ISO_REFINE_S_LO_KM"); unsetenv("ISO_REFINE_TRANSITION_KM");
     unsetenv("ISO_H_BASE"); unsetenv("ISO_DH");
 }
+#endif  // CHROMO_ENABLE_LEGACY
 
 // ----------------------------------------------------------------------------
 // Run control: step-cap selection, termination classification, and the snapshot
@@ -5120,10 +5270,12 @@ static void test_output_schedule_final_frame_not_duplicated() {
 int main() {
     std::cout << "===== Chromosphere test suite =====\n\n";
 
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_scalar_to_get_scalar_inverse);
     RUN(test_ip1_im1_interior_shift);
     RUN(test_flux_lim_is_minmod);
     RUN(test_flux_lim_mc3);
+#endif
     RUN(test_saha_ionization_fraction_log_domain);
     RUN(test_broadcast_static_metric_cache);
     RUN(test_equilibrium_density_from_pressure_matches_bisection);
@@ -5146,7 +5298,9 @@ int main() {
     RUN(test_mixture_integrator_path_and_guards);
     RUN(test_mixture_physical_conduction);
     RUN(test_mixture_field_cache_contract);
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_model_gentle_two_fluid_path);
+#endif
     RUN(test_stage8_gamma_model_column_saha_hse_and_ghosts);
     RUN(test_upper_bc_hydro_conduction_temperature_decoupling);
     RUN(test_face_flux_capture_matches_production_continuity);
@@ -5158,26 +5312,33 @@ RUN(test_release_timestep_uses_frozen_signal_speed);
     RUN(test_outer_conduction_capture_matches_solver_face);
     RUN(test_outer_conduction_physical_face_is_mesh_independent);
     RUN(test_model_column_gamma_ic_uses_cell_average_temperature);
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_cons_prim_roundtrip);
+#endif
 
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_pressure_relation_eq38);
     RUN(test_spectral_radius_uniform_at_rest);
+#endif
     RUN(test_nu_in_collision_formula);
     RUN(test_kappa_e_eq53);
     RUN(test_kappa_n_eq59);
     RUN(test_kappa_n_dominates_in_chromosphere);
 
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_cal_dt_respects_cfl);
     RUN(test_cal_max_v_matches_spectral_radius);
     RUN(test_uniform_state_is_fixed_point);
     RUN(test_mass_conservation_on_uniform_state);
     RUN(test_rk4_uniform_fixed_point);
     RUN(test_advance_euler_stable_under_model_c7);
+#endif
 
     RUN(test_ionization_rate_S_voronov_at_1e4K);
     RUN(test_ionization_rate_S_increases_with_T);
     RUN(test_recombination_rate_alpha_hummer);
     RUN(test_photoionization_rate_default_uniform);
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_stage_e_photoionization_drives_low_T_equilibrium);
     RUN(test_stage_e_no_chi_H_drain_from_photoionization);
     RUN(test_model_c7_photoionization_uses_route_b_closure);
@@ -5188,23 +5349,34 @@ RUN(test_release_timestep_uses_frozen_signal_speed);
     RUN(test_stage_e_large_dt_bounded);
     RUN(test_advance_euler_no_op_when_ionization_disabled);
     RUN(test_advance_euler_stable_under_model_c7_with_ionization);
+#endif
 
     RUN(test_parser_reads_synthetic_file);
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_pfss_ic_grid_invariants);
     RUN(test_pfss_advance_euler_stable);
     RUN(test_analytic_canopy_B_profile);
+#endif
 
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_apply_open_bcs_mirrors_and_extrapolates);
     RUN(test_apply_open_bcs_outer_velocity_halving_pattern);
     RUN(test_open_bcs_stability_under_model_c7);
     RUN(test_model_c7_bc_discrete_hse_inner_mach_capped_outer);
     RUN(test_model_c7_tr_jump_bc);
+#endif
     RUN(test_trac_broadening_conserves_kappa_lambda);
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_trac_cutoff_detection_and_limiter);
+#endif
     RUN(test_beam_heating_rate_profile);
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_beam_heating_partitions_by_heat_capacity);
+#endif
     RUN(test_coronal_heating_rate_profile);
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_coronal_heating_partitions_by_heat_capacity);
+#endif
 
     // Static local refinement: mesh builder, metric caches, irregular-grid
     // manufactured operators, and the refinement-unset regression.
@@ -5216,6 +5388,7 @@ RUN(test_release_timestep_uses_frozen_signal_speed);
     RUN(test_metric_caches_center_to_center);
     RUN(test_numerical_diffusivity_uniform_reduction);
     RUN(test_numerical_diffusivity_nonuniform_face_scaling);
+#ifdef CHROMO_ENABLE_LEGACY
     RUN(test_irregular_uniform_state_preserved);
     RUN(test_irregular_linear_pressure_gradient);
     RUN(test_irregular_cfl_selection);
@@ -5224,6 +5397,7 @@ RUN(test_release_timestep_uses_frozen_signal_speed);
     RUN(test_uniform_regression_refinement_unset);
     RUN(test_refined_mesh_ic_runs);
     RUN(test_outer_refined_mesh_ic_runs);
+#endif
 
     // Run control: long-run step cap, termination reason, snapshot cadence.
     RUN(test_step_cap_legacy_time_mult);

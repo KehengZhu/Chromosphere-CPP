@@ -30,8 +30,8 @@
  */
 
 #include "two_temp/two_temp.hpp"
-#include "parallel.hpp"
-#include "profiling.hpp"
+#include "core/parallel.hpp"
+#include "core/profiling.hpp"
 
 #include <cmath>
 #include <cstdio>

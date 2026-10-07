@@ -1,5 +1,5 @@
 /*!
- * @file two_fluid/integrators.cpp
+ * @file legacy/two_fluid/integrators.cpp
  * @brief Two-fluid time integrators and the operator-split source stages.
  * @ingroup two_fluid_solver
  *
@@ -18,10 +18,10 @@
  * NONE of this is release physics: the release timestep is the two stages in
  * single_fluid/integrator.cpp.
  */
-#include "two_fluid/two_fluid.hpp"
-#include "physics.hpp"
-#include "profiling.hpp"
-#include "parallel.hpp"
+#include "two_fluid.hpp"
+#include "core/physics.hpp"
+#include "core/profiling.hpp"
+#include "core/parallel.hpp"
 
 #include <cmath>
 #include <cstdlib>

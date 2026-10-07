@@ -26,7 +26,7 @@ staged=$(git diff --cached --name-only --diff-filter=ACMR -- \
     'docs/doxygen/Doxyfile' \
     'docs/doxygen/pages/*' \
     '*.hpp' '*.cpp' \
-    'src/*' 'scenarios/*' 'chromo_main.cpp')
+    'src/*' 'scenarios/*' 'legacy/*')
 
 [ -z "$staged" ] && exit 0
 

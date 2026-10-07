@@ -25,8 +25,8 @@
 
 #include "single_fluid/mixture.hpp"
 #include "single_fluid/exact_rs.hpp"
-#include "profiling.hpp"
-#include "parallel.hpp"
+#include "core/profiling.hpp"
+#include "core/parallel.hpp"
 
 #include <cmath>
 #include <limits>

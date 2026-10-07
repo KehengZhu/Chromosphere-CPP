@@ -1,29 +1,30 @@
 /*!
  * @file scenarios/model_column.hpp
- * @brief model_column (RELEASE) and model_gentle (historical two-fluid) — the
+ * @brief model_column (RELEASE) and model_column_2t (EXPERIMENTAL) — the
  *        field-aligned chromosphere-to-corona column.
  * @ingroup scenarios
  *
  * model_column — the field-aligned chromosphere→corona column. One IC/BC
- * implementation, TWO scenarios that never cross solvers:
+ * implementation for the two Saha/Gamma1 scenarios:
  *
  *   * `model_column`  — the DEFAULT and the RELEASE scenario. It always loads
  *     the production Gamma1 table, so it always runs the single-fluid
  *     equilibrium-mixture solver (src/single_fluid/) with the state
  *     U = (rho, rho u, E) and the timestep
  *         U^n -> MUSCL-Hancock/Godunov hydro -> U* -> implicit physical conduction -> U^{n+1}.
- *     Every historical two-fluid knob listed below is REJECTED outright in this
- *     mode, so `model_column` names exactly one production model.
+ *     Every historical two-fluid knob listed below is REJECTED outright, so
+ *     `model_column` names exactly one production model.
  *
- *   * `model_gentle`  — the HISTORICAL two-fluid research preset. It never loads
- *     a Gamma1 table, so it always runs the seven-row two-fluid solver
- *     (src/two_fluid/) with a fixed adiabatic index, finite-rate ionization, a
- *     radiative sink, TRAC and the mesh-scaled artificial conduction term.
+ *   * `model_column_2t` — the EXPERIMENTAL two-temperature twin (src/two_temp/).
+ *
+ * The HISTORICAL two-fluid research preset `model_gentle`, which used to share
+ * this IC/BC, is a separate legacy scenario (legacy/scenarios/model_gentle.hpp,
+ * built only with -DCHROMO_ENABLE_LEGACY=ON).
  *
  * A single straight field line (B = 1, gravity on) initialized from the real
- * Model C7 atmosphere (Avrett & Loeser 2008, Table 26; via c7_full_profile in
- * model_c7.cpp), driven to conduction-driven ("gentle", Antiochos & Sturrock
- * 1978) evaporation.
+ * Model C7 atmosphere (Avrett & Loeser 2008, Table 26; via c7_full_profile and
+ * c7_full_temperature_pchip in c7_profile.cpp), driven to conduction-driven
+ * ("gentle", Antiochos & Sturrock 1978) evaporation.
  *
  * The numerical scheme is the well-balanced, high-order configuration validated in
  * docs/studies/evaporation/gentle_evaporation_downflow.md (the "bestwb" set) — ALWAYS ON here, no toggles:
@@ -42,7 +43,7 @@
  * IC: the C7 temperature and ionization FRACTION with the total density re-integrated
  * hydrostatically from the base (clean V ≈ 0 start).
  *
- * Env knobs valid in BOTH modes (numerics are fixed; only physics is tunable):
+ * Env knobs (numerics are fixed; only physics is tunable):
  *   ISO_NS            grid cells (release preset: 500 coarse-equivalent)
  *   ISO_H_BASE        domain base height [km]   (release preset: 1600)
  *   ISO_DH            domain height span [km]   (release preset: 553)
@@ -57,7 +58,8 @@
  *   ISO_INNER_T_NEUMANN  conduction lower BC: 0 = Dirichlet (default) / 1 = Neumann
  *   ISO_REFINE_*      static local mesh refinement (scenarios/mesh.hpp)
  *
- * HISTORICAL two-fluid-only knobs — rejected by the release scenario:
+ * HISTORICAL two-fluid-only knobs — rejected here; they configure the legacy
+ * model_gentle scenario:
  *   ISO_GAMMA         fixed adiabatic index of the two-fluid solver
  *   ISO_TWO_FLUID     evolve ion & neutral as separate fluids
  *   ISO_IONIZATION    Stage-E ionization/recombination network
@@ -78,7 +80,7 @@
 
 #pragma once
 
-#include "chromosphere.hpp"
+#include "core/chromosphere.hpp"
 
 namespace chromosphere {
 
@@ -86,30 +88,30 @@ namespace chromosphere {
  *  @{
  */
 
-/// Initial condition shared by `model_column` (release) and `model_gentle`
-/// (historical two-fluid).
+/// Initial condition of `model_column` (release), also the base of
+/// `model_column_2t`.
 ///
-/// Loads the `GAMMA_TABLE` when one is given — a loaded Gamma1 table is what
-/// selects the single-fluid release solver, an empty one leaves the two-fluid
-/// solver — and in release mode REJECTS every historical two-fluid knob listed
-/// in the file header, so a release run cannot be silently reconfigured. Then it
+/// Loads the `GAMMA_TABLE` when one is given and throws if no Gamma1 table is
+/// loaded (the fixed-gamma two-fluid column is the legacy `model_gentle`
+/// scenario). It REJECTS every historical two-fluid knob listed in the file
+/// header, so a release run cannot be silently reconfigured. Then it
 /// builds the mesh (optionally statically refined, which may resize the Grid),
 /// sets the field-line geometry and gravity, samples the Model C7 temperature
 /// and ionization fraction, re-integrates the density hydrostatically from the
 /// base for a clean V ≈ 0 start, fills both ghost layers via
 /// model_column_update_bc(), and returns the initial conserved state — three
-/// `mix::` rows in release mode, seven `cons::` rows in two-fluid mode.
+/// `mix::` rows (four `tt::` rows on the two-temperature leg).
 ///
-/// The release leg is REFERENCE-FREE: it leaves `Grid::eq_wb` false and stores
-/// no frozen equilibrium state. Only the two-fluid leg sets eq_wb and freezes
-/// this IC as `Grid::eq_state`.
+/// The release is REFERENCE-FREE: it leaves `Grid::eq_wb` false and stores
+/// no frozen equilibrium state.
 Vec  model_column_ic(Grid& grid);
 
-/// Per-step boundary refresh for both legs of the scenario.
+/// Per-step boundary refresh of `model_column` (and, through
+/// model_column_2t_update_bc(), of `model_column_2t`).
 ///
 /// Decodes the top and base interior cells with whichever state convention is
-/// active (mixture decode for the release, cons2prim algebra for the two-fluid
-/// path) and rewrites the two outer and two inner ghost layers:
+/// active (the mixture decode for the release, the two-temperature decode on
+/// the experimental leg) and rewrites the two outer and two inner ghost layers:
 ///
 ///   * outer — subsonic outflow: a hydrostatic ghost ladder anchored on the fixed
 ///     reservoir back-pressure `kOuterPRef` (captured once, the single externally
@@ -121,9 +123,6 @@ Vec  model_column_ic(Grid& grid);
 ///   * inner — the quasi-static stratified reservoir at the 1600 km truncation
 ///     temperature `kInnerTRef` with V = 0, laid out on a second-order
 ///     (trapezoidal, EOS-closed) ghost ladder.
-///
-/// It also advances the time-dependent two-fluid drivers (the imposed q(T) flux
-/// ramp and the coronal-heating ramp), which are inactive in release mode.
 void model_column_update_bc(Grid& grid, const Vec& xn);
 
 /// EXPERIMENTAL. Initial condition of `model_column_2t`, the two-temperature

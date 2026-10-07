@@ -1,6 +1,6 @@
 /*!
  * @file scenarios/scenario.hpp
- * @brief Scenario dispatcher and the shared open-hyperbolic boundary update.
+ * @brief Scenario dispatcher.
  * @ingroup scenarios
  *
  * Scenario dispatcher.
@@ -16,7 +16,7 @@
 #include <functional>
 #include <string>
 
-#include "chromosphere.hpp"
+#include "core/chromosphere.hpp"
 
 namespace chromosphere {
 
@@ -59,31 +59,15 @@ struct Scenario {
     std::string name;
 };
 
-/// Build a Scenario by name. `data_path` is required when the scenario reads
-/// a tabulated input file (e.g. "pfss_field_line"); ignored otherwise. Throws
-/// std::runtime_error on unknown name or missing required data_path.
+/// Build a Scenario by name: `model_column` (release) or `model_column_2t`
+/// (experimental), or — only in a -DCHROMO_ENABLE_LEGACY=ON build — one of the
+/// legacy two-fluid scenarios `model_c7`, `model_flare`, `model_gentle`,
+/// `analytic_canopy`, `pfss_field_line`. `data_path` is required when the
+/// scenario reads a tabulated input file (e.g. "pfss_field_line"); ignored
+/// otherwise. Throws std::runtime_error on an unknown name, a missing required
+/// data_path, or a legacy name in a build without the legacy code (the message
+/// names -DCHROMO_ENABLE_LEGACY=ON).
 Scenario make_scenario(const std::string& name, const std::string& data_path = "");
-
-/// Open-hyperbolic boundary update shared by all built-in scenarios.
-///
-///   * Inner face (s = s_{-1/2}) — closed reflecting wall:
-///       ρ(-1) = ρ(0),  T(-1) = T(0),  V(-1) = -V(0)
-///       ρ(-2) = ρ(1),  T(-2) = T(1),  V(-2) = -V(1)
-///     Anti-symmetric velocity guarantees zero mass flux across s = 0; the
-///     ρ and T mirrors keep the pressure gradient there well posed.
-///
-///   * Outer face (s = s_{ns-1/2}) — pure Neumann outflow on every variable:
-///       ρ(ns)   = ρ(ns+1) = ρ(ns-1)
-///       T(ns)   = T(ns+1) = T(ns-1)
-///       V(ns)   = V(ns+1) = V(ns-1)
-///       U(ns)   = U(ns+1) = U(ns-1)
-///     No impedance / dissipation at the face — well-posed only for IC near
-///     HSE or with an added sponge layer; transient runs (e.g. C7 IC under
-///     gravity) may go unstable.
-///
-/// Ghost energies are rebuilt with the same gauge as the IC: φ_g(-1) =
-/// grid.phi_g_imh[0] and φ_g(ns) = grid.phi_g_iph[ns-1].
-void apply_open_bcs(Grid& grid, const Vec& xn);
 
 /** @} */
 

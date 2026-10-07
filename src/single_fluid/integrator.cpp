@@ -11,7 +11,7 @@
  * that decodes it), and there are no volumetric energy stages: TRAC, nonthermal
  * beam heating, volumetric coronal heating, radiative cooling and
  * artificial/numerical conduction are NOT part of the release and live only in
- * the historical two-fluid research solver (src/two_fluid/).
+ * the historical two-fluid research solver (legacy/two_fluid/).
  *
  * The conduction stage is a nonlinear backward-Euler solve on the mixture energy
  * row alone: Newton on the cell temperatures with a tridiagonal Jacobian, the
@@ -22,8 +22,8 @@
  */
 
 #include "single_fluid/mixture.hpp"
-#include "profiling.hpp"
-#include "parallel.hpp"
+#include "core/profiling.hpp"
+#include "core/parallel.hpp"
 
 #include <algorithm>
 #include <array>

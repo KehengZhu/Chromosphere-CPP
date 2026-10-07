@@ -15,9 +15,10 @@
  *     `model_column` production configuration advances;
  *
  *   * the HISTORICAL two-fluid / multi-temperature / finite-rate-ionization
- *     research solver, `src/two_fluid/` (`two_fluid/two_fluid.hpp`), whose
- *     conserved state is the seven-row ion/neutral/electron carrier vector.
- *     It is NOT the release path.
+ *     research solver, `legacy/two_fluid/` (`legacy/two_fluid/two_fluid.hpp`),
+ *     whose conserved state is the seven-row ion/neutral/electron carrier
+ *     vector. It is NOT the release path, is frozen, and is compiled only with
+ *     -DCHROMO_ENABLE_LEGACY=ON.
  *
  * This header declares only what BOTH sides share: the Grid (mesh geometry,
  * prescribed magnetic field, gravity, physical constants, runtime toggles),

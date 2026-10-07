@@ -1,5 +1,5 @@
 /*!
- * @file two_fluid/two_fluid.hpp
+ * @file legacy/two_fluid/two_fluid.hpp
  * @brief HISTORICAL two-fluid / multi-temperature / finite-rate-ionization research
  *        solver API (seven-row carrier state). NOT the release path.
  * @ingroup two_fluid_solver
@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include "chromosphere.hpp"
+#include "core/chromosphere.hpp"
 
 namespace chromosphere {
 

@@ -1,5 +1,5 @@
 /*! Smoke-test the tracked production Gamma1 table independently of CRASH. */
-#include "eos.hpp"
+#include "core/eos.hpp"
 
 #include <cmath>
 #include <iostream>

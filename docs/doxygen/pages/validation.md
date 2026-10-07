@@ -23,17 +23,17 @@ cd build && ctest --output-on-failure
 ./build/chromo_tests
 ```
 
-It prints `[RUN  ] <name>` before each case and `[  OK  ] <name>  (<k> checks)` after it, then a summary block. As measured on the current tree:
+It prints `[RUN  ] <name>` before each case and `[  OK  ] <name>  (<k> checks)` after it, then a summary block. As measured on the current tree with the legacy two-fluid code built in (`-DCHROMO_ENABLE_LEGACY=ON`):
 
 ```text
 ===== Summary =====
-Passed: 11647
+Passed: 11648
 Failed: 0
 ```
 
-That is **107 test cases and 11647 individual checks, 0 failures**. Note that `Passed:` counts individual `EXPECT_NEAR` / `EXPECT_REL` / `EXPECT_TRUE` invocations across all cases, not the number of cases. The binary exits 0 if and only if no check failed. `ctest` currently reports `100% tests passed, 0 tests failed out of 9`.
+That is **107 test cases and 11648 individual checks, 0 failures**. The default build (legacy `OFF`) compiles only the cases that do not need the two-fluid solver or its scenarios — **64 cases, 5591 checks** — because every legacy case and its registration are wrapped in `#ifdef CHROMO_ENABLE_LEGACY`. Note that `Passed:` counts individual `EXPECT_NEAR` / `EXPECT_REL` / `EXPECT_TRUE` invocations across all cases, not the number of cases. The binary exits 0 if and only if no check failed. With `.venv/bin/python` present, `ctest` reports `100% tests passed, 0 tests failed out of 10` in the default build and `out of 9` in the legacy build (which does not register `legacy_scenario_disabled`).
 
-**The suite passes in both storage precisions.** 11647 / 0 in the `double` release build and 11647 / 0 in the diagnostic `CHROMO_STATE_FLOAT32` build, with **no tolerance loosened anywhere**. `test_release_production_table_domain_corners` is no longer skipped in either precision: its ULP walk steps in the storage type and nudges against the solver's own EOS acceptance rather than a test-side recomputation of the endpoint energy. (The 29 check failures once documented under the retired `CHROMO_STATE_FLOAT64` option were an artifact of promoting `Vec` alone while the update chain still cast through `float`; they do not occur now that precision is a single coherent knob. See Storage precision in @ref architecture.)
+**The suite passes in both storage precisions.** 11648 / 0 in the `double` build and 11648 / 0 in the diagnostic `CHROMO_STATE_FLOAT32` build (legacy code included; 5591 / 0 in both without it), with **no tolerance loosened anywhere**. `test_release_production_table_domain_corners` is no longer skipped in either precision: its ULP walk steps in the storage type and nudges against the solver's own EOS acceptance rather than a test-side recomputation of the endpoint energy. (The 29 check failures once documented under the retired `CHROMO_STATE_FLOAT64` option were an artifact of promoting `Vec` alone while the update chain still cast through `float`; they do not occur now that precision is a single coherent knob. See Storage precision in @ref architecture.)
 
 **Release validation script.**
 
@@ -71,8 +71,8 @@ As measured on the current `double`-precision release tree: check 1 bit-identica
 | Test | What it asserts |
 | --- | --- |
 | `test_model_column_release_scenario_defaults_and_overrides` | The `model_column` preset sets none of `ISO_TWO_FLUID`, `ISO_IONIZATION`, `ISO_COOLING`, `ISO_TRAC`, `ISO_CORONA`, `ISO_CHEAT`, `ISO_QFLUX`, `ISO_TBOOST`, `ISO_NUMERICAL_DIFFUSIVITY_MULT`; `ISO_GAMMA` makes `make_scenario("model_column", "")` throw; the retired `model_isentropic` alias throws; and `model_column_ic` itself throws on each rejected knob. |
-| `test_mixture_integrator_path_and_guards` | On a release Grid the legacy two-fluid entry points `advance_Euler_state`, `advance_Euler_explicit_state`, `advance_RK4`, `cal_dt_i` and `rhs_explicit_state` must all throw. |
-| `test_model_gentle_two_fluid_path` | The reverse direction: `model_gentle` never sets `GAMMA_TABLE`, produces a seven-row state with `single_fluid` false, and `mixture_decode` on it must throw. |
+| `test_mixture_integrator_path_and_guards` | (Legacy build.) On a release Grid the legacy two-fluid entry points `advance_Euler_state`, `advance_Euler_explicit_state`, `advance_RK4`, `cal_dt_i` and `rhs_explicit_state` must all throw. |
+| `test_model_gentle_two_fluid_path` | (Legacy build.) The reverse direction: `model_gentle` never sets `GAMMA_TABLE`, produces a seven-row state with `single_fluid` false, and `mixture_decode` on it must throw. |
 | `test_model_column_release_numerics_defaults` | The release defaults really are `swmf_godunov_flux` and `pressure_reconstruct`, and `roe_characteristic_flux` is off unless asked for; `ISO_RIEMANN=roe-local` selects it *and* clears `swmf_godunov_flux`, so the three fluxes are mutually exclusive; neither Gamma-path flux may leak onto the two-fluid path; invalid `ISO_RIEMANN` / `ISO_RECONSTRUCTION` values, and Gamma-only choices requested off the Gamma path, must throw. |
 
 **Scenario initial-condition and boundary checks.** The Saha-HSE column and its ghost ladder, both upper-boundary temperature closures (single-T release and decoupled), the C7 closures in both upper-BC modes, the open-BC mirror/extrapolation patterns, the PFSS data-file parser and grid invariants, the analytic canopy `B` profile, and the static-refinement mesh builder: `test_stage8_gamma_model_column_saha_hse_and_ghosts`, `test_upper_bc_hydro_conduction_temperature_decoupling`, `test_model_c7_bc_discrete_hse_inner_mach_capped_outer`, `test_model_c7_tr_jump_bc`, `test_apply_open_bcs_mirrors_and_extrapolates`, `test_apply_open_bcs_outer_velocity_halving_pattern`, `test_open_bcs_stability_under_model_c7`, `test_advance_euler_stable_under_model_c7`, `test_advance_euler_stable_under_model_c7_with_ionization`, `test_parser_reads_synthetic_file`, `test_pfss_ic_grid_invariants`, `test_pfss_advance_euler_stable`, `test_analytic_canopy_B_profile`, `test_mesh_disabled_is_uniform`, `test_mesh_refined_diagnostic_profile`, `test_mesh_outer_refined_profile`, `test_mesh_outer_profile_edge_cases`, `test_refine_params_env_aliases`, `test_refined_mesh_ic_runs`, `test_outer_refined_mesh_ic_runs`.
@@ -81,7 +81,7 @@ As measured on the current `double`-precision release tree: check 1 bit-identica
 
 ## Registered CTest cases
 
-Nine tests are registered in `CMakeLists.txt`.
+Ten tests are registered in `CMakeLists.txt`; `legacy_scenario_disabled` only when `CHROMO_ENABLE_LEGACY` is `OFF`, and `conductive_flux_python` only when `.venv/bin/python` exists.
 
 | Test | What it verifies |
 | --- | --- |
@@ -93,6 +93,7 @@ Nine tests are registered in `CMakeLists.txt`.
 | `release_reject_two_fluid` | Same guard with `ISO_TWO_FLUID=1`; must fail with `ISO_TWO_FLUID is a legacy two-fluid setting`. |
 | `release_reject_ionization` | Same guard with the `ionization` CLI argument; must fail with `finite-rate ionization was requested`. |
 | `release_output_sidecar` | `cmake/check_gamma_output.cmake`: a short `ISO_NS=48` `model_column` run must write a `.gamma_diag` sidecar carrying `EOS_MODE=gamma_table`, the table's SHA-256 as provenance, the gravity-potential convention, and the ten named physical columns; and the raw snapshot header must declare exactly **3** conserved rows, i.e. `(rho, rho u, E)`. |
+| `legacy_scenario_disabled` | `cmake/check_legacy_disabled.cmake` (default build only): each of `model_c7`, `model_flare`, `model_gentle`, `analytic_canopy`, `pfss_field_line` must exit non-zero *and* name `-DCHROMO_ENABLE_LEGACY=ON`. |
 | `conductive_flux_python` | `tests/test_conductive_flux.py` — the Python conductive-flux diagnostic reproduces the `physics.hpp` electron and neutral conductivity formulas exactly, and gives byte-identical flux for the fixed-gamma and Gamma-table input paths on identical arrays. Registered only when `.venv/bin/python` exists. |
 
 The four `release_reject_*` cases check the *reason* for the failure, not merely that it failed, so a release run cannot be silently reconfigured into something else and cannot fail the guard for an unrelated reason.

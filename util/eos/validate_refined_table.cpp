@@ -1,5 +1,5 @@
 /*! Stage-9 off-node validation against a direct-CRASH 2x-refined grid. */
-#include "eos.hpp"
+#include "core/eos.hpp"
 
 #include <algorithm>
 #include <cmath>

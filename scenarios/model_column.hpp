@@ -26,19 +26,20 @@
  * c7_full_temperature_pchip in c7_profile.cpp), driven to conduction-driven
  * ("gentle", Antiochos & Sturrock 1978) evaporation.
  *
- * The numerical scheme is the well-balanced, high-order configuration validated in
- * docs/studies/evaporation/gentle_evaporation_downflow.md (the "bestwb" set) — ALWAYS ON here, no toggles:
- *   - well-balanced explicit reconstruction (φ_g-consistent shifted pressures),
- *   - log-space MUSCL reconstruction of the exponentially-stratified slots,
- *   - the asymmetric MC3/Koren limiter (β = 2),
- *   - equilibrium-reference ("δ-form") well-balancing (V = 0 exact for any strat.),
- *   - inner (photospheric) discrete-HSE reservoir well-balanced through BOTH ghosts,
- *     density included (ρ ∝ p at T₀) so V = 0 is an exact fixed point for mass too.
- * The release additionally uses the SWMF exact-Riemann Godunov flux (frozen
- * composition, gamma = 5/3) and the
- * (ln rho, u, ln p) primitive set. Together these hold a hydrostatic column at
- * V ≈ 0 to round-off, so any residual flow is physical (conduction-driven
- * evaporation), not truncation drainage.
+ * The numerical scheme is fixed here, no toggles (full statement in
+ * docs/standards/release_facts.md):
+ *   - MUSCL-Hancock reconstruction of (ln rho, u, ln p) with the asymmetric
+ *     MC3/Koren limiter (β = 2); the face temperature is recovered from the
+ *     reconstructed (rho, p) through the same Saha closure,
+ *   - the SWMF exact-Riemann Godunov flux at frozen composition (gamma = 5/3),
+ *   - the momentum source (gravity) applied in both the Hancock predictor and
+ *     the corrector,
+ *   - a second-order (trapezoidal, EOS-closed) hydrostatic ladder for the two
+ *     ghosts below the 1600 km mid-chromospheric truncation.
+ * The scheme is reference-free and NOT well-balanced in the constructive sense:
+ * a hydrostatic column is not an exact discrete fixed point. Its residual is
+ * second-order truncation error (N=500, t=0: max|F^rho| = 1.78e-13 kg m^-2 s^-1,
+ * order 2.19 to N=1000). Evidence: docs/studies/numerics/reference_free_release_recap.md.
  *
  * IC: the C7 temperature and ionization FRACTION with the total density re-integrated
  * hydrostatically from the base (clean V ≈ 0 start).

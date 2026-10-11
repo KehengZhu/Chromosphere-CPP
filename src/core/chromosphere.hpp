@@ -642,10 +642,9 @@ struct Grid {
     /// explicit reconstruction is affected.) When true, rhs_explicit_state corrects
     /// the shifted-state pressures with the shifted φ_g, so a hydrostatic profile is
     /// a discrete fixed point (V≈0) and the isentropic relaxation
-    /// (docs/studies/evaporation/gentle_evaporation_downflow.md, model_column) holds. Default false
-    /// keeps every existing scenario / the 5950-test baseline byte-for-byte; set by
-    /// model_column. (Candidate to enable globally — it is the physically
-    /// correct reconstruction and removes the spurious chromospheric downflow.)
+    /// (docs/studies/evaporation/gentle_evaporation_downflow.md) holds. Default
+    /// false; set only by the legacy two-fluid scenarios (model_gentle, model_c7,
+    /// pfss_field_line). The release solver never reads it.
     bool well_balanced = false;
 
     /// LEGACY TWO-FLUID ONLY. Log-space MUSCL reconstruction in rhs_explicit_state.
@@ -660,12 +659,13 @@ struct Grid {
     /// slope, and the reconstructed face jump (hence the diffusion) collapses. The SIGNED
     /// velocities {V, U} stay linear (log undefined; no large dynamic range). Faces are
     /// exp'd back before prim2cons so the scheme stays conservative; applied AFTER the
-    /// well-balanced φ_g pressure correction (which must see linear p). Default false
-    /// keeps every existing scenario / the test baseline byte-for-byte; always on in
-    /// model_column. Composes with well_balanced.
+    /// well-balanced φ_g pressure correction (which must see linear p). Default
+    /// false; set only by legacy model_gentle. The release solver never reads it.
+    /// Composes with well_balanced.
     bool log_reconstruct = false;
 
-    /// Slope limiter for the explicit MUSCL reconstruction (rhs_explicit_state).
+    /// BOTH solvers. Slope limiter for the explicit MUSCL reconstruction
+    /// (release: limit_mc3 in single_fluid/mixture.cpp; legacy: rhs_explicit_state).
     /// Default false ⇒ the symmetric minmod limiter φ(r)=max(0,min(1,r)) used
     /// everywhere (writeup eq 15; slimL=slimR so one flux_lim(r) feeds both faces
     /// of a cell). True ⇒ the MC3 / Koren limiter (BATSRUS ModFaceValue 'mc3'), the
@@ -674,10 +674,8 @@ struct Grid {
     /// of the O(Δs) base-drainage truncation in the iso runs). Because it is
     /// asymmetric, the '+' and '−' reconstruction terms take DIFFERENT limited
     /// slopes — see flux_lim_mc3_plus / flux_lim_mc3_minus. limiter_beta is the
-    /// Koren β (2 ⇒ classic Koren; 1 ⇒ minmod-like). Default off keeps every
-    /// existing scenario / the 5958-test baseline byte-for-byte; always on in
-    /// model_column (β=2). Composes with log_reconstruct and well_balanced (it only
-    /// changes how the same differences are limited).
+    /// Koren β (2 ⇒ classic Koren; 1 ⇒ minmod-like). Default off; always on in
+    /// model_column (β=2). It only changes how the same differences are limited.
     bool  mc3_limiter = false;
     Real limiter_beta = 2.0f;
 
@@ -744,8 +742,9 @@ struct Grid {
     /// equilibrium (conduction-driven evaporation) evolve normally minus that fixed
     /// O(Δs) correction. eq_state is the (u = 0, HSE) IC set by the scenario;
     /// eq_residual is computed lazily on the first step with subtraction disabled via
-    /// the empty() guard. Always on in model_column; both solvers support it, each in
-    /// its own conserved-state width.
+    /// the empty() guard. LEGACY TWO-FLUID ONLY: set by legacy model_gentle. The
+    /// release solver never reads it, and model_column_ic sets it false — the
+    /// release is reference-free (docs/studies/numerics/reference_free_release_recap.md).
     bool eq_wb = false;
     Vec  eq_state;  ///< frozen reference equilibrium (conserved), set by scenario IC
     Vec  eq_residual;  ///< cached explicit-RHS residual at eq_state (empty until computed)

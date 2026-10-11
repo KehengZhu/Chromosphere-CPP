@@ -478,19 +478,19 @@ Vec model_column_ic(Grid& grid) {
         kInnerPRes1 = pg1; kInnerRhoRes1 = rg1;
     }
 
-    // --- numerical scheme: the validated "bestwb" configuration (always on) ---
-    // well-balanced + log-space MUSCL + MC3/Koren (β=2) + equilibrium-reference
-    // δ-form well-balancing. These hold a hydrostatic column at V≈0 to round-off
-    // for any stratification (docs/studies/evaporation/gentle_evaporation_downflow.md). No toggles.
+    // --- numerical scheme (always on, no toggles) ---
+    // MC3/Koren limiter (β=2) on the (ln rho, u, ln p) reconstruction. The
+    // release reconstruction is log-space by construction and decodes each cell
+    // with its own φ_g, so the two-fluid-only Grid::log_reconstruct and
+    // Grid::well_balanced are not set. The scheme is reference-free and not
+    // constructively well-balanced (see the eq_wb note at the end of this IC).
     grid.out_base_km              = h_base;   // label output heights from the true base
     grid.inner_conduction_neumann = kInnerTNeumann;
-    grid.well_balanced            = true;
-    grid.log_reconstruct          = true;
     grid.mc3_limiter              = true;
     grid.limiter_beta             = 2.0f;
     // DIAGNOSTIC-ONLY reconstruction override for the scheme-comparison leg of the
     // face-flux study (docs/studies/numerics/top_ripple_face_flux_diagnosis.md). Unset — the default
-    // — leaves the "bestwb" MC3(beta=2) configuration above completely untouched.
+    // — leaves the release MC3 (beta=2) limiter above completely untouched.
     //   ISO_LIMITER=mc3    MC3/Koren, beta from ISO_MC3_BETA (default 2) [= default]
     //   ISO_LIMITER=minmod symmetric minmod
     //   ISO_LIMITER=first  beta=0 with MC3 ⇒ phi≡0 ⇒ piecewise-constant (1st order)

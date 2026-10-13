@@ -29,20 +29,21 @@
  * The numerical scheme is fixed here, no toggles (full statement in
  * docs/standards/release_facts.md):
  *   - MUSCL-Hancock reconstruction of (ln rho, u, ln p) with the asymmetric
- *     MC3/Koren limiter (β = 2); the face temperature is recovered from the
- *     reconstructed (rho, p) through the same Saha closure,
+ *     MC3/Koren limiter (β = 2); the ln p slot is hydrostatic: the limiter acts
+ *     only on the departure from discrete hydrostatic balance, and the gravity
+ *     source uses the same discrete relation. The face temperature is recovered
+ *     from the reconstructed (rho, p) through the same Saha closure,
  *   - the SWMF exact-Riemann Godunov flux at frozen composition (gamma = 5/3),
  *   - the momentum source (gravity) applied in both the Hancock predictor and
  *     the corrector,
- *   - a second-order (trapezoidal, EOS-closed) hydrostatic ladder for the two
- *     ghosts below the 1600 km mid-chromospheric truncation.
- * The scheme is reference-free and NOT well-balanced in the constructive sense:
- * a hydrostatic column is not an exact discrete fixed point. Its residual is
- * second-order truncation error (N=500, t=0: max|F^rho| = 6.0e-14 kg m^-2 s^-1,
- * order 1.95 to N=1000). Evidence: docs/studies/numerics/reference_free_release_recap.md
- * and docs/studies/numerics/hydrostatic_reconstruction_and_mc3_fix.md. ISO_HSE_RECON=1
- * selects an experimental hydrostatic reconstruction that makes the column at rest
- * an exact discrete fixed point.
+ *   - an EOS-closed hydrostatic ladder, in that same discrete relation, for the
+ *     two ghosts below the 1600 km mid-chromospheric truncation.
+ * The scheme is reference-free (no frozen equilibrium is stored or subtracted)
+ * and exactly balanced at rest: a column in the discrete hydrostatic relation is
+ * a fixed point to round-off (N=500, t=0: max|F^rho| = 1.5e-19 kg m^-2 s^-1;
+ * the plain ln p scheme it replaced left 6.0e-14, second order). Exact balance
+ * holds for B = 1, the current model. Evidence:
+ * docs/studies/numerics/hydrostatic_reconstruction_and_mc3_fix.md.
  *
  * IC: the C7 temperature and ionization FRACTION with the total density re-integrated
  * hydrostatically from the base (clean V ≈ 0 start).

@@ -184,7 +184,7 @@ What it captures is one explicit RHS evaluation: the decoded cell-centred inputs
 
 @verbatim
 # face-flux diagnostic (read-only capture of mixture_rhs_explicit)
-# ns=661 first_cell=0 uniform_mesh=0 mc3=1 beta=2 roe=0 swmf_godunov=1 pressure_reconstruct=1 ds_km=1.10477
+# ns=661 first_cell=0 uniform_mesh=0 mc3=1 beta=2 roe=0 swmf_godunov=1 pressure_reconstruct=1 hydrostatic_reconstruct=1 ds_km=1.10477
 # mass flux = the mix::RHO continuity row (total mass density; the release state has no carrier rows)
 # columns=cell_km face_km rho_cell v_cell T_cell rho_L rho_R v_L v_R T_L T_R cs_L cs_R a_face f_central f_diff f_total r_rho phi_plus_rho r_ip1_rho phi_minus_rho r_v phi_plus_v r_T phi_plus_T p_cell p_L p_R
 # t = 0 step = 0

@@ -1,6 +1,6 @@
 # Visualization catalog — `model_column` (release)
 
-Figures and movies of the release solver: the single-fluid Saha/`Gamma1` column with the SWMF Godunov flux and `double` storage. Outputs land in `visualization/model_column/`. Conventions and the index of the other catalog files are in [README.md](README.md).
+Figures and movies of the release solver: the single-fluid Saha/`Gamma1` column with the SWMF Godunov flux and `double` storage. Outputs land in `visualization/model_column/`. Conventions and the index of the other catalog files are in [README.md](README.md). Since 2026-10-12 the top level holds only outputs of the current release, which includes the hydrostatic reconstruction. Everything made from the earlier code, which covers every entry below unless it says otherwise, is in `visualization/model_column/2026-10-12_7a0e1af/` (see its `INDEX.md`).
 
 ---
 

@@ -548,7 +548,7 @@ void build_swmf_godunov_flux(const Grid& grid, const MixtureFaceArrays& left,
 // MUSCL-Hancock step apply it: the Hancock predictor with weight dt_predictor
 // and the corrector inside the final RHS.
 //
-// With the experimental hydrostatic reconstruction (`hse_half_step` non-null)
+// With the release hydrostatic reconstruction (`hse_half_step` non-null)
 // the gravity term is 2 p_i sinh(o_i)/ds_i instead of rho_i g_par: exactly the
 // pressure difference between cell i's own hydrostatic face extrapolations
 // p_i exp(+/-o_i), so it cancels the flux difference of a balanced column.
@@ -743,7 +743,7 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
     stencil_view(grid, decoded,  2, w_ip2);
     stencil_view(grid, decoded, -2, w_im2);
 
-    // EXPERIMENTAL hydrostatic reconstruction (Grid::hydrostatic_reconstruct).
+    // Hydrostatic reconstruction (Grid::hydrostatic_reconstruct, the release).
     // Every neighbour's ln p is moved into cell i's hydrostatic frame by removing
     // the discrete hydrostatic steps h_{j+1/2} = o_j + o_{j+1} between it and cell
     // i, so the limiter sees only the departure from balance. The face values are

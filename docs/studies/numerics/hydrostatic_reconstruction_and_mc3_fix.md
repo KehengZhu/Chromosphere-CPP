@@ -1,6 +1,6 @@
-# MC3 branch fix and an experimental hydrostatic reconstruction
+# MC3 branch fix and the hydrostatic reconstruction
 
-**Status: CURRENT** — the MC3 branch fix is in the release reconstruction; the hydrostatic reconstruction is an experimental prototype behind `ISO_HSE_RECON=1`, default off. Supersedes the hydrostatic-residual numbers of `reference_free_release_recap.md` (measured before the fix).
+**Status: CURRENT** — the MC3 branch fix and the hydrostatic reconstruction are both in the release. The hydrostatic reconstruction was a prototype behind `ISO_HSE_RECON=1` (commit `7a0e1af`) and was promoted to the release, with the switch removed, on 2026-10-12 (see *Promotion to release*). Labels A/B/C below are the configurations as they were measured. Supersedes the hydrostatic-residual numbers of `reference_free_release_recap.md` (measured before the fix).
 
 ## Question
 
@@ -9,13 +9,13 @@ The advisor pointed out that limiting `ln p` directly ignores gravity. In a colu
 ## What changed
 
 1. **MC3 branch fix (release).** `limit_mc3` in `src/single_fluid/mixture.cpp` uses the code's ratio `r = Δ₋/Δ₊` with the limited slope applied to `Δ₊`. BATSRUS `ModFaceValue` 'mc3' gives the upper face `u_i + (Δ₋ + 2Δ₊)/6` and the lower face `u_i − (2Δ₋ + Δ₊)/6`, so the `+` branch must be `(r+2)/3` and the `−` branch `(2r+1)/3`. The code had them swapped, which is the `κ = −1/3` scheme rather than the documented third-order `κ = 1/3`. On cell averages of `s²` at `s = 1, 2, 3` the old code gives the face value at 2.5 as 5.917, BATSRUS and the fixed code 6.25 (exact). The frozen legacy helpers `flux_lim_mc3_plus/minus` keep the old form.
-2. **Hydrostatic reconstruction (prototype, `ISO_HSE_RECON=1`, `Grid::hydrostatic_reconstruct`).**
+2. **Hydrostatic reconstruction (`Grid::hydrostatic_reconstruct`; the prototype `ISO_HSE_RECON=1` when measured, the release since 2026-10-12).**
    - Each cell carries its half-cell step `o_i = ρ_i g_par ds_i/(2p_i)`, from the decoded state at `U^n`. Ghosts take the boundary cell's `g_par` and width.
    - The `ln p` slot of every stencil neighbour is moved into cell `i`'s hydrostatic frame by removing the steps `h_{j+1/2} = o_j + o_{j+1}` between them. MC3 then limits only the departure, and face values are shifted back by `±o_i`. The predictor half-step centres use the same frame.
    - The gravity source becomes `2 p_i sinh(o_i)/ds_i`, which is exactly the pressure difference of cell `i`'s own extrapolations and equals `ρ_i g_par` to `O((ds/H)²)`.
    - The IC and both ghost ladders are built in the same discrete form, `ln p_{i+1} − ln p_i = o_i + o_{i+1}`.
    - `ln ρ` and `u` are unchanged. The flux-tube term is unchanged, so exact balance holds for `B ≡ 1` (the current model) only.
-   - `model_column_2t` rejects the switch.
+   - `model_column_2t` and the `ISO_RECONSTRUCTION=lnrho-v-lnt` reference run without it and keep the trapezoidal IC and ghost forms.
 
    One implementation detail mattered: `phi_g` carries a float-literal km→m factor, so the gravity the solver differences differs from `grid.g` by 4.7e-8 relative. Balancing the IC against `grid.g` left a uniform 1.3e-5 m/s² sinking, 2.6e-4 m/s after 20 s at every resolution. The IC and ghosts therefore use the solver's own `(φ_iph − φ_imh)/ds` (`solver_g` in `scenarios/model_column.cpp`). The release path is not changed by this; the 5e-8 mismatch is far below its truncation error.
 
@@ -71,7 +71,7 @@ The release regression `test_stage8_gamma_model_column_saha_hse_and_ghosts` (5 s
 | column mass drift | −8.816e-5 | −1.196e-4 | −7.438e-5 | −8.828e-5 | −1.198e-4 | −7.426e-5 |
 | base face f_diff/f_total | −0.161 | −0.174 | −0.001 | −0.162 | −0.175 | −0.001 |
 
-- **Evaporation is insensitive to both changes.** B moves mean V and F_eff by +0.36–0.44 %, about 40 % of the N500 → N1000 difference (+0.9 %) and in the same direction. C moves them by ≤ 0.06 %. At 100 s all three agree to 0.03 %.
+- **Evaporation is insensitive to both changes.** B moves mean V and F_eff by +0.36–0.44 %, about 40 % of the N500 → N1000 difference (+0.9 %) and in the same direction. C differs from A by ≤ 0.06 %, so the hydrostatic reconstruction undoes the B shift. At 100 s all three agree to 0.03 %.
 - **Column mass.** B loses 36 % more mass by 1000 s and C 16 % less. The differences are the same at both resolutions and are set up in the first ~100 s (−3.39e-4, −3.72e-4, −3.21e-4 at 100 s). They are a start-up-transient boundary effect, not a resolution effect.
 - **First-interior-face artifact.** The dissipative share of the base-face mass flux, listed in `release_facts.md` as open (~16 %), is 16–17 % in A and B and **0.1 % in C**, at both resolutions. The artifact is the hydrostatic inconsistency of the reconstruction and the lower ghosts.
 
@@ -79,15 +79,53 @@ The release regression `test_stage8_gamma_model_column_saha_hse_and_ghosts` (5 s
 
 - The advisor's diagnosis is right in kind: the release does not reconstruct relative to hydrostatic balance, and the residual it leaves is a second-order truncation error largest where `H` varies fastest. The limiter clipping is not the mechanism on this mesh; the unlimited reconstruction and source mismatch are.
 - The MC3 fix makes the code do what its documentation claims. Its measured effect is mixed and small: better at the base face and in the bulk, worse in the top cells for short times, and +36 % column mass loss. Keeping it in the release is a correctness choice, not a measured improvement.
-- The hydrostatic reconstruction makes the column at rest exact to round-off, removes the first-interior-face artifact, and leaves evaporation unchanged. It is a candidate for the release. Before that it needs:
+- The hydrostatic reconstruction makes the column at rest exact to round-off, removes the first-interior-face artifact, and leaves evaporation unchanged. It was a candidate for the release, with three open items; their resolution is under *Promotion to release*:
   - the variable-`B` flux-tube term in the balanced form;
   - a decision on `ln ρ`, which is still reconstructed raw (harmless for balance at `u = 0`, since the exact Riemann solver returns zero mass flux at equal pressures);
   - a long-run (4000 s) and CFL check.
 
+## Promotion to release (2026-10-12)
+
+The hydrostatic reconstruction is now always on in `model_column` (`Grid::hydrostatic_reconstruct`). Setting `ISO_HSE_RECON` at all throws, so a stale `ISO_HSE_RECON=0` cannot silently run the release. The `ISO_RECONSTRUCTION=lnrho-v-lnt` reference and `model_column_2t` run without it and keep the trapezoidal IC and ghost forms. The three open items above were resolved as follows:
+
+- **Variable `B`.** Not needed for the current model, which has `B ≡ 1`. Recorded as a scope limit in `release_facts.md`: a variable-`B` model would bring back a residual.
+- **`ln ρ`.** Left as is. At rest a density jump is a stationary contact, and the exact Riemann solver gives it zero mass flux. That would not hold for a Rusanov-type flux, which is only the per-face fallback and recorded zero fallbacks on every run here.
+- **Long run and CFL.** Measured below.
+
+**Promotion is exact.** A 20 s release run of the new default build is byte-identical (`.txt`, `.gamma_diag`) to the prototype binary run with `ISO_HSE_RECON=1`. All ctest tests pass, including the legacy build, and so does `scripts/release_validation.sh` (default and explicit paths bit-identical; 100 s smoke with `godunov.fallbacks=0`).
+
+The column-at-rest regression moved into `test_hydrostatic_reconstruction_exact_fixed_point` (`max|V| < 1e-8 m/s`). Three face-flux tests normalized the continuity check by the face flux itself; at rest that flux is now round-off. They now impose a linear 0–20 m/s upflow on their test column.
+
+### 4000 s, release configuration (B = plain `ln p` with the MC3 fix, C = release)
+
+N=500/R4, CFL 0.50, single-T outer closure. Runs `outputs/model_column/hse_recon/long_{B,C}_N500_4000s`. Every run ends `termination=end_time` with `godunov.fallbacks=0`. Face metrics come from the `.faceflux` capture nearest each time. The spread is `(max − min)/mean` of `f_total` over faces below 1850 km. The mean V, `F_eff` and drift columns come from `pressure_reconstruction_diag.py`.
+
+| t | | base/top `f_total` | spread 1600–1850 km | base-face `\|f_diff/f_total\|` | cell-0 `ρV/f_total[0]` | top V [m/s] | top `f_total` | mean V [m/s] | `F_eff` | mass drift |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 500 s | B | 1.152 | 20.8 % | 17.4 % | 1.369 | 19.56 | 5.588e-10 | 7.473 | 4.7125e-10 | −1.748e-4 |
+| | C | 1.039 | 11.4 % | 0.10 % | 1.000 | 19.50 | 5.578e-10 | 7.455 | 4.7179e-10 | −1.110e-4 |
+| 4000 s | B | 1.0036 | 13.0 % | 17.5 % | 1.369 | 9.418 | 2.682e-10 | 4.689 | 2.4690e-10 | −7.98e-5 |
+| | C | 1.0022 | 13.0 % | 0.11 % | 1.000 | 9.412 | 2.683e-10 | 4.689 | 2.4694e-10 | −5.07e-5 |
+
+- **Evaporation is unchanged at 4000 s.** Mean V is identical, and `F_eff`, top V and top flux agree to ≤ 0.06 %. The old release (pre-MC3 fix) gave 9.42 m/s and 2.683e-10 at the top (`release_facts.md`), so the published long-run evaporation numbers stand.
+- **The first-interior-face artifact stays removed for the whole run:** 0.10–0.11 % at every time, and the base cell's `ρV` matches the face flux (1.000 against 1.369).
+- **The ~13 % lower-chromosphere spread is unchanged** (12.96 % against 13.04 % at 4000 s), as expected for the physical adiabatic-contraction signature (`docs/studies/boundaries/twall_mass_flux_relaxation_timescales.md`). Early on the two differ: at 500 s the spread is 11.4 % in C against 20.8 % in B, and base/top is 1.039 against 1.152. That difference was not decomposed further.
+- **Column mass loss is 36 % smaller** by 4000 s, consistent with the 1000 s result.
+
+### CFL 0.25 control at 500 s
+
+| 500 s, CFL 0.50 → 0.25 | mean V | `F_eff` | top V | top `f_total` |
+|---|---|---|---|---|
+| B | 7.473 → 7.472 | +0.47 % | +0.32 % | +0.29 % |
+| C | 7.455 → 7.455 | +0.09 % | +0.16 % | +0.16 % |
+
+The release is no more CFL-sensitive than the scheme it replaces, and CFL 0.50 stays validated for this configuration.
+
 ## Reproduce
 
 ```bash
-# A = binary built at f01189b, B/C = current; C adds ISO_HSE_RECON=1
+# A = binary built at f01189b; B = binary built at 7a0e1af; C = that binary with ISO_HSE_RECON=1,
+# which is now the default (current builds reject ISO_HSE_RECON)
 # column at rest
 ISO_NS=500 ISO_T_TOP=0 ISO_HEAT_FLUX=0 CHROMO_T_END=20 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 \
 CHROMO_FRAME_DT=5 CHROMO_FACE_FLUX_DIAG=1 CHROMO_FACE_FLUX_TOP=0 CHROMO_FACE_FLUX_STRIDE=40 \

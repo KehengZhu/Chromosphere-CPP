@@ -1941,74 +1941,8 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
                    th.internal_energy+0.5*th.rho*std::pow(
                        g(mix::MOM)/th.rho, 2)+th.rho*phis[j], 3e-6);
     }
-    // ---- reference-free hydrostatic regression, at the RELEASE resolution ----
-    // The release subtracts no frozen equilibrium residual (grid.eq_wb is false
-    // on the gamma path), so this is a genuine test of the discretization: the
-    // initialized Saha-HSE column has to stay at rest on its own. That makes the
-    // achievable bound resolution dependent, which is why the evolution runs on
-    // a fresh coarse-equivalent N=500 grid -- refined to 661 cells, the shipped
-    // release mesh -- instead of the 48-cell grid used for the structural checks
-    // above. Measured on that mesh after 5 steps at the production CFL 0.50 in the
-    // double release build:
-    //   max|V| = 1.04e-2 m/s, max|rho u| = 2.9e-13, ||dU||/||U|| = 3.3e-9
-    // (before the MC3 branch fix 4.9e-3 / 1.4e-13 / 7.9e-9; the float32-era values
-    // were 5.9e-3 / 5.4e-13 / 9.2e-8). The bounds below carry >= 4x headroom
-    // on each. For scale, the conduction-
-    // driven evaporation this model exists to study runs at 15-40 m/s, and the
-    // t=0 face mass-flux defect of this same configuration sits ~1.3x above the
-    // float32 round-off floor of the stored state. On a 14x coarser grid the
-    // same max|V| is ~0.76 m/s, so do NOT reuse these numbers off the release
-    // mesh (docs/studies/numerics/reference_free_release_recap.md).
-    // Built through make_scenario so the run really is the release preset
-    // (1600-2153 km, outer R4 refinement, 22000 K wall), not a bare uniform grid
-    // with library defaults -- with ONE deliberate exception: the outer hydro ghost
-    // temperature follows the top cell (ISO_HYDRO_T_DECOUPLE=1). With conduction
-    // off nothing relaxes the release's fixed 22 kK ghost toward the 22.67 kK
-    // initial top cell, and that IC/BC entropy jump (max|V| 1.2e-2 here) would mask
-    // the interior predictor defect this check exists to catch. The single-T
-    // closure with its ghost matched to the IC reproduces the decoupled 20 s
-    // residuals to four digits
-    // (docs/studies/boundaries/outer_temperature_bc_single_t_recap.md §4). And at the VALIDATED
-    // PRODUCTION CFL 0.50 rather than the solver's conservative 0.25 fallback:
-    // the predictor defect this regression exists to catch grows like dt, so an
-    // automated guard has to run at the timestep production actually uses.
-    clear_model_column_release_defaults_env();
-    Scenario release_sc = make_scenario("model_column", "");
-    setenv("ISO_HEAT_FLUX", "0", 1);   // conduction OFF: this is the HSE leg
-    setenv("ISO_HYDRO_T_DECOUPLE", "1", 1);   // IC-consistent outer ghost T, see above
-    Grid release_grid;
-    release_grid.init(release_sc.peek_ns(), 0.50f);
-    release_grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
-    const Vec release_state = release_sc.ic(release_grid);
-    EXPECT_TRUE(release_grid.ns == 661u);      // N=500 coarse-equivalent, R4 outer
-    EXPECT_TRUE(!release_grid.eq_wb);          // reference-free release
-    EXPECT_TRUE(release_grid.eq_residual.is_empty());
-    const auto release_sz = arma::size(release_grid.ns, num_of_mixture_eq);
-    Vec evolved = release_state;
-    for (int step = 0; step < 5; ++step) {
-        release_sc.update_bc(release_grid, evolved);
-        const MixtureField field = mixture_decode(release_grid, evolved);
-        const Vec dt = mixture_timestep(release_grid, evolved, field);
-        evolved = mixture_advance(release_grid, evolved, dt, field);
-        release_grid.sim_time += dt(0);
-    }
-    EXPECT_TRUE(!evolved.has_nan());
-    double max_velocity = 0.0, max_total_momentum = 0.0;
-    for (arma::uword i = 0; i < release_grid.ns; ++i) {
-        const double rho = evolved(arma::sub2ind(release_sz, i, mix::RHO));
-        const double momentum = evolved(arma::sub2ind(release_sz, i, mix::MOM));
-        max_velocity = std::max(max_velocity, std::abs(momentum/rho));
-        max_total_momentum = std::max(max_total_momentum, std::abs(momentum));
-    }
-    const double relative_state_change = arma::norm(evolved-release_state, 2)
-                                       / arma::norm(release_state, 2);
-    std::cout << "        [reference-free HSE @ N500/" << release_grid.ns
-              << " cells] max|V|=" << max_velocity
-              << " m/s  max|rho u|=" << max_total_momentum
-              << "  ||dU||/||U||=" << relative_state_change << '\n';
-    EXPECT_TRUE(max_velocity < 4.0e-2);
-    EXPECT_TRUE(max_total_momentum < 2.0e-12);
-    EXPECT_NEAR(relative_state_change, 0.0, 5e-7);
+    // The release-resolution column-at-rest regression lives in
+    // test_hydrostatic_reconstruction_exact_fixed_point.
     // make_scenario installs the release env preset process-wide; drop it again
     // so the following tests keep their own configurations.
     clear_model_column_release_defaults_env();
@@ -2017,23 +1951,33 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
     unsetenv("ISO_CORONA"); unsetenv("ISO_TRAC");
 }
 
-// EXPERIMENTAL hydrostatic reconstruction (ISO_HSE_RECON=1). The IC, both ghost
-// ladders, the ln p reconstruction and the gravity source all use the same
-// discrete relation ln p_{i+1} - ln p_i = -(g/2)(ds_i rho_i/p_i + ds_{i+1}
-// rho_{i+1}/p_{i+1}), so the release-preset column at rest must be a fixed point
-// to round-off, where the release scheme leaves a second-order residual.
+// Release column at rest, at the release resolution. The release is
+// reference-free (grid.eq_wb is false; no frozen residual is subtracted), and its
+// IC, both ghost ladders, the ln p (hydrostatic) reconstruction and the gravity
+// source all use the same discrete relation ln p_{i+1} - ln p_i =
+// -(g/2)(ds_i rho_i/p_i + ds_{i+1} rho_{i+1}/p_{i+1}), so the initialized Saha-HSE
+// column must stay at rest to round-off. Run through make_scenario on the shipped
+// N=500/R4 mesh (661 cells) at the production CFL 0.50, with conduction off and
+// ONE deliberate exception to the preset: the outer hydro ghost temperature
+// follows the top cell (ISO_HYDRO_T_DECOUPLE=1). With conduction off nothing
+// relaxes the release's fixed 22 kK ghost toward the 22.67 kK initial top cell,
+// and that IC/BC entropy jump would mask the interior balance this checks
+// (docs/studies/boundaries/outer_temperature_bc_single_t_recap.md section 4).
+// The plain ln p scheme this replaced left max|V| = 1.04e-2 m/s after the same
+// five steps (docs/studies/numerics/hydrostatic_reconstruction_and_mc3_fix.md).
 static void test_hydrostatic_reconstruction_exact_fixed_point() {
     clear_model_column_release_defaults_env();
     Scenario sc = make_scenario("model_column", "");
     setenv("ISO_HEAT_FLUX", "0", 1);
     setenv("ISO_HYDRO_T_DECOUPLE", "1", 1);
-    setenv("ISO_HSE_RECON", "1", 1);
     Grid grid;
     grid.init(sc.peek_ns(), 0.50f);
     grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
     const Vec initial = sc.ic(grid);
     EXPECT_TRUE(grid.hydrostatic_reconstruct && grid.pressure_reconstruct);
-    EXPECT_TRUE(grid.ns == 661u);
+    EXPECT_TRUE(grid.ns == 661u);      // N=500 coarse-equivalent, R4 outer
+    EXPECT_TRUE(!grid.eq_wb);          // reference-free release
+    EXPECT_TRUE(grid.eq_residual.is_empty());
     const auto sz = arma::size(grid.ns, num_of_mixture_eq);
     Vec evolved = initial;
     for (int step = 0; step < 5; ++step) {
@@ -2049,14 +1993,13 @@ static void test_hydrostatic_reconstruction_exact_fixed_point() {
             evolved(arma::sub2ind(sz, i, mix::MOM))/evolved(arma::sub2ind(sz, i, mix::RHO))));
     const double relative_state_change =
         arma::norm(evolved-initial, 2)/arma::norm(initial, 2);
-    std::cout << "        [hydrostatic reconstruction @ N500/" << grid.ns
+    std::cout << "        [release column at rest @ N500/" << grid.ns
               << " cells] max|V|=" << max_velocity
               << " m/s  ||dU||/||U||=" << relative_state_change << '\n';
-    // Measured 9.7e-10 m/s and 7.6e-15; the release scheme gives max|V| ~ 1e-2 m/s
-    // on the same five steps.
+    // Measured 9.7e-10 m/s and 7.6e-15 (round-off).
+    EXPECT_TRUE(!evolved.has_nan());
     EXPECT_TRUE(max_velocity < 1.0e-8);
     EXPECT_TRUE(relative_state_change < 1.0e-13);
-    unsetenv("ISO_HSE_RECON");
     clear_model_column_release_defaults_env();
 }
 
@@ -2123,6 +2066,17 @@ static double saha_density_from_pressure(double pressure, double temperature) {
 static void set_cell_state(const Grid& grid, Vec& state, arma::uword i,
                            double rho, double V, double T) {
     mixture_pack_cell(grid, state, i, rho, V, T, mixture_cell_phi(grid, i));
+}
+
+// The release column at rest is a discrete fixed point, so its face fluxes are
+// round-off (~1e-20 kg m^-2 s^-1) and cannot carry a flux-comparison test. Give
+// it an evaporation-like upflow rising linearly to 20 m/s at the top, keeping
+// each cell's rho and T, so every face carries a real mass flux.
+static void add_test_upflow(const Grid& grid, Vec& state) {
+    for (arma::uword i = 0; i < grid.ns; ++i) {
+        const MixtureThermo th = decode_cell(grid, state, i);
+        set_cell_state(grid, state, i, th.rho, 20.0*(i+0.5)/grid.ns, th.T);
+    }
 }
 
 static void test_upper_bc_hydro_conduction_temperature_decoupling() {
@@ -2266,6 +2220,7 @@ static void test_face_flux_capture_matches_production_continuity() {
     const arma::uword ns = 200;
     Grid grid;
     Vec state = setup_decoupling_column(grid, false, ns);
+    add_test_upflow(grid, state);
     model_column_update_bc(grid, state);
     MixtureField field = mixture_decode(grid, state);
     const Vec dt = mixture_timestep(grid, state, field);
@@ -2360,6 +2315,12 @@ static void test_model_column_release_numerics_defaults() {
         EXPECT_TRUE(grid->swmf_godunov_flux);
         EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(grid->pressure_reconstruct);
+        EXPECT_TRUE(grid->hydrostatic_reconstruct);
+    }
+    {   // The retired hydrostatic-reconstruction switch is rejected, not ignored.
+        setenv("ISO_HSE_RECON","0",1);
+        EXPECT_TRUE(throws_any([&] { (void)build(true); }));
+        unsetenv("ISO_HSE_RECON");
     }
 #ifdef CHROMO_ENABLE_LEGACY
     {   // 6: the non-gamma path keeps Rusanov + (ln rho,V,ln T) — neither the Roe
@@ -2377,6 +2338,7 @@ static void test_model_column_release_numerics_defaults() {
         EXPECT_TRUE(!grid->swmf_godunov_flux);
         EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(!grid->pressure_reconstruct);
+        EXPECT_TRUE(!grid->hydrostatic_reconstruct);   // needs the ln p slot
     }
     {   // Explicitly requesting the release pair is a no-op.
         setenv("ISO_RIEMANN","swmf-godunov",1);
@@ -2385,6 +2347,7 @@ static void test_model_column_release_numerics_defaults() {
         EXPECT_TRUE(grid->swmf_godunov_flux);
         EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(grid->pressure_reconstruct);
+        EXPECT_TRUE(grid->hydrostatic_reconstruct);
     }
     {   // The Roe characteristic flux stays reachable as the reference solver, and
         // is mutually exclusive with the release Godunov flux, so the face Riemann
@@ -2430,6 +2393,7 @@ static void test_roe_local_face_flux_and_projection() {
     const arma::uword ns = 80;
     Grid grid;
     Vec state = setup_decoupling_column(grid, false, ns);
+    add_test_upflow(grid, state);
     model_column_update_bc(grid, state);
     const MixtureField field = mixture_decode(grid, state);
     const Vec dt = mixture_timestep(grid, state, field);
@@ -2665,6 +2629,7 @@ static void test_swmf_godunov_flux_mode() {
     const arma::uword ns = 80;
     Grid grid;
     Vec state = setup_decoupling_column(grid, false, ns);
+    add_test_upflow(grid, state);
     model_column_update_bc(grid, state);
     const MixtureField field = mixture_decode(grid, state);
     const Vec dt = mixture_timestep(grid, state, field);

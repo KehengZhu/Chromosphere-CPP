@@ -120,12 +120,13 @@ int   kOuterPNeumann = 0;
 // EXPERIMENTAL two-temperature leg (`model_column_2t`). Set only by
 // model_column_2t_ic; leaves the release leg untouched.
 bool  kTwoTemperature = false;
-// EXPERIMENTAL hydrostatic reconstruction (ISO_HSE_RECON=1, Grid::
-// hydrostatic_reconstruct). The solver then balances the discrete relation
+// Release hydrostatic reconstruction (Grid::hydrostatic_reconstruct). The
+// solver balances the discrete relation
 // ln p_{i+1} - ln p_i = -(g/2)(ds_i rho_i/p_i + ds_{i+1} rho_{i+1}/p_{i+1}), so the
-// IC and both ghost ladders are built in that same form; otherwise the
-// release forms are untouched.
-bool  kHseRecon = false;
+// IC and both ghost ladders are built in that same form. Off only for the
+// two-temperature leg and the ln T reference reconstruction, which keep the
+// trapezoidal forms.
+bool  kHseRecon = true;
 
 double gamma_density_from_pressure(const Grid& grid, double pressure, double temperature) {
     if (!(pressure > 0.0) || !(temperature > 0.0))
@@ -148,8 +149,8 @@ double gamma_density_from_pressure(const Grid& grid, double pressure, double tem
 
 // Gravity magnitude the release solver actually applies in cell i [m/s^2]: its
 // source differences phi_g, which carries a float-literal km->m factor, so it
-// differs from grid.g by ~5e-8 relative. The hydrostatic-reconstruction
-// prototype must balance against this value, not grid.g.
+// differs from grid.g by ~5e-8 relative. The hydrostatic reconstruction must
+// balance against this value, not grid.g.
 double solver_g(const Grid& grid, arma::uword i) {
     return static_cast<double>((grid.phi_g_iph(i) - grid.phi_g_imh(i))/grid.ds_i(i));
 }
@@ -267,15 +268,19 @@ Vec model_column_ic(Grid& grid) {
     kBjump             = env_f("ISO_TJUMP_B", 1.0f);
     kVcapMach          = env_f("ISO_VCAP", 0.1f);
     kInnerTNeumann     = (env_f("ISO_INNER_T_NEUMANN", 0.0f) != 0.0f);
-    kHseRecon          = (env_f("ISO_HSE_RECON", 0.0f) != 0.0f);
-    if (kHseRecon && kTwoTemperature)
+    if (std::getenv("ISO_HSE_RECON"))
         throw std::runtime_error(
-            "model_column_ic: ISO_HSE_RECON is a release-solver prototype; the "
-            "two-temperature solver does not implement it");
-    grid.hydrostatic_reconstruct = kHseRecon;
-    if (kHseRecon)
-        std::cerr << "[model_column] ISO_HSE_RECON=1: EXPERIMENTAL hydrostatic "
-                     "reconstruction (prototype, not the release scheme)" << std::endl;
+            "model_column_ic: ISO_HSE_RECON was removed; the hydrostatic "
+            "reconstruction is the release scheme and has no switch");
+    // The hydrostatic reconstruction lives in the ln p slot, so the ln T
+    // reference reconstruction (ISO_RECONSTRUCTION, parsed with the numerics
+    // below) and the two-temperature solver, which does not implement it, run
+    // without it. Decided here because the IC is built in the matching form.
+    {
+        const char* recon = std::getenv("ISO_RECONSTRUCTION");
+        kHseRecon = !grid.two_temperature
+            && !(recon && std::string(recon) == "lnrho-v-lnt");
+    }
     // Upper-BC over-specification experiment: hydro ghost T free-floats (zero
     // gradient), conduction wall unchanged. Default 0 ⇒ the release single-T BC.
     kHydroTDecouple    = (env_f("ISO_HYDRO_T_DECOUPLE", 0.0f) != 0.0f);
@@ -596,6 +601,10 @@ Vec model_column_ic(Grid& grid) {
         std::cerr << "[model_column] reconstruction override: ISO_RECONSTRUCTION="
                   << choice << " (release default: lnrho-v-lnp)" << std::endl;
     }
+    if (kHseRecon && !grid.pressure_reconstruct)
+        throw std::logic_error(
+            "model_column_ic: hydrostatic reconstruction without ln p reconstruction");
+    grid.hydrostatic_reconstruct = kHseRecon;
     // One line naming the numerical method actually in force, so a run log always
     // records it without having to enable the face-flux sidecar.
     std::cerr << "[model_column] numerics: flux="
@@ -603,6 +612,7 @@ Vec model_column_ic(Grid& grid) {
                   : grid.roe_characteristic_flux ? "roe-local" : "rusanov")
               << " reconstruction="
               << (grid.pressure_reconstruct ? "lnrho-v-lnp" : "lnrho-v-lnt")
+              << " hydrostatic=" << grid.hydrostatic_reconstruct
               << " limiter=" << (grid.mc3_limiter ? "mc3" : "minmod")
               << " beta=" << grid.limiter_beta << std::endl;
 
@@ -645,7 +655,12 @@ Vec model_column_ic(Grid& grid) {
     grid.broadcast();
 
     // The release is REFERENCE-FREE: it does not know a hydrostatic equilibrium
-    // in advance and does not subtract a frozen residual. The release formerly
+    // in advance and does not subtract a frozen residual. It is nevertheless
+    // exactly balanced at rest: the hydrostatic reconstruction (set above) makes
+    // any column in the discrete relation ln p_{i+1} - ln p_i = o_i + o_{i+1} a
+    // fixed point, built from the live state each step, so the t = 0 face mass
+    // flux is round-off (1.5e-19 kg m^-2 s^-1 at N=500). The history below is the
+    // residual of the plain (ln rho, u, ln p) scheme it replaced. The release formerly
     // froze this (V=0, HSE) IC as grid.eq_state and subtracted R(U_eq) every
     // step, which made that one state an exact discrete fixed point but bound
     // the solver to a pre-known global equilibrium and kept applying a residual

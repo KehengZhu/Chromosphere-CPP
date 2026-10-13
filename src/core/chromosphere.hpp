@@ -736,8 +736,9 @@ struct Grid {
     /// this flag changes ONLY which pair of variables is authoritative at a face.
     bool pressure_reconstruct = false;
 
-    /// EXPERIMENTAL hydrostatic reconstruction (prototype, default off; selected by
-    /// ISO_HSE_RECON=1 in model_column, requires pressure_reconstruct). Each cell
+    /// Hydrostatic reconstruction (release: model_column always sets it, except
+    /// under the ln T reference reconstruction and in the two-temperature leg;
+    /// Grid default off; requires pressure_reconstruct). Each cell
     /// carries its own local hydrostatic slope k_i = rho_i g_par,i / p_i [1/m] and
     /// half-cell step o_i = k_i ds_i/2 [dimensionless, in ln p]. The ln p slot then
     /// limits only the DEPARTURE from the discrete hydrostatic relation

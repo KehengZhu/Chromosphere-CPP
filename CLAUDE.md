@@ -30,11 +30,11 @@ Full statements, numbers and evidence: **`docs/standards/release_facts.md` — r
 
 - `model_column` means exactly one thing: the release single-fluid equilibrium-mixture solver, state `U = (rho, rho u, E)`; ionization and carrier densities are derived, never stored. One step = explicit MUSCL-Hancock/Godunov hydro, then implicit physical conduction (Lie splitting). No TRAC, beam heating, coronal heating, radiative cooling or artificial conduction in the release path, not even behind flags.
 - Face flux: SWMF exact-Riemann Godunov at **frozen composition** (`gamma = 5/3`, ionization energy in `E0`), face-local Rusanov fallback counted in `godunov.*`. `Gamma1` is the *other* (equilibrium) limit, not "wrong". Saha re-equilibration after each step is an open modelling question — do not redesign ionization without asking.
-- Release configuration: `(ln rho, u, ln p)` MC3/Koren reconstruction, N=500/R4 mesh (661 cells), CFL 0.50, fixed outer reservoir with one 22 kK ghost temperature. The C++ default CFL stays 0.25.
+- Release configuration: `(ln rho, u, ln p)` MC3/Koren reconstruction with the `ln p` slot hydrostatic (`Grid::hydrostatic_reconstruct`, no switch), N=500/R4 mesh (661 cells), CFL 0.50, fixed outer reservoir with one 22 kK ghost temperature. The C++ default CFL stays 0.25.
 - The 1600 km lower boundary is a **mid-chromospheric truncation, never "photospheric"**.
-- The release is reference-free but **not** well-balanced; `eq_wb` is legacy-only and never set on a release Grid.
+- The release is reference-free **and** exactly balanced at rest for `B = 1` (hydrostatic reconstruction, since 2026-10-12); "not well-balanced" describes the earlier plain `ln p` scheme only. `eq_wb` is legacy-only and never set on a release Grid.
 - Storage is **double**; nothing in the release path names `float`/`double` (use `Real`/`Vec`). `CHROMO_STATE_FLOAT32=ON` is diagnostic only. Any float32-era evaporation number is ~30 % high.
-- Do not overclaim double: the first-interior-face artifact and a ~13 % lower-chromosphere flux spread remain. N500 long-run evaporation flux is not established < 10 % grid-converged — a resolution limit, separate from precision.
+- Do not overclaim double: it did not remove the first-interior-face artifact (the hydrostatic reconstruction did) or the ~13 % lower-chromosphere flux spread (physical: adiabatic contraction). N500 long-run evaporation flux is not established < 10 % grid-converged — a resolution limit, separate from precision.
 - `ISO_RIEMANN`, `ISO_RECONSTRUCTION` are reference-only overrides; never production. Rejected (need new evidence to revisit): the `ModTransitionRegion` momentum split, a characteristic lower boundary, selective mixed precision.
 
 ## Running

@@ -522,6 +522,7 @@ int main(int argc, char** argv) {
                   << " roe=" << grid.roe_characteristic_flux
                   << " swmf_godunov=" << grid.swmf_godunov_flux
                   << " pressure_reconstruct=" << grid.pressure_reconstruct
+                  << " hydrostatic_reconstruct=" << grid.hydrostatic_reconstruct
                   << " ds_km=" << (grid.ds_i(0)*1.0e-3f)
                   << "\n# mass flux = the mix::RHO continuity row (total mass "
                      "density; the release state has no carrier rows)\n"

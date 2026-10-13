@@ -120,6 +120,12 @@ int   kOuterPNeumann = 0;
 // EXPERIMENTAL two-temperature leg (`model_column_2t`). Set only by
 // model_column_2t_ic; leaves the release leg untouched.
 bool  kTwoTemperature = false;
+// EXPERIMENTAL hydrostatic reconstruction (ISO_HSE_RECON=1, Grid::
+// hydrostatic_reconstruct). The solver then balances the discrete relation
+// ln p_{i+1} - ln p_i = -(g/2)(ds_i rho_i/p_i + ds_{i+1} rho_{i+1}/p_{i+1}), so the
+// IC and both ghost ladders are built in that same form; otherwise the
+// release forms are untouched.
+bool  kHseRecon = false;
 
 double gamma_density_from_pressure(const Grid& grid, double pressure, double temperature) {
     if (!(pressure > 0.0) || !(temperature > 0.0))
@@ -140,6 +146,14 @@ double gamma_density_from_pressure(const Grid& grid, double pressure, double tem
     return equilibrium_density_from_pressure(pressure, temperature);
 }
 
+// Gravity magnitude the release solver actually applies in cell i [m/s^2]: its
+// source differences phi_g, which carries a float-literal km->m factor, so it
+// differs from grid.g by ~5e-8 relative. The hydrostatic-reconstruction
+// prototype must balance against this value, not grid.g.
+double solver_g(const Grid& grid, arma::uword i) {
+    return static_cast<double>((grid.phi_g_iph(i) - grid.phi_g_imh(i))/grid.ds_i(i));
+}
+
 // One rung of an EOS-consistent hydrostatic ladder taken DOWNWARD by `ds`
 // metres from an anchor (p_anchor, rho_anchor) at fixed temperature T_gh:
 //     p = p_anchor + Δs·½(ρ_anchor + ρ)·g,     ρ = ρ_EOS(p, T_gh),
@@ -148,8 +162,12 @@ double gamma_density_from_pressure(const Grid& grid, double pressure, double tem
 void gamma_hse_rung_down(const Grid& grid, double p_anchor, double rho_anchor,
                          double T_gh, double ds, double& p_out, double& rho_out) {
     double rho_gh = rho_anchor;
-    for (int it = 0; it < 8; ++it) {
-        const double p = p_anchor + ds*0.5*(rho_anchor + rho_gh)*grid.g;
+    double p_gh = p_anchor;
+    for (int it = 0; it < (kHseRecon ? 40 : 8); ++it) {
+        const double p = kHseRecon
+            ? p_anchor*std::exp(0.5*ds*solver_g(grid, 0)*(rho_anchor/p_anchor + rho_gh/p_gh))
+            : p_anchor + ds*0.5*(rho_anchor + rho_gh)*grid.g;
+        p_gh = p;
         const double rho_next = gamma_density_from_pressure(grid, p, T_gh);
         const bool done = std::abs(rho_next - rho_gh) <= 1.0e-14*rho_next;
         p_out = p;
@@ -249,6 +267,15 @@ Vec model_column_ic(Grid& grid) {
     kBjump             = env_f("ISO_TJUMP_B", 1.0f);
     kVcapMach          = env_f("ISO_VCAP", 0.1f);
     kInnerTNeumann     = (env_f("ISO_INNER_T_NEUMANN", 0.0f) != 0.0f);
+    kHseRecon          = (env_f("ISO_HSE_RECON", 0.0f) != 0.0f);
+    if (kHseRecon && kTwoTemperature)
+        throw std::runtime_error(
+            "model_column_ic: ISO_HSE_RECON is a release-solver prototype; the "
+            "two-temperature solver does not implement it");
+    grid.hydrostatic_reconstruct = kHseRecon;
+    if (kHseRecon)
+        std::cerr << "[model_column] ISO_HSE_RECON=1: EXPERIMENTAL hydrostatic "
+                     "reconstruction (prototype, not the release scheme)" << std::endl;
     // Upper-BC over-specification experiment: hydro ghost T free-floats (zero
     // gradient), conduction wall unchanged. Default 0 ⇒ the release single-T BC.
     kHydroTDecouple    = (env_f("ISO_HYDRO_T_DECOUPLE", 0.0f) != 0.0f);
@@ -332,7 +359,7 @@ Vec model_column_ic(Grid& grid) {
     // One hydrostatic integration from the base pressure exp(ln_p_base) with base
     // ionization x_base: fills T_c/ni_c/nn_c and returns ln p of the top cell.
     auto integrate_column = [&](double ln_p_base, double x_base) -> double {
-        double ln_p = ln_p_base, prev_h = h_base;
+        double ln_p = ln_p_base, prev_h = h_base, prev_ds = 0.0;
         double prev_invH = grid.g*grid.m_i/((1.0+x_base)*grid.k_b*T_base);
         for (arma::uword i = 0; i < grid.ns; ++i) {
             const double h_c = 0.5 * (h_F(i) + h_F(i + 1));        // km
@@ -349,7 +376,11 @@ Vec model_column_ic(Grid& grid) {
                     const double rho = gamma_density_from_pressure(grid, std::exp(trial), T);
                     x = saha_ionization_fraction_n_h(rho/eos_constants::m_h, T);
                     const double invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
-                    const double next = previous_ln_p-0.5*(prev_invH+invH)*dh_m;
+                    // Cell 0 is anchored half a cell above the base in both forms.
+                    const double next = (kHseRecon && i > 0)
+                        ? previous_ln_p-0.5/grid.g*(prev_invH*solver_g(grid, i-1)*prev_ds
+                                                    +invH*solver_g(grid, i)*grid.ds_i(i))
+                        : previous_ln_p-0.5*(prev_invH+invH)*dh_m;
                     if (std::abs(next-trial) < 2.0e-13) {
                         trial = next;
                         converged = true;
@@ -370,6 +401,7 @@ Vec model_column_ic(Grid& grid) {
             n_i = x * n_tot;
             n_n = (1.0-x)*n_tot;
             prev_h = h_c;
+            prev_ds = grid.ds_i(i);
             prev_invH = grid.g*grid.m_i/((1.0+x)*grid.k_b*T);
             T_c(i)  = T;
             ni_c(i) = n_i;
@@ -622,11 +654,13 @@ Vec model_column_ic(Grid& grid) {
     // making the lower ghost ladder second order dropped the raw discrete
     // hydrostatic face mass-flux defect of the release mesh by ~560x, so the
     // frozen reference no longer has anything material to remove. Under the
-    // release double-precision state that residual is 1.78e-13 kg m^-2 s^-1 at
-    // N=500 -- ~1e8x above the double round-off floor, i.e. pure discretization,
-    // and second-order convergent (order 2.19 to N=1000). The old "~1.3x of the
-    // float32 round-off floor" reading was a property of float32 storage.
-    // Evidence: docs/studies/numerics/reference_free_release_recap.md.
+    // release double-precision state that residual is 6.0e-14 kg m^-2 s^-1 at
+    // N=500 (1.78e-13 before the MC3 branch fix) -- far above the double
+    // round-off floor, i.e. pure discretization, and second-order convergent
+    // (order 1.95 to N=1000). The old "~1.3x of the float32 round-off floor"
+    // reading was a property of float32 storage.
+    // Evidence: docs/studies/numerics/reference_free_release_recap.md,
+    // docs/studies/numerics/hydrostatic_reconstruction_and_mc3_fix.md.
     //
     // The legacy two-fluid column (model_gentle) is a different solver that
     // never received the predictor source term, so it keeps the frozen
@@ -792,8 +826,11 @@ void model_column_update_bc(Grid& grid, const Vec& xn) {
         auto hse_rung = [&](Real p_below, Real rho_below, Real T_e_gh, Real T_i_gh,
                             Real& p_out, Real& rho_out) {
             Real rho_gh = rho_below;
-            for (int it = 0; it < 2; ++it) {
-                p_out = p_below - ds * 0.5f * (rho_below + rho_gh) * g;
+            p_out = p_below;
+            for (int it = 0; it < (kHseRecon ? 40 : 2); ++it) {
+                p_out = kHseRecon
+                    ? p_below*std::exp(-0.5*ds*solver_g(grid, nl)*(rho_below/p_below + rho_gh/p_out))
+                    : p_below - ds * 0.5f * (rho_below + rho_gh) * g;
                 if (p_out < 1.0e-12f) p_out = 1.0e-12f;
                 rho_gh = ghost_density(p_out, T_e_gh, T_i_gh);
             }

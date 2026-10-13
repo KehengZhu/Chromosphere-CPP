@@ -323,6 +323,9 @@ struct MixtureRhsScratch {
     arma::Col<double> flux_iph;  ///< numerical flux at the upper face i+1/2, ns*3
     arma::Col<double> flux_imh;  ///< numerical flux at the lower face i-1/2, ns*3
     arma::Col<double> source;    ///< geometric pressure-area + gravity source, ns*3
+    /// Hydrostatic half-cell ln p steps o_e = rho g_par ds/(2p) [dimensionless] of the
+    /// ns+4 extended cells (ghosts included); used only by hydrostatic_reconstruct.
+    arma::Col<double> hse_half_step;
 
     Vec predicted_state;  ///< packed conserved state after the Hancock half step
     Vec rhs;              ///< assembled explicit right-hand side returned to the caller
@@ -673,7 +676,10 @@ struct Grid {
     /// than minmod, so it clips the under-resolved TR gradient far less (the source
     /// of the O(Δs) base-drainage truncation in the iso runs). Because it is
     /// asymmetric, the '+' and '−' reconstruction terms take DIFFERENT limited
-    /// slopes — see flux_lim_mc3_plus / flux_lim_mc3_minus. limiter_beta is the
+    /// slopes: with r = Δ₋/Δ₊, (r+2)/3 for the upper face and (2r+1)/3 for the
+    /// lower one (release limit_mc3; corrected 2026-10-11 — the legacy
+    /// flux_lim_mc3_plus / flux_lim_mc3_minus keep the swapped, κ = −1/3,
+    /// form). limiter_beta is the
     /// Koren β (2 ⇒ classic Koren; 1 ⇒ minmod-like). Default off; always on in
     /// model_column (β=2). It only changes how the same differences are limited.
     bool  mc3_limiter = false;
@@ -729,6 +735,19 @@ struct Grid {
     /// and feed the identical equilibrium face builder, flux and source stages, so
     /// this flag changes ONLY which pair of variables is authoritative at a face.
     bool pressure_reconstruct = false;
+
+    /// EXPERIMENTAL hydrostatic reconstruction (prototype, default off; selected by
+    /// ISO_HSE_RECON=1 in model_column, requires pressure_reconstruct). Each cell
+    /// carries its own local hydrostatic slope k_i = rho_i g_par,i / p_i [1/m] and
+    /// half-cell step o_i = k_i ds_i/2 [dimensionless, in ln p]. The ln p slot then
+    /// limits only the DEPARTURE from the discrete hydrostatic relation
+    ///   ln p_{i+1} - ln p_i = o_i + o_{i+1},
+    /// and every face value is cell i's hydrostatic extrapolation ln p_i +/- o_i plus
+    /// that limited departure. The gravity source is replaced by the matching
+    /// 2 p_i sinh(o_i)/ds_i, so a column in that discrete balance is an exact
+    /// fixed point of both MUSCL-Hancock stages (B = 1 only; the flux-tube term is
+    /// unchanged). Reconstruction of ln rho and u is unchanged.
+    bool hydrostatic_reconstruct = false;
 
     /// Equilibrium-reference ("δ-form") well-balancing. A general NON-isothermal
     /// hydrostatic atmosphere (e.g. Model C7, with a temperature minimum) is only

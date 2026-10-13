@@ -247,12 +247,17 @@ void limit_minmod(const Work& ratio, Work& result) {
     }
 }
 
+// MC3/Koren (BATSRUS ModFaceValue 'mc3'). With r = Δ₋/Δ₊ and the limited slope
+// applied to Δ₊, the unlimited kappa = 1/3 face values are
+//   u_{i+1/2} = u_i + (Δ₋ + 2Δ₊)/6  ⇒  '+' branch (r + 2)/3,
+//   u_{i-1/2} = u_i − (2Δ₋ + Δ₊)/6  ⇒  '−' branch (2r + 1)/3.
+// (The two branches were previously swapped, which is kappa = −1/3.)
 void limit_mc3(const Work& ratio, double beta, bool plus, Work& result) {
     result.set_size(ratio.n_elem);
     for (arma::uword i = 0; i < ratio.n_elem; ++i) {
         const double r = ratio(i);
         if (!std::isfinite(r)) { result(i) = 0.0; continue; }
-        const double third_order = plus ? (2.0*r + 1.0)/3.0 : (r + 2.0)/3.0;
+        const double third_order = plus ? (r + 2.0)/3.0 : (2.0*r + 1.0)/3.0;
         result(i) = std::max(0.0, std::min(std::min(beta*r, beta), third_order));
     }
 }
@@ -542,17 +547,49 @@ void build_swmf_godunov_flux(const Grid& grid, const MixtureFaceArrays& left,
 // This is the ONE source the hydrodynamic update uses, and both stages of the
 // MUSCL-Hancock step apply it: the Hancock predictor with weight dt_predictor
 // and the corrector inside the final RHS.
+//
+// With the experimental hydrostatic reconstruction (`hse_half_step` non-null)
+// the gravity term is 2 p_i sinh(o_i)/ds_i instead of rho_i g_par: exactly the
+// pressure difference between cell i's own hydrostatic face extrapolations
+// p_i exp(+/-o_i), so it cancels the flux difference of a balanced column.
+// It equals rho_i g_par to O((ds/H)^2).
 void build_source(const Grid& grid, const Vec& state,
-                  const MixtureField& decoded, Work& source) {
+                  const MixtureField& decoded, Work& source,
+                  const Work* hse_half_step = nullptr) {
     source.zeros(grid.ns*num_of_mixture_eq);
     const auto sz = state_size(grid);
     for (arma::uword i = 0; i < grid.ns; ++i) {
         const double g_par = -static_cast<double>(
             (grid.phi_g_iph(i) - grid.phi_g_imh(i))/grid.ds_i(i));
+        const double gravity = hse_half_step
+            ? 2.0*decoded.cells[i].p*std::sinh((*hse_half_step)(i+2))
+                / static_cast<double>(grid.ds_i(i))
+            : static_cast<double>(state(arma::sub2ind(sz, i, mix::RHO)))*g_par;
         source(arma::sub2ind(sz, i, mix::MOM)) =
             decoded.cells[i].p * static_cast<double>(grid.B_i(i))
                 * static_cast<double>(grid.dinvB_ds_i(i))
-            + static_cast<double>(state(arma::sub2ind(sz, i, mix::RHO)))*g_par;
+            + gravity;
+    }
+}
+
+// Hydrostatic half-cell ln p steps o_e = rho_e g_par ds_e/(2 p_e) of the ns+4
+// extended cells, at U^n. Ghosts take the adjacent boundary cell's g_par and
+// width (the same mirrored width the reconstruction weights use).
+void build_hse_half_steps(const Grid& grid, const MixtureField& decoded,
+                          Work& half_step) {
+    const arma::uword ext_n = grid.ns+4;
+    const auto ext_size = arma::size(ext_n, num_of_mixture_eq);
+    half_step.set_size(ext_n);
+    for (arma::uword e = 0; e < ext_n; ++e) {
+        const bool interior = e >= 2 && e < grid.ns+2;
+        const arma::uword i = interior ? e-2 : (e < 2 ? 0 : grid.ns-1);
+        const double g_par = -static_cast<double>(
+            (grid.phi_g_iph(i) - grid.phi_g_imh(i))/grid.ds_i(i));
+        const double rho_over_p = interior
+            ? decoded.cells[i].rho/decoded.cells[i].p
+            : std::exp(decoded.extended_primitive(arma::sub2ind(ext_size, e, MIX_LOG_RHO))
+                       - decoded.extended_primitive(arma::sub2ind(ext_size, e, MIX_THERMAL)));
+        half_step(e) = 0.5*rho_over_p*g_par*static_cast<double>(grid.ds_i(i));
     }
 }
 
@@ -706,6 +743,42 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
     stencil_view(grid, decoded,  2, w_ip2);
     stencil_view(grid, decoded, -2, w_im2);
 
+    // EXPERIMENTAL hydrostatic reconstruction (Grid::hydrostatic_reconstruct).
+    // Every neighbour's ln p is moved into cell i's hydrostatic frame by removing
+    // the discrete hydrostatic steps h_{j+1/2} = o_j + o_{j+1} between it and cell
+    // i, so the limiter sees only the departure from balance. The face values are
+    // shifted back by cell i's own half step (+o_i up, -o_i down) once built.
+    const bool hse = grid.hydrostatic_reconstruct;
+    const Work* hse_half = nullptr;
+    auto hse_index = [&](arma::uword i) {
+        return arma::sub2ind(state_size(grid), i, MIX_THERMAL);
+    };
+    if (hse) {
+        if (!grid.pressure_reconstruct)
+            throw std::logic_error(
+                "hydrostatic_reconstruct requires the ln p reconstruction");
+        build_hse_half_steps(grid, decoded, scratch.hse_half_step);
+        hse_half = &scratch.hse_half_step;
+        const Work& o = scratch.hse_half_step;
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            const arma::uword c = i+2, k = hse_index(i);
+            const double h_imh = o(c-1) + o(c), h_iph = o(c) + o(c+1);
+            w_ip1(k) -= h_iph;
+            w_ip2(k) -= h_iph + o(c+1) + o(c+2);
+            w_im1(k) += h_imh;
+            w_im2(k) += h_imh + o(c-2) + o(c-1);
+        }
+    }
+    auto hse_shift_faces = [&](Work* up_a, Work* up_b, Work* down_a, Work* down_b) {
+        if (!hse) return;
+        const Work& o = scratch.hse_half_step;
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            const arma::uword k = hse_index(i);
+            for (Work* f : {up_a, up_b})   if (f) (*f)(k) += o(i+2);
+            for (Work* f : {down_a, down_b}) if (f) (*f)(k) -= o(i+2);
+        }
+    };
+
     dw_iph = w_ip1 - w;
     dw_imh = w - w_im1;
     r = dw_imh/dw_iph;
@@ -762,6 +835,7 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
         wl_iph = w + W1%lp_r%(w_ip1 - w);
         wr_imh = w - W1%lm_r%(w_ip1 - w);
     }
+    hse_shift_faces(&wl_iph, nullptr, &wr_imh, nullptr);
 
     MixtureFaceArrays& fr_iph = scratch.faces[0];
     MixtureFaceArrays& fl_iph = scratch.faces[1];
@@ -780,7 +854,7 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
     // evaluated at U^n. Both MUSCL-Hancock stages consume it: the predictor just
     // below and the corrector when the final RHS is assembled.
     Work& source = scratch.source;
-    build_source(grid, state, decoded, source);
+    build_source(grid, state, decoded, source, hse_half);
 
     const auto sz = state_size(grid);
     Vec& predicted = scratch.predicted_state;
@@ -807,6 +881,15 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
     stencil_view(grid, decoded_predicted,  0, wt);
     stencil_view(grid, decoded_predicted,  1, wt_ip1);
     stencil_view(grid, decoded_predicted, -1, wt_im1);
+    if (hse) {
+        // Same hydrostatic frame, with the U^n steps, for the half-step centres.
+        const Work& o = scratch.hse_half_step;
+        for (arma::uword i = 0; i < grid.ns; ++i) {
+            const arma::uword c = i+2, k = hse_index(i);
+            wt_ip1(k) -= o(c) + o(c+1);
+            wt_im1(k) += o(c-1) + o(c);
+        }
+    }
 
     if (grid.uniform_mesh) {
         wr_iph = 0.5*(w_ip1 + wt_ip1) - 0.5*lm_rip1%(w_ip2 - w_ip1);
@@ -819,6 +902,7 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
         wr_imh = 0.5*(w + wt)         - W1%lm_r%(w_ip1 - w);
         wl_imh = 0.5*(w_im1 + wt_im1) + W4%lp_rim1%(w - w_im1);
     }
+    hse_shift_faces(&wr_iph, &wl_iph, &wr_imh, &wl_imh);
 
     // Corrector parentage, matching the four reconstructions just above:
     //   wr_iph[i] from cell i+1, wl_iph[i] and wr_imh[i] from cell i,

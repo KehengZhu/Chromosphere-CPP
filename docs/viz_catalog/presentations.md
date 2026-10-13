@@ -174,3 +174,28 @@ PY
 ```
 
 The pixel boxes assume the current figure sizes (2240×1330, 2600×1365, 2210×1235, 1650×1275); re-check them if a parent figure is redrawn at another size.
+
+---
+
+## 2026-10-11 hydrostatic-limiter deck (advisor follow-up)
+
+### Figures (`docs/presentations/2026-10-11-hydrostatic-limiter/figures/`)
+
+Unchanged copies of the three study figures catalogued in [model_column.md](model_column.md). `hse_recon_evaporation_bars.pdf` is Result 2; `hse_recon_evaporation.pdf` is its backup slide.
+
+```bash
+.venv/bin/python util/release/plot_hse_recon_comparison.py
+cp visualization/model_column/hse_recon_static_residual.pdf \
+   visualization/model_column/hse_recon_evaporation.pdf \
+   visualization/model_column/hse_recon_evaporation_bars.pdf \
+   docs/presentations/2026-10-11-hydrostatic-limiter/figures/
+```
+
+The two schematics (what the limiter compares; the hydrostatic version) are TikZ inside `presentation.tex`.
+
+### `presentation.pdf`
+
+```bash
+cd docs/presentations/2026-10-11-hydrostatic-limiter
+latexmk -pdf -output-directory=build presentation.tex && cp build/presentation.pdf .
+```

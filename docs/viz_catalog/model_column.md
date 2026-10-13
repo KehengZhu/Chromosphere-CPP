@@ -647,3 +647,29 @@ printf '%s\n' 0.003 0.005 0.0103 0.02 0.04 0.08 | xargs -P 6 -I{} env \
     --p-top {} --fps 20 \
     --out visualization/model_column/tp_sweep_movies/tp_sweep_p{}_N500_5000s_overlay_p_abs.mp4
 ```
+
+---
+
+## MC3 branch fix and experimental hydrostatic reconstruction (`visualization/model_column/`)
+
+Study: `docs/studies/numerics/hydrostatic_reconstruction_and_mc3_fix.md`. Inputs are the A/B/C runs under `outputs/model_column/hse_recon/` (A = binary built at `f01189b`, B = MC3 branch fixed, C = B + `ISO_HSE_RECON=1`); the run commands are in the study's Reproduce section.
+
+### `hse_recon_static_residual.pdf`
+
+Column at rest, conduction off, outer ghost matched to the IC (`ISO_T_TOP=0`), 20 s: log-scale bars of the t = 0 max|F^ρ| and the 20 s max|V| for A, B and C at 500 and 1000 cells. C sits at round-off.
+
+### `hse_recon_evaporation.pdf`
+
+Conduction-driven release runs, 1000 s, 500 (solid) and 1000 (dashed) cells: mean V over 2130–2150 km and relative column-mass change against time for A, B and C.
+
+```bash
+.venv/bin/python util/release/plot_hse_recon_comparison.py
+```
+
+### `hse_recon_evaporation_bars.pdf`
+
+The same 500-cell runs at t = 1000 s as bars for A, B and C: mean V over 2130–2150 km [m/s] and the dissipative share |f_diff/f_total| of the base-face mass flux [%] (16.1, 17.4, 0.1).
+
+```bash
+.venv/bin/python util/release/plot_hse_recon_comparison.py
+```

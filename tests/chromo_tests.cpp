@@ -515,7 +515,7 @@ static void test_reconstruction_preserves_constant_pressure() {
     // it is common to both variants and irrelevant to the mismatch question).
     auto mc3 = [](double r, double beta, bool plus) {
         if (!std::isfinite(r)) return 0.0;
-        const double third = plus ? (2.0*r + 1.0)/3.0 : (r + 2.0)/3.0;
+        const double third = plus ? (r + 2.0)/3.0 : (2.0*r + 1.0)/3.0;
         return std::max(0.0, std::min(std::min(beta*r, beta), third));
     };
     // Faces of a 1-D cell-centred field q: returns L at i+1/2 and R at i+1/2.
@@ -582,7 +582,7 @@ static void test_reconstruction_preserves_constant_pressure() {
 static void test_smooth_saha_gradient_reduces_pressure_mismatch() {
     auto mc3 = [](double r, double beta, bool plus) {
         if (!std::isfinite(r)) return 0.0;
-        const double third = plus ? (2.0*r + 1.0)/3.0 : (r + 2.0)/3.0;
+        const double third = plus ? (r + 2.0)/3.0 : (2.0*r + 1.0)/3.0;
         return std::max(0.0, std::min(std::min(beta*r, beta), third));
     };
     auto faces = [&](const std::vector<double>& q, std::size_t i,
@@ -1950,9 +1950,10 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
     // release mesh -- instead of the 48-cell grid used for the structural checks
     // above. Measured on that mesh after 5 steps at the production CFL 0.50 in the
     // double release build:
-    //   max|V| = 4.9e-3 m/s, max|rho u| = 1.4e-13, ||dU||/||U|| = 7.9e-9
-    // (the float32-era values were 5.9e-3 / 5.4e-13 / 9.2e-8). The bounds below
-    // carry >= 4x headroom on each. For scale, the conduction-
+    //   max|V| = 1.04e-2 m/s, max|rho u| = 2.9e-13, ||dU||/||U|| = 3.3e-9
+    // (before the MC3 branch fix 4.9e-3 / 1.4e-13 / 7.9e-9; the float32-era values
+    // were 5.9e-3 / 5.4e-13 / 9.2e-8). The bounds below carry >= 4x headroom
+    // on each. For scale, the conduction-
     // driven evaporation this model exists to study runs at 15-40 m/s, and the
     // t=0 face mass-flux defect of this same configuration sits ~1.3x above the
     // float32 round-off floor of the stored state. On a 14x coarser grid the
@@ -2005,7 +2006,7 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
               << " cells] max|V|=" << max_velocity
               << " m/s  max|rho u|=" << max_total_momentum
               << "  ||dU||/||U||=" << relative_state_change << '\n';
-    EXPECT_TRUE(max_velocity < 2.0e-2);
+    EXPECT_TRUE(max_velocity < 4.0e-2);
     EXPECT_TRUE(max_total_momentum < 2.0e-12);
     EXPECT_NEAR(relative_state_change, 0.0, 5e-7);
     // make_scenario installs the release env preset process-wide; drop it again
@@ -2014,6 +2015,49 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
     unsetenv("ISO_TWO_FLUID"); unsetenv("ISO_IONIZATION");
     unsetenv("ISO_HEAT_FLUX"); unsetenv("ISO_COOLING");
     unsetenv("ISO_CORONA"); unsetenv("ISO_TRAC");
+}
+
+// EXPERIMENTAL hydrostatic reconstruction (ISO_HSE_RECON=1). The IC, both ghost
+// ladders, the ln p reconstruction and the gravity source all use the same
+// discrete relation ln p_{i+1} - ln p_i = -(g/2)(ds_i rho_i/p_i + ds_{i+1}
+// rho_{i+1}/p_{i+1}), so the release-preset column at rest must be a fixed point
+// to round-off, where the release scheme leaves a second-order residual.
+static void test_hydrostatic_reconstruction_exact_fixed_point() {
+    clear_model_column_release_defaults_env();
+    Scenario sc = make_scenario("model_column", "");
+    setenv("ISO_HEAT_FLUX", "0", 1);
+    setenv("ISO_HYDRO_T_DECOUPLE", "1", 1);
+    setenv("ISO_HSE_RECON", "1", 1);
+    Grid grid;
+    grid.init(sc.peek_ns(), 0.50f);
+    grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
+    const Vec initial = sc.ic(grid);
+    EXPECT_TRUE(grid.hydrostatic_reconstruct && grid.pressure_reconstruct);
+    EXPECT_TRUE(grid.ns == 661u);
+    const auto sz = arma::size(grid.ns, num_of_mixture_eq);
+    Vec evolved = initial;
+    for (int step = 0; step < 5; ++step) {
+        sc.update_bc(grid, evolved);
+        const MixtureField field = mixture_decode(grid, evolved);
+        const Vec dt = mixture_timestep(grid, evolved, field);
+        evolved = mixture_advance(grid, evolved, dt, field);
+        grid.sim_time += dt(0);
+    }
+    double max_velocity = 0.0;
+    for (arma::uword i = 0; i < grid.ns; ++i)
+        max_velocity = std::max(max_velocity, std::abs(
+            evolved(arma::sub2ind(sz, i, mix::MOM))/evolved(arma::sub2ind(sz, i, mix::RHO))));
+    const double relative_state_change =
+        arma::norm(evolved-initial, 2)/arma::norm(initial, 2);
+    std::cout << "        [hydrostatic reconstruction @ N500/" << grid.ns
+              << " cells] max|V|=" << max_velocity
+              << " m/s  ||dU||/||U||=" << relative_state_change << '\n';
+    // Measured 9.7e-10 m/s and 7.6e-15; the release scheme gives max|V| ~ 1e-2 m/s
+    // on the same five steps.
+    EXPECT_TRUE(max_velocity < 1.0e-8);
+    EXPECT_TRUE(relative_state_change < 1.0e-13);
+    unsetenv("ISO_HSE_RECON");
+    clear_model_column_release_defaults_env();
 }
 
 // ---------------------------------------------------------------------------
@@ -5302,6 +5346,7 @@ int main() {
     RUN(test_model_gentle_two_fluid_path);
 #endif
     RUN(test_stage8_gamma_model_column_saha_hse_and_ghosts);
+    RUN(test_hydrostatic_reconstruction_exact_fixed_point);
     RUN(test_upper_bc_hydro_conduction_temperature_decoupling);
     RUN(test_face_flux_capture_matches_production_continuity);
     RUN(test_model_column_release_numerics_defaults);

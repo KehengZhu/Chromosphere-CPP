@@ -38,8 +38,11 @@
  *     ghosts below the 1600 km mid-chromospheric truncation.
  * The scheme is reference-free and NOT well-balanced in the constructive sense:
  * a hydrostatic column is not an exact discrete fixed point. Its residual is
- * second-order truncation error (N=500, t=0: max|F^rho| = 1.78e-13 kg m^-2 s^-1,
- * order 2.19 to N=1000). Evidence: docs/studies/numerics/reference_free_release_recap.md.
+ * second-order truncation error (N=500, t=0: max|F^rho| = 6.0e-14 kg m^-2 s^-1,
+ * order 1.95 to N=1000). Evidence: docs/studies/numerics/reference_free_release_recap.md
+ * and docs/studies/numerics/hydrostatic_reconstruction_and_mc3_fix.md. ISO_HSE_RECON=1
+ * selects an experimental hydrostatic reconstruction that makes the column at rest
+ * an exact discrete fixed point.
  *
  * IC: the C7 temperature and ionization FRACTION with the total density re-integrated
  * hydrostatically from the base (clean V ≈ 0 start).

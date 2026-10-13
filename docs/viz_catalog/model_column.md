@@ -366,9 +366,34 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_twa
     --out visualization/model_column/twall_sweep_N500_4000s_overlay.mp4 --fps 20
 ```
 
-### `twall_sweep_N500_4000s_overlay_p_abs.mp4`
+### `twall_sweep_N500_4000s_overlay_p_abs.mp4` (current release, 2026-10-13)
 
-The same movie with the **absolute log-Pa pressure panel** (`ANIM_P_PANEL=abs`), kept alongside the relative-pressure version above. Identical in every other panel and in every frame. Keep it for two reasons: it is the only rendering that shows the actual pressure stratification of the sweep in physical units, and it is the control that makes the relative panel's case — the 13 walls are indistinguishable here, which is the measurement, not an artifact of a badly chosen y limit (see the numbers in the entry above). Use this one when the question is "what is the pressure", the relative one when the question is "how does the wall change the pressure".
+The absolute-pressure overlay movie below, rendered from the sweep rerun with the **current release** (commit `b78ee95`, hydrostatic reconstruction). Every setting matches the legacy sweep so that the comparison isolates the code change: the same 13 walls (8–70 kK at CFL 0.50, 100 kK at CFL 0.25), `ISO_HYDRO_T_DECOUPLE=1` as in the legacy runs, 2 OpenMP threads per run, 20 s frames and the face-flux sidecar. All 13 runs end `termination=end_time` with `godunov.fallbacks=0`. They ran on the mac-mini, whose build reproduces the laptop's release run byte-for-byte, and the raw runs (about 1.2 GB) are in `outputs/model_column/twall_sweep_hse_recon/` there. Compare it with `2026-10-12_7a0e1af/twall_sweep_N500_4000s_overlay_p_abs_legacy.mp4`. The movies look the same. Measured at t = 4000 s, legacy → current:
+
+| | 8 kK | 15 kK | 22 kK | 45 kK | 70 kK | 100 kK |
+|---|---|---|---|---|---|---|
+| top V [m/s] | −0.398 → −0.398 | 2.084 → 2.081 | 9.501 → 9.495 | 91.14 → 91.40 | 306.1 → 307.8 | 792 → 790 |
+| top `f_total` change | +0.01 % | 0.00 % | −0.01 % | +0.31 % | +0.58 % | −0.29 % |
+| base-face `\|f_diff/f_total\|` | 16.1 → 0.14 % | 16.0 → 0.11 % | 16.1 → 0.11 % | 16.2 → 0.09 % | 16.2 → 0.09 % | 16.2 → 0.04 % |
+| cell-0 `ρV/f_total[0]` | 1.268 → 1.000 | 1.271 → 1.000 | 1.275 → 1.000 | 1.280 → 1.000 | 1.282 → 1.000 | 1.292 → 1.001 |
+
+At every wall temperature the evaporation is unchanged to ≤ 0.6 % in top flux. The largest relative velocity change is +1.3 % at 10 kK, where the top velocity is only −0.08 m/s. The first-interior-face artifact is gone at every wall temperature.
+
+```bash
+# runs (mac-mini)
+ISO_HYDRO_T_DECOUPLE=1 SWEEP_FACE_FLUX=1 \
+SWEEP_CASES="8000:0.50 10000:0.50 11000:0.50 12000:0.50 13000:0.50 14000:0.50 15000:0.50 18000:0.50 22000:0.50 30000:0.50 45000:0.50 70000:0.50 100000:0.25" \
+  util/run/run_twall_sweep.sh outputs/model_column/twall_sweep_hse_recon 4000 20
+# movie
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=abs .venv/bin/python util/release/animate_twall_sweep.py \
+    --dir outputs/model_column/twall_sweep_hse_recon --cfl 0.50 \
+    --run 100000=outputs/model_column/twall_sweep_hse_recon/twall_100kK_cfl0.25.txt \
+    --out visualization/model_column/twall_sweep_N500_4000s_overlay_p_abs.mp4 --fps 20
+```
+
+### `twall_sweep_N500_4000s_overlay_p_abs_legacy.mp4` (in `2026-10-12_7a0e1af/`)
+
+Formerly `twall_sweep_N500_4000s_overlay_p_abs.mp4`. It was renamed when it moved, and it is the legacy sweep of `outputs/model_column/twall_sweep/` (plain `ln p`, before the MC3 fix). The command below wrote it under its old name. The same movie with the **absolute log-Pa pressure panel** (`ANIM_P_PANEL=abs`), kept alongside the relative-pressure version above. Identical in every other panel and in every frame. Keep it for two reasons: it is the only rendering that shows the actual pressure stratification of the sweep in physical units, and it is the control that makes the relative panel's case — the 13 walls are indistinguishable here, which is the measurement, not an artifact of a badly chosen y limit (see the numbers in the entry above). Use this one when the question is "what is the pressure", the relative one when the question is "how does the wall change the pressure".
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl ANIM_P_PANEL=abs .venv/bin/python util/release/animate_twall_sweep.py \

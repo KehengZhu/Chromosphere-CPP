@@ -12,20 +12,21 @@ Figures and movies of the release solver: the single-fluid Saha/`Gamma1` column 
 EOS-aware initial (`t=0`) temperature versus height for the **release**
 coarse-equivalent N=500 column. The static x4 outer refinement above 500 km gives
 661 cells over 1600--2153 km: coarse 1104.768 m grading to fine 276.042 m, with the
-fine region starting at 2100 km. Initial temperature spans 6631.35--22674.60 K.
+fine region starting at 2100 km. Initial temperature spans 6631.35--22674.80 K.
 
-Provenance is the release smoke run `release_roe_lnp_N500_100s`, which was launched
-with no environment overrides, so the mesh and initial state are the scenario's own
-release defaults AT THE TIME (mixture Roe, `(ln rho,V,ln p)`, MC3 beta=2; the release flux is now `swmf-godunov` -- confirmed by the
-console log's `flux=roe-local reconstruction=lnrho-v-lnp limiter=mc3 beta=2`). The
-script independently rebuilds the faces from `scenarios/mesh.cpp` and cross-checks
-them against the run header (max face error 4.995 m, within the float32
-six-significant-digit header rounding tolerance).
+Provenance is the current release smoke run `release_godunov_lnp_N500_100s`, written by
+`scripts/release_validation.sh` with no environment overrides (console log:
+`flux=swmf-godunov reconstruction=lnrho-v-lnp hydrostatic=1 limiter=mc3 beta=2`). The
+figure was regenerated from it on 2026-10-13. The earlier version, drawn from the Roe-era run
+`release_roe_lnp_N500_100s`, is in `2026-10-12_7a0e1af/`. The script independently
+rebuilds the faces from `scenarios/mesh.cpp` and cross-checks them against the run
+header. It accumulates them in double, as the release does, and the maximum face error
+is 5.000 m: the six-significant-digit header rounding.
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
   util/release/plot_model_column_mesh_temperature.py \
-  --run outputs/model_column/release_roe_lnp_N500_100s.txt \
+  --run outputs/model_column/release_godunov_lnp_N500_100s.txt \
   --ns-coarse 500 \
   --output visualization/model_column/model_column_N500_mesh_temperature_initial
 ```

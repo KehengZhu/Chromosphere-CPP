@@ -155,11 +155,10 @@ def main() -> None:
     # The state header is documented as height but stores cumulative UPPER faces,
     # printed at six significant digits. Temperature remains cell-centred, so use
     # reconstructed centres for plotting and faces only for this provenance check.
-    # Mirror chromo_main's float32, kilometre-by-kilometre accumulation before
+    # Mirror chromo_main's kilometre-by-kilometre accumulation in its storage
+    # type (Real = double since the precision cutover; float32 before it) before
     # comparing with its six-significant-digit text header.
-    face_height_km = np.float32(args.base_height_km) + np.cumsum(
-        ds_m.astype(np.float32) * np.float32(1.0e-3), dtype=np.float32
-    )
+    face_height_km = args.base_height_km + np.cumsum(ds_m * 1.0e-3)
     face_error_m = np.max(np.abs(face_height_km - printed_face_km)) * 1000.0
     if face_error_m > 5.1:
         raise ValueError(f"reconstructed mesh disagrees with run header by {face_error_m:.2f} m")

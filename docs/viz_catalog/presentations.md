@@ -199,3 +199,36 @@ The two schematics (what the limiter compares; the hydrostatic version) are TikZ
 cd docs/presentations/2026-10-11-hydrostatic-limiter
 latexmk -pdf -output-directory=build presentation.tex && cp build/presentation.pdf .
 ```
+
+---
+
+## 2026-10-27 outer-BC and TR-pulse deck (advisor follow-up)
+
+### Figures (`docs/presentations/2026-10-27-outer-bc-and-tr-pulses/figures/`)
+
+Unchanged copies of two figures catalogued in [model_column.md](model_column.md) (outer pressure closure rerun and hot-wall TR pulses).
+
+```bash
+.venv/bin/python util/release/plot_outer_bc_and_tr_pulses.py      # on the mac-mini, where the runs live
+cp visualization/model_column/outer_bc_rerun_timeseries.pdf \
+   visualization/model_column/tr_pulses_resolution.pdf \
+   docs/presentations/2026-10-27-outer-bc-and-tr-pulses/figures/
+```
+
+### Movies (`docs/presentations/2026-10-27-outer-bc-and-tr-pulses/movies/`)
+
+Unchanged copies of four movies catalogued in [model_column.md](model_column.md) (same section).
+
+```bash
+cp visualization/model_column/outer_bc_rerun_22kK.mp4 \
+   visualization/model_column/outer_bc_rerun_22kK_pressure.mp4 \
+   visualization/model_column/outer_bc_rerun_100kK.mp4 \
+   visualization/model_column/tr_pulses_N500_vs_N1000_100kK.mp4 \
+   docs/presentations/2026-10-27-outer-bc-and-tr-pulses/movies/
+```
+
+### `presentation.pdf`
+
+```bash
+cd docs/presentations/2026-10-27-outer-bc-and-tr-pulses && latexmk presentation.tex
+```

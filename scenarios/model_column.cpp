@@ -523,6 +523,13 @@ Vec model_column_ic(Grid& grid) {
     // constructively well-balanced (see the eq_wb note at the end of this IC).
     grid.out_base_km              = h_base;   // label output heights from the true base
     grid.inner_conduction_neumann = kInnerTNeumann;
+    // DIAGNOSTIC-ONLY: Kirchhoff face conductivity for the Spitzer part.
+    grid.conduction_kirchhoff_face = (env_f("ISO_COND_KIRCHHOFF", 0.0f) != 0.0f);
+    grid.conduction_arithmetic_face = (env_f("ISO_COND_ARITH", 0.0f) != 0.0f);
+    if (grid.conduction_kirchhoff_face && grid.conduction_arithmetic_face)
+        throw std::runtime_error(
+            "model_column_ic: ISO_COND_KIRCHHOFF and ISO_COND_ARITH are alternative "
+            "face-conductivity rules; set at most one");
     grid.mc3_limiter              = true;
     grid.limiter_beta             = 2.0f;
     // DIAGNOSTIC-ONLY reconstruction override for the scheme-comparison leg of the

@@ -699,3 +699,99 @@ The same 500-cell runs at t = 1000 s as bars for A, B and C: mean V over 2130–
 ```bash
 .venv/bin/python util/release/plot_hse_recon_comparison.py
 ```
+
+## Outer pressure closure rerun and hot-wall TR pulses (`docs/plans/outer_pressure_bc_floating_discussion.md`)
+
+All four figures and `outputs/model_column/hot_wall_resolution/tr_pulses_metrics.json` come from one invocation. The runs live on the mac-mini; run the script there and copy the PDFs back.
+
+Prerequisite runs (mac-mini, `build_omp` = b78ee95; face-conductivity runs from a separate `build_kirch` with the uncommitted `ISO_COND_KIRCHHOFF` / `ISO_COND_ARITH` patch):
+
+```bash
+B=outputs/model_column/outer_bc_swap_hse_recon
+ISO_HYDRO_T_DECOUPLE=1 ISO_OUTER_T_HYDRO_WALL=1 ISO_OUTER_P_NEUMANN=2 SWEEP_THREADS=3 SWEEP_FACE_FLUX=1 \
+    SWEEP_CASES="22000:0.50 100000:0.25" util/run/run_twall_sweep.sh $B/pneumann2
+ISO_HYDRO_T_DECOUPLE=1 ISO_OUTER_T_HYDRO_WALL=1 SWEEP_THREADS=3 SWEEP_FACE_FLUX=1 \
+    SWEEP_CASES="22000:0.50 100000:0.25" util/run/run_twall_sweep.sh $B/tpinned
+# the two 100 kK runs above were stopped at t = 1500 s to save time
+CHROMO_BINARY=$PWD/build_kirch/chromo_main ISO_COND_KIRCHHOFF=1 ISO_HYDRO_T_DECOUPLE=1 SWEEP_THREADS=6 \
+    SWEEP_FACE_FLUX=1 SWEEP_CASES="100000:0.25" util/run/run_twall_sweep.sh outputs/model_column/cond_kirchhoff 700
+CHROMO_BINARY=$PWD/build_kirch/chromo_main ISO_COND_ARITH=1 ISO_HYDRO_T_DECOUPLE=1 SWEEP_THREADS=12 \
+    SWEEP_FACE_FLUX=1 SWEEP_CASES="100000:0.25" util/run/run_twall_sweep.sh outputs/model_column/cond_arith 700
+ISO_NS=1000 ISO_HYDRO_T_DECOUPLE=1 SWEEP_THREADS=12 SWEEP_FACE_FLUX=1 SWEEP_CASES="100000:0.25" \
+    util/run/run_twall_sweep.sh outputs/model_column/hot_wall_resolution/n1000 500
+```
+
+The reference runs are the T_wall sweep rerun in `outputs/model_column/twall_sweep_hse_recon/` (see the T_wall sweep section above).
+
+```bash
+.venv/bin/python util/release/plot_outer_bc_and_tr_pulses.py
+```
+
+### `outer_bc_rerun_timeseries.pdf`
+
+Top-cell velocity (log), top-cell pressure over its initial value, and column mass against time, at T_wall = 22 kK (0–4000 s) and 100 kK (0–1500 s), for the fixed outer pressure (ghost T pinned to the wall, equivalent to the release default) against the floating (hydrostatically extrapolated) pressure.
+
+### `tr_pulses_locking.pdf`
+
+100 kK, N500, 2000–2600 s: velocity minus its 60 s running median at three heights in the transition region, over the cell that holds the 7 kK isotherm; vertical lines mark the isotherm entering a new cell.
+
+### `tr_pulses_resolution.pdf`
+
+100 kK, 300–500 s, N500 (left) against N1000 (right): T(h) around the 7 kK isotherm at 500 s with cell centres, velocity pulses 3 km above it, and the top-cell velocity.
+
+### `tr_pulses_face_conductivity.pdf`
+
+The same layout for N500, 300–700 s, with three face-conductivity rules: the default harmonic mean, `ISO_COND_KIRCHHOFF=1` (Kirchhoff secant on the Spitzer part, harmonic neutral part; this *lowers* the face conductivity at the TR base) and `ISO_COND_ARITH=1`.
+
+### `outer_bc_rerun_22kK.mp4`, `outer_bc_rerun_100kK.mp4`
+
+The six-panel closure overlay (T, V, q, rho, p, face mass flux against height) for the two outer closures above, 22 kK 0–4000 s (200 frames, 20 fps) and 100 kK 0–1480 s (75 frames, 8 fps). At 100 kK the floating-pressure run's transition region sinks from 2140 to ~1960 km.
+
+```bash
+ANIM_MAX_FRAMES=200 .venv/bin/python util/release/animate_outer_bc_compare.py --preset rerun22 \
+    --out visualization/model_column/outer_bc_rerun_22kK.mp4
+ANIM_MAX_FRAMES=150 .venv/bin/python util/release/animate_outer_bc_compare.py --preset rerun100 --fps 8 \
+    --out visualization/model_column/outer_bc_rerun_100kK.mp4
+```
+
+### `outer_bc_rerun_22kK_pressure.mp4`
+
+Single panel: p(h) above 2100 km for fixed vs floating outer pressure at 22 kK, 0–4000 s (200 frames, 20 fps).
+
+```bash
+.venv/bin/python util/release/animate_pressure_zoom.py \
+    --run "fixed p (today)=outputs/model_column/outer_bc_swap_hse_recon/tpinned/twall_22kK_cfl0.50.txt" \
+    --run "floating p (your formulas)=outputs/model_column/outer_bc_swap_hse_recon/pneumann2/twall_22kK_cfl0.50.txt" \
+    --title "22 kK wall: pressure above 2100 km" \
+    --out visualization/model_column/outer_bc_rerun_22kK_pressure.mp4
+```
+
+### `tr_pulses_N500_vs_N1000_100kK.mp4`, `tr_pulses_face_conductivity_100kK.mp4`
+
+Side by side, top ~25 km of the column at 100 kK: T(h) with cell centres, V(h), the pulse (V minus its 60 s running median) and its history 3 km above the 7 kK isotherm. N500 vs N1000 over 300–500 s (89 frames), and the three face-conductivity rules over 300–700 s (177 frames), 8 fps.
+
+```bash
+.venv/bin/python util/release/animate_tr_pulses.py \
+    --run "N500 (cells 276 m)=outputs/model_column/twall_sweep_hse_recon/twall_100kK_cfl0.25.txt" \
+    --run "N1000 (cells 138 m)=outputs/model_column/hot_wall_resolution/n1000/twall_100kK_cfl0.25.txt" \
+    --title "Transition-region pulses at a 100 kK wall: N500 vs N1000" \
+    --out visualization/model_column/tr_pulses_N500_vs_N1000_100kK.mp4
+.venv/bin/python util/release/animate_tr_pulses.py \
+    --run "harmonic mean (default)=outputs/model_column/twall_sweep_hse_recon/twall_100kK_cfl0.25.txt" \
+    --run "Kirchhoff, Spitzer part only=outputs/model_column/cond_kirchhoff/twall_100kK_cfl0.25.txt" \
+    --run "arithmetic mean=outputs/model_column/cond_arith/twall_100kK_cfl0.25.txt" \
+    --t1 700 --title "Transition-region pulses at a 100 kK wall: face-conductivity rule" \
+    --out visualization/model_column/tr_pulses_face_conductivity_100kK.mp4
+```
+
+## Analytic TR conditioning (`docs/plans/tr_analytic_upper_bc_discussion.md`)
+
+### `tr_pressure_conditioning.pdf`
+
+Static analytic transition region rebuilt from SWMF `ModTransitionRegion.f90` (`check_tr_table` scheme, CHIANTI 8.0 loss table, `kappa_0_e(20)`, no flow), with the base temperature and the base heat flux left free. Fixed TR length 1.5 Mm; reference point is the release top (p = 0.0103 Pa total, 22 kK, 0.527 W m^-2 into the column from the release `.outercond` diagnostic), giving a 477 kK corona and 163 W m^-2 coming down. Left: the TR energy budget (163 W m^-2 in, 162 W m^-2 radiated, 0.5 W m^-2 left for the chromosphere). Middle and right: TR base pressure against the heat into the chromosphere (10x change moves p by -0.2 %) and against the base temperature (10 -> 50 kK moves p by +1.2 %). The sensitivities, including the backwards reading, are printed to stdout.
+
+```bash
+MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
+    util/release/plot_tr_pressure_conditioning.py \
+    --out visualization/model_column/tr_pressure_conditioning.pdf
+```

@@ -68,6 +68,52 @@ double mixture_conductivity(double n_e, double n_hi, double temperature) {
          + mixture_kappa_n(n_e, n_hi, temperature);
 }
 
+// One cell's (or one boundary datum's) conduction inputs: total and electron
+// conductivity [W m^-1 K^-1] and temperature [K].
+struct ConductionPoint { double k, k_e, T; };
+
+ConductionPoint conduction_point(double n_e, double n_hi, double temperature) {
+    return {mixture_conductivity(n_e, n_hi, temperature),
+            mixture_kappa_e(n_e, n_hi, temperature), temperature};
+}
+
+// The default face rule: arithmetic on a uniform mesh, distance-weighted
+// harmonic otherwise.
+double face_mean(const Grid& grid, double ka, double kb, double da, double db) {
+    if (grid.uniform_mesh) return 0.5*(ka+kb);
+    ka = std::max(ka, 1.0e-30);
+    kb = std::max(kb, 1.0e-30);
+    return (da+db)/(da/ka+db/kb);
+}
+
+// Face conductivity between two points a and b (cell sizes da, db). With
+// Grid::conduction_kirchhoff_face the electron part is the Kirchhoff secant
+// (Phi_b − Phi_a)/(T_b − T_a), Phi = int kappa_e dT = (2/7) kappa_e T for
+// kappa_e ∝ T^{5/2}, which stays exact across an unresolved TR foot where the
+// harmonic mean is pinned to the cold side. Grid::conduction_arithmetic_face
+// instead takes the plain arithmetic mean of the total conductivity, which
+// on a cold-neutral | hot-ionized face lies near the Kirchhoff value of the
+// TOTAL kappa (neutral conduction falls to zero with ionization).
+// `direct_b` marks b as a physical-
+// face datum whose own conductivity the default rule uses unaveraged.
+double face_conductivity(const Grid& grid, const ConductionPoint& a,
+                         const ConductionPoint& b, double da, double db,
+                         bool direct_b = false) {
+    if (grid.conduction_arithmetic_face)
+        return direct_b ? b.k : 0.5*(a.k + b.k);
+    if (!grid.conduction_kirchhoff_face)
+        return direct_b ? b.k : face_mean(grid, a.k, b.k, da, db);
+    const double lo = std::min(a.k_e, b.k_e);
+    const double hi = std::max(a.k_e, b.k_e);
+    const double dT = b.T - a.T;
+    double k_e = 0.5*(a.k_e + b.k_e);
+    if (std::abs(dT) > 1.0e-9*std::max(a.T, b.T))
+        k_e = std::min(hi, std::max(lo, (2.0/7.0)*(b.k_e*b.T - a.k_e*a.T)/dT));
+    const double kn_a = std::max(a.k - a.k_e, 0.0);
+    const double kn_b = std::max(b.k - b.k_e, 0.0);
+    return k_e + (direct_b ? kn_b : face_mean(grid, kn_a, kn_b, da, db));
+}
+
 void thomas_solve_double_inplace(
     const std::vector<double>& a, std::vector<double>& b,
     const std::vector<double>& c, std::vector<double>& d,
@@ -203,22 +249,24 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
     CaloricMixtureThermo inner{};
     CaloricMixtureThermo outer{};
     OuterConductionWall wall{};
-    double k_inner = 0.0;
-    double k_outer = 0.0;
     double diag_kr_top = 0.0;
     const int conduction_threads = std::min(
         kMaximumConductionThreads, parallel_max_threads());
 
-    auto face_k = [&](double kh, double kt, double dh, double dtw) {
-        if (grid.uniform_mesh) return 0.5*(kh+kt);
-        kh = std::max(kh, 1.0e-30);
-        kt = std::max(kt, 1.0e-30);
-        return (dh+dtw)/(dh/kh+dtw/kt);
+    ConductionPoint inner_point{};
+    ConductionPoint outer_point{};
+    // The electron part is only needed by the Kirchhoff face rule.
+    auto cell_point = [&](arma::uword j) {
+        return ConductionPoint{
+            s.conductivity[j],
+            grid.conduction_kirchhoff_face
+                ? mixture_kappa_e(s.n_e[j], s.n_hi[j], s.temperature[j]) : 0.0,
+            s.temperature[j]};
     };
 
     // One Grid owns one mutable conduction scratch set and is intentionally not
     // concurrently reentrant. All physical-cell writes below are index-disjoint.
-#pragma omp parallel if(conduction_threads > 1) num_threads(conduction_threads) shared(stop,converged,caloric_seeded,previous_step_was_small,converged_after_updates,inner,outer,wall,k_inner,k_outer,diag_kr_top,team_size,failure,residual_max_slots,step_max_slots)
+#pragma omp parallel if(conduction_threads > 1) num_threads(conduction_threads) shared(stop,converged,caloric_seeded,previous_step_was_small,converged_after_updates,inner,outer,wall,inner_point,outer_point,diag_kr_top,team_size,failure,residual_max_slots,step_max_slots)
     {
         const int tid = parallel_thread_index();
 
@@ -260,8 +308,8 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
                     outer = decode_ghost(grid, grid.mix_outer_boundary0,
                                          grid.phi_g_iph(ns-1));
                     wall = outer_conduction_wall(grid, outer);
-                    k_inner = mixture_conductivity(inner.n_e, inner.n_HI, inner.T);
-                    k_outer = mixture_conductivity(wall.n_e, wall.n_HI, wall.T);
+                    inner_point = conduction_point(inner.n_e, inner.n_HI, inner.T);
+                    outer_point = conduction_point(wall.n_e, wall.n_HI, wall.T);
                 } catch (...) {
                     failure.capture(ns, std::current_exception());
                     stop = true;
@@ -301,21 +349,23 @@ Vec mixture_apply_conduction(const Grid& grid, const Vec& state, double dt) {
                 for (long long raw_i = 0; raw_i < static_cast<long long>(ns); ++raw_i) {
                     const arma::uword i = static_cast<arma::uword>(raw_i);
                     try {
+                        const ConductionPoint here = cell_point(i);
                         const double kl = i == 0
-                            ? face_k(s.conductivity[i],k_inner,grid.ds_i(i),grid.ds_i(i))
-                            : face_k(s.conductivity[i],s.conductivity[i-1],
-                                     grid.ds_i(i),grid.ds_i(i-1));
+                            ? face_conductivity(grid, here, inner_point,
+                                                grid.ds_i(i), grid.ds_i(i))
+                            : face_conductivity(grid, here, cell_point(i-1),
+                                                grid.ds_i(i), grid.ds_i(i-1));
                         // The imposed outer temperature is a PHYSICAL-FACE datum:
                         // the wall conductivity is used directly and the flux
                         // distance is the half top cell, not a ghost-centre span.
                         const bool physical_outer_face =
                             i+1 == ns && grid.outer_conduction_temperature_override;
                         const double kr = i+1 == ns
-                            ? (physical_outer_face
-                                ? k_outer
-                                : face_k(s.conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i)))
-                            : face_k(s.conductivity[i],s.conductivity[i+1],
-                                     grid.ds_i(i),grid.ds_i(i+1));
+                            ? face_conductivity(grid, here, outer_point,
+                                                grid.ds_i(i), grid.ds_i(i),
+                                                physical_outer_face)
+                            : face_conductivity(grid, here, cell_point(i+1),
+                                                grid.ds_i(i), grid.ds_i(i+1));
                         const double ds_right = physical_outer_face
                             ? 0.5*static_cast<double>(grid.ds_i(i))
                             : static_cast<double>(grid.ds_iph_i(i));
@@ -476,7 +526,8 @@ double mixture_conduction_residual_max(const Grid& grid, const Vec& before,
         throw std::logic_error("mixture conduction residual requires a Gamma1 table");
     const arma::uword ns = grid.ns;
     const auto sz = state_size(grid);
-    std::vector<double> conductivity(ns), e_old(ns), e_now(ns), temperature(ns);
+    std::vector<ConductionPoint> point(ns);
+    std::vector<double> e_old(ns), e_now(ns), temperature(ns);
     for (arma::uword i = 0; i < ns; ++i) {
         const double phi = mixture_cell_phi(grid, i);
         auto decode = [&](const Vec& st) {
@@ -491,33 +542,28 @@ double mixture_conduction_residual_max(const Grid& grid, const Vec& before,
         e_old[i] = old_th.internal_energy;
         e_now[i] = new_th.internal_energy;
         temperature[i] = new_th.T;
-        conductivity[i] = mixture_conductivity(new_th.n_e, new_th.n_HI,
-                                               new_th.T);
+        point[i] = conduction_point(new_th.n_e, new_th.n_HI, new_th.T);
     }
     const CaloricMixtureThermo inner = decode_ghost(
         grid, grid.mix_inner_boundary0, grid.phi_g_imh(0));
     const CaloricMixtureThermo outer = decode_ghost(
         grid, grid.mix_outer_boundary0, grid.phi_g_iph(ns-1));
-    const double k_inner = mixture_conductivity(inner.n_e, inner.n_HI, inner.T);
+    const ConductionPoint inner_point =
+        conduction_point(inner.n_e, inner.n_HI, inner.T);
     const OuterConductionWall wall = outer_conduction_wall(grid, outer);
-    const double k_outer = mixture_conductivity(wall.n_e, wall.n_HI, wall.T);
-    auto face_k = [&](double kh, double kt, double dh, double dtw) {
-        if (grid.uniform_mesh) return 0.5*(kh+kt);
-        kh=std::max(kh,1.0e-30); kt=std::max(kt,1.0e-30);
-        return (dh+dtw)/(dh/kh+dtw/kt);
-    };
+    const ConductionPoint outer_point =
+        conduction_point(wall.n_e, wall.n_HI, wall.T);
     double maximum = 0.0;
     for (arma::uword i = 0; i < ns; ++i) {
         const double kl = i == 0
-            ? face_k(conductivity[i],k_inner,grid.ds_i(i),grid.ds_i(i))
-            : face_k(conductivity[i],conductivity[i-1],grid.ds_i(i),grid.ds_i(i-1));
+            ? face_conductivity(grid, point[i], inner_point, grid.ds_i(i), grid.ds_i(i))
+            : face_conductivity(grid, point[i], point[i-1], grid.ds_i(i), grid.ds_i(i-1));
         const bool physical_outer_face =
             i+1 == ns && grid.outer_conduction_temperature_override;
         const double kr = i+1 == ns
-            ? (physical_outer_face
-                ? k_outer
-                : face_k(conductivity[i],k_outer,grid.ds_i(i),grid.ds_i(i)))
-            : face_k(conductivity[i],conductivity[i+1],grid.ds_i(i),grid.ds_i(i+1));
+            ? face_conductivity(grid, point[i], outer_point, grid.ds_i(i), grid.ds_i(i),
+                                physical_outer_face)
+            : face_conductivity(grid, point[i], point[i+1], grid.ds_i(i), grid.ds_i(i+1));
         double gl = grid.B_i(i)/grid.ds_i(i)*kl/grid.B_imh(i)/grid.ds_imh_i(i);
         const double ds_right = physical_outer_face
             ? 0.5*static_cast<double>(grid.ds_i(i))

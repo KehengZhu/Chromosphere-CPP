@@ -166,7 +166,9 @@ def load_face_flux(path):
             if line.startswith("#") or not line.strip():
                 continue
             rows.append(line.split())
-    if cur_t is not None and rows:
+    # A run stopped mid-write leaves a partial last capture: keep it only if complete.
+    if cur_t is not None and rows and len({len(r) for r in rows}) == 1 \
+            and (face_km is None or len(rows) == len(face_km)):
         a = np.asarray(rows, dtype=float)
         if face_km is None:
             face_km = a[:, 1]

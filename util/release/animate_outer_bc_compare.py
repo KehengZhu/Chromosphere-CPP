@@ -126,6 +126,38 @@ PRESETS = {
         # band puts eight labelled decades on one short axis.
         f_linthresh_frac=1.0e-2,
     ),
+    # 2026-10-27 rerun under the hydrostatic-reconstruction release, one movie per
+    # wall temperature: fixed back-pressure with the hydro ghost T pinned to the wall
+    # (equivalent to the release default) against the floating (hydrostatically
+    # extrapolated) pressure. The 100 kK pair was stopped at 1500 s.
+    "rerun22": dict(
+        title=("Outer boundary at a 22 kK wall: fixed pressure vs floating pressure "
+               "(N500, 661 cells)"),
+        runs=[
+            ("fixed $p$ (today)",
+             "outputs/model_column/outer_bc_swap_hse_recon/tpinned/twall_22kK_cfl0.50.txt"),
+            ("floating $p$ (your formulas)",
+             "outputs/model_column/outer_bc_swap_hse_recon/pneumann2/twall_22kK_cfl0.50.txt"),
+        ],
+        colors=["#2f3640", "#c0392b"],
+        widths=[2.6, 1.8],
+        styles=["-", "-"],
+        f_linthresh_frac=1.0e-2,
+    ),
+    "rerun100": dict(
+        title=("Outer boundary at a 100 kK wall: fixed pressure vs floating pressure "
+               "(N500, 661 cells)"),
+        runs=[
+            ("fixed $p$ (today)",
+             "outputs/model_column/outer_bc_swap_hse_recon/tpinned/twall_100kK_cfl0.25.txt"),
+            ("floating $p$ (your formulas)",
+             "outputs/model_column/outer_bc_swap_hse_recon/pneumann2/twall_100kK_cfl0.25.txt"),
+        ],
+        colors=["#2f3640", "#c0392b"],
+        widths=[2.6, 1.8],
+        styles=["-", "-"],
+        f_linthresh_frac=1.0e-2,
+    ),
 }
 
 
@@ -314,7 +346,7 @@ def main():
     # then part of the result, and four "[end_time, t_end=4000 s]" suffixes are just
     # legend width.
     labels = [r["label"] if r["term"] == "end_time" else
-              f"{r['label']}  [{r['term']}, $t_{{\\rm end}}$={r['times'][-1]:.0f} s]"
+              f"{r['label']}  [{r['term'] or 'stopped'}, $t_{{\\rm end}}$={r['times'][-1]:.0f} s]"
               for r in runs]
     style = {k: preset[k] for k in ("colors", "widths", "styles")}
 

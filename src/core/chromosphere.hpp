@@ -848,6 +848,26 @@ struct Grid {
     /// photosphere heats freely. Set by model_column from ISO_INNER_T_NEUMANN.
     bool  inner_conduction_neumann = false;
 
+    /// Release conduction face conductivity. Default false ⇒ the existing rule:
+    /// arithmetic mean of the two cell conductivities on a uniform mesh, distance-
+    /// weighted harmonic mean otherwise. True ⇒ the Spitzer electron part uses the
+    /// Kirchhoff secant (2/7)(kappa_e,b T_b − kappa_e,a T_a)/(T_b − T_a) [W m^-1 K^-1],
+    /// clipped to [min, max] of the two cell values. For kappa_e ∝ T^{5/2} that
+    /// is the exact face conductivity of a steady profile between the two centres
+    /// however steep it is, whereas the harmonic mean is pinned to the cold side of
+    /// an unresolved front. The neutral part keeps the default rule. Diagnostic
+    /// only; set by model_column from ISO_COND_KIRCHHOFF.
+    bool  conduction_kirchhoff_face = false;
+
+    /// Release conduction face conductivity, second diagnostic variant. True ⇒
+    /// the plain arithmetic mean of the two total cell conductivities
+    /// [W m^-1 K^-1] at every face, on any mesh. At the base of the transition
+    /// region the cold side is dominated by neutral conduction and the hot side by
+    /// Spitzer conduction, and there the arithmetic mean lies near the Kirchhoff
+    /// value of the total conductivity. Diagnostic only; set by model_column from
+    /// ISO_COND_ARITH. Cannot be combined with conduction_kirchhoff_face.
+    bool  conduction_arithmetic_face = false;
+
     /// Time-ramp on the imposed coronal conductive flux q(T) — the gentle
     /// conduction-driven evaporation driver (docs/studies/evaporation/gentle_evaporation_plan.md v2).
     /// The scenario stores the steady quiet value in outer_heat_flux_base; the

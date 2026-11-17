@@ -1002,7 +1002,7 @@ static void test_pressure_face_hint_does_not_change_face_state() {
 static void clear_model_column_release_defaults_env() {
     const char* keys[] = {
         "GAMMA_TABLE", "ISO_GAMMA", "ISO_H_BASE", "ISO_DH", "ISO_NS",
-        "ISO_HEAT_FLUX", "ISO_T_TOP", "ISO_HYDRO_T_DECOUPLE",
+        "ISO_HEAT_FLUX", "ISO_T_TOP",
         "ISO_REFINE_PROFILE", "ISO_REFINE_FACTOR", "ISO_REFINE_S_LO_KM",
         "ISO_REFINE_TRANSITION_KM", "ISO_NUMERICAL_DIFFUSIVITY_MULT",
         "ISO_COOLING", "ISO_TRAC", "ISO_CORONA", "ISO_TWO_FLUID",
@@ -1021,7 +1021,6 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     EXPECT_TRUE(std::string(std::getenv("ISO_DH")) == "553");
     EXPECT_TRUE(std::string(std::getenv("ISO_HEAT_FLUX")) == "1");
     EXPECT_TRUE(std::string(std::getenv("ISO_T_TOP")) == "22000");
-    EXPECT_TRUE(std::string(std::getenv("ISO_HYDRO_T_DECOUPLE")) == "0");
     EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_PROFILE")) == "outer");
     EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_FACTOR")) == "4");
     EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_S_LO_KM")) == "500");
@@ -1481,7 +1480,6 @@ static void test_mixture_roe_flux_and_rusanov_fallback() {
     Grid grid;
     const Vec uniform = setup_gamma_equilibrium(grid, table, 8, false);
     grid.roe_characteristic_flux = true;
-    grid.pressure_reconstruct = true;
     grid.mc3_limiter = true;
     grid.limiter_beta = 2.0f;
 
@@ -1504,7 +1502,6 @@ static void test_mixture_roe_flux_and_rusanov_fallback() {
     // property the release solver is chosen for.
     Grid graded;
     Vec state = setup_gamma_equilibrium(graded, table, 32, false);
-    graded.pressure_reconstruct = true;
     graded.mc3_limiter = true;
     graded.limiter_beta = 2.0f;
     const double p0 = 1.0;
@@ -1545,7 +1542,6 @@ static void test_mixture_roe_flux_and_rusanov_fallback() {
     Grid fallback;
     Vec extreme = setup_gamma_equilibrium(fallback, table, 8, true);
     fallback.roe_characteristic_flux = true;
-    fallback.pressure_reconstruct = true;
     const auto fsz = arma::size(fallback.ns, num_of_mixture_eq);
     const Real rho4 = extreme(arma::sub2ind(fsz, 4, mix::RHO));
     extreme(arma::sub2ind(fsz, 4, mix::MOM)) = rho4*3.0e5f;
@@ -1817,12 +1813,9 @@ static void test_mixture_field_cache_contract() {
             arma::sub2ind(ext_size,ext_i,0)),std::log(direct.rho),1e-13);
         EXPECT_NEAR(decoded.extended_primitive(
             arma::sub2ind(ext_size,ext_i,1)),at(mix::MOM)/direct.rho,1e-13);
-        // Slot 2 is the thermal reconstruction variable: log(p) on the release
-        // (ln rho, u, ln p) path, log(T) with the lnT reference set.
+        // Slot 2 is the thermal reconstruction variable, log(p).
         EXPECT_NEAR(decoded.extended_primitive(
-            arma::sub2ind(ext_size,ext_i,2)),
-            grid.pressure_reconstruct ? std::log(direct.p) : std::log(direct.T),
-            1e-13);
+            arma::sub2ind(ext_size,ext_i,2)),std::log(direct.p),1e-13);
         EXPECT_NEAR(decoded.extended_temperature(ext_i),direct.T,1e-13);
     }
     // The four ghost slots decode the four ghost buffers at the face potentials.
@@ -1958,9 +1951,9 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
 // -(g/2)(ds_i rho_i/p_i + ds_{i+1} rho_{i+1}/p_{i+1}), so the initialized Saha-HSE
 // column must stay at rest to round-off. Run through make_scenario on the shipped
 // N=500/R4 mesh (661 cells) at the production CFL 0.50, with conduction off and
-// ONE deliberate exception to the preset: the outer hydro ghost temperature
-// follows the top cell (ISO_HYDRO_T_DECOUPLE=1). With conduction off nothing
-// relaxes the release's fixed 22 kK ghost toward the 22.67 kK initial top cell,
+// ONE deliberate exception to the preset: the outer ghost temperature is the
+// initial top-cell temperature (ISO_T_TOP=0) instead of 22 kK. With conduction
+// off nothing relaxes a fixed 22 kK ghost toward the 22.67 kK initial top cell,
 // and that IC/BC entropy jump would mask the interior balance this checks
 // (docs/studies/boundaries/outer_temperature_bc_single_t_recap.md section 4).
 // The plain ln p scheme this replaced left max|V| = 1.04e-2 m/s after the same
@@ -1969,12 +1962,12 @@ static void test_hydrostatic_reconstruction_exact_fixed_point() {
     clear_model_column_release_defaults_env();
     Scenario sc = make_scenario("model_column", "");
     setenv("ISO_HEAT_FLUX", "0", 1);
-    setenv("ISO_HYDRO_T_DECOUPLE", "1", 1);
+    setenv("ISO_T_TOP", "0", 1);
     Grid grid;
     grid.init(sc.peek_ns(), 0.50f);
     grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
     const Vec initial = sc.ic(grid);
-    EXPECT_TRUE(grid.hydrostatic_reconstruct && grid.pressure_reconstruct);
+    EXPECT_TRUE(grid.hydrostatic_reconstruct);
     EXPECT_TRUE(grid.ns == 661u);      // N=500 coarse-equivalent, R4 outer
     EXPECT_TRUE(!grid.eq_wb);          // reference-free release
     EXPECT_TRUE(grid.eq_residual.is_empty());
@@ -2004,14 +1997,13 @@ static void test_hydrostatic_reconstruction_exact_fixed_point() {
 }
 
 // ---------------------------------------------------------------------------
-// Upper-boundary hydro-temperature / conduction-temperature decoupling
-// (ISO_HYDRO_T_DECOUPLE, chromosphere.hpp::outer_conduction_temperature_override)
+// The release upper boundary: one fixed outer temperature
 // ---------------------------------------------------------------------------
 
-// The h=1600..2153 km transition-region column of the upper-BC experiment, at a
-// test-sized cell count. ISO_T_TOP pins the reference wall at 22 kK so the
-// baseline hydro ghost temperature is a known constant.
-static Vec setup_decoupling_column(Grid& grid, bool decouple, arma::uword ns) {
+// The h=1600..2153 km release column at a test-sized cell count, on a uniform
+// mesh. ISO_T_TOP pins the outer ghost temperature at 22 kK so it is a known
+// constant.
+static Vec setup_release_test_column(Grid& grid, arma::uword ns) {
     // The release scenario REJECTS every historical two-fluid knob, so they must
     // be absent, not set to "0".
     unsetenv("ISO_GAMMA");  unsetenv("ISO_COOLING");  unsetenv("ISO_CORONA");
@@ -2019,17 +2011,16 @@ static Vec setup_decoupling_column(Grid& grid, bool decouple, arma::uword ns) {
     setenv("ISO_HEAT_FLUX", "1", 1);
     setenv("ISO_H_BASE", "1600", 1); setenv("ISO_DH", "553", 1);
     setenv("ISO_T_TOP", "22000", 1);
-    setenv("ISO_HYDRO_T_DECOUPLE", decouple ? "1" : "0", 1);
     grid.init(ns, 0.25f);
     grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
     return model_column_ic(grid);
 }
 
-static void clear_decoupling_env() {
+static void clear_release_test_env() {
     unsetenv("ISO_COOLING");
     unsetenv("ISO_CORONA");    unsetenv("ISO_TRAC");       unsetenv("ISO_HEAT_FLUX");
     unsetenv("ISO_H_BASE");    unsetenv("ISO_DH");         unsetenv("ISO_T_TOP");
-    unsetenv("ISO_HYDRO_T_DECOUPLE"); unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
+    unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
     unsetenv("ISO_RIEMANN");
 }
 
@@ -2079,136 +2070,29 @@ static void add_test_upflow(const Grid& grid, Vec& state) {
     }
 }
 
-static void test_upper_bc_hydro_conduction_temperature_decoupling() {
+static void test_upper_bc_single_fixed_temperature() {
     const arma::uword ns = 200;   // 2.77 km cells; ns=40 over-conducts the coarse top cell
-
-    // ---- (1) flag OFF: the pre-existing behaviour, bit for bit ----------
-    // The hydro ghosts carry the imposed wall (a=b=1 ⇒ both at ISO_T_TOP) and the
-    // conduction override stays disarmed, so Stage D reads the hydro ghost as before.
-    {
-        Grid grid;
-        Vec state = setup_decoupling_column(grid, false, ns);
-        EXPECT_TRUE(!grid.outer_conduction_temperature_override);
-        const MixtureThermo g0 = decode_outer_ghost(grid, grid.mix_outer_boundary0);
-        const MixtureThermo g1 = decode_outer_ghost(grid, grid.mix_outer_boundary1);
-        EXPECT_REL(g0.T, 22000.0, 1e-5);
-        EXPECT_REL(g1.T, 22000.0, 1e-5);
-        // Move the live top cell well off the wall: the baseline hydro ghost must NOT
-        // follow it (that is exactly the extra constraint the experiment removes).
-        const MixtureThermo top = decode_cell(grid, state, grid.ns-1);
-        set_cell_state(grid, state, grid.ns-1, top.rho, 0.0, 1.20*top.T);
-        model_column_update_bc(grid, state);
-        EXPECT_REL(decode_outer_ghost(grid, grid.mix_outer_boundary0).T, 22000.0, 1e-5);
-        EXPECT_TRUE(!grid.outer_conduction_temperature_override);
-    }
-
-    // ---- (2),(3),(5),(6),(7) decoupled mode -----------------------------
-    {
-        Grid grid;
-        Vec state = setup_decoupling_column(grid, true, ns);
-        EXPECT_TRUE(grid.outer_conduction_temperature_override);
-        // Conduction still sees the unchanged fixed hot wall...
-        EXPECT_REL(grid.outer_conduction_temperature, 22000.0, 1e-6);
-        // ...while the hydro ghost zero-gradient-extrapolates the live top cell.
-        const MixtureThermo top0 = decode_cell(grid, state, grid.ns-1);
-        MixtureThermo g0 = decode_outer_ghost(grid, grid.mix_outer_boundary0);
-        MixtureThermo g1 = decode_outer_ghost(grid, grid.mix_outer_boundary1);
-        EXPECT_REL(g0.T, top0.T, 2e-6);           // T_hydro_g0 = T_top
-        EXPECT_REL(g1.T, g0.T, 2e-6);             // T_hydro_g1 = T_hydro_g0
-        const double p_back = g0.p;               // the captured reservoir back-pressure
-
-        // (7) second ghost: EOS-closed density on a one-sided HSE rung off the first.
-        const Real ds = grid.ds_i(grid.ns-1);
-        EXPECT_REL(g1.p, p_back - ds*0.5*(g0.rho+g1.rho)*grid.g, 1e-5);
-        EXPECT_REL(g0.rho, saha_density_from_pressure(p_back, g0.T), 2e-6);
-        EXPECT_REL(g1.rho, saha_density_from_pressure(g1.p, g1.T), 2e-6);
-
-        // (5) changing the LIVE top temperature moves the hydro ghost temperature but
-        // leaves the conduction-only wall alone. (6) The ghost pressure stays exactly
-        // the captured back-pressure — it has NOT reverted to live extrapolation.
-        const MixtureThermo top = decode_cell(grid, state, grid.ns-1);
-        set_cell_state(grid, state, grid.ns-1, 1.05*top.rho, 0.0, 1.20*top.T);
-        model_column_update_bc(grid, state);
-        g0 = decode_outer_ghost(grid, grid.mix_outer_boundary0);
-        EXPECT_REL(g0.T, 1.20*top.T, 2e-5);
-        EXPECT_REL(g0.p, p_back, 2e-6);
-        EXPECT_REL(grid.outer_conduction_temperature, 22000.0, 1e-6);
-        EXPECT_TRUE(std::abs(g0.T-grid.outer_conduction_temperature)
-                    > 0.05*grid.outer_conduction_temperature);   // genuinely decoupled
-    }
-
-    // ---- (4) Stage D responds to the conduction-only wall, not to the ghost ----
-    {
-        Grid grid;
-        Vec state = setup_decoupling_column(grid, true, ns);
-        EXPECT_TRUE(grid.enable_conduction);
-        model_column_update_bc(grid, state);
-        const Vec ghost_before = grid.mix_outer_boundary0;
-        const MixtureField field = mixture_decode(grid, state);
-        const Vec dt = mixture_timestep(grid, state, field);
-        const Vec cold_wall = mixture_advance(grid, state, dt, field);
-        // Raising ONLY the conduction wall must change the conductive result...
-        grid.outer_conduction_temperature = 26000.0f;
-        const Vec hot_wall = mixture_advance(grid, state, dt, field);
-        const double T_cold = decode_cell(grid, cold_wall, grid.ns-1).T;
-        const double T_hot  = decode_cell(grid, hot_wall,  grid.ns-1).T;
-        EXPECT_TRUE(T_hot > T_cold);
-        EXPECT_TRUE(std::abs(T_hot-T_cold) > 1e-3*T_cold);
-        // ...without touching the hydro ghost state at all.
-        EXPECT_TRUE(arma::approx_equal(grid.mix_outer_boundary0, ghost_before,
-                                       "absdiff", 0.0));
-
-        // (3) Conduction reads the WALL, not the live hydro ghost. Same state, same
-        // ghosts: disarming the override hands Stage D the hydro ghost temperature
-        // (= T_top here, cooler than the 22 kK wall), so the step must come out
-        // COLDER than the overridden one. If Stage D were still reading the ghost the
-        // two would be identical.
-        grid.outer_conduction_temperature = 22000.0f;
-        const Vec wall_driven = mixture_advance(grid, state, dt, field);
-        grid.outer_conduction_temperature_override = false;
-        const Vec ghost_driven = mixture_advance(grid, state, dt, field);
-        grid.outer_conduction_temperature_override = true;
-        const double T_wall_driven  = decode_cell(grid, wall_driven,  grid.ns-1).T;
-        const double T_ghost_driven = decode_cell(grid, ghost_driven, grid.ns-1).T;
-        EXPECT_TRUE(decode_outer_ghost(grid, grid.mix_outer_boundary0).T < 22000.0);
-        EXPECT_TRUE(T_wall_driven > T_ghost_driven);
-    }
-
-    // ---- (8) well-balancedness: BC(q_ref) = q_g,ref in decoupled mode --------
-    // The reference IC is V=0 and hydrostatic, so T_top = T_top,ref there and the
-    // decoupled ghost lands on the same equilibrium rung, so the column must still
-    // hold V=0 to the same order as baseline, with no acoustic launch off the top.
-    {
-        auto max_speed_after_steps = [&](bool decouple) {
-            Grid grid;
-            Vec state = setup_decoupling_column(grid, decouple, ns);
-            const MixtureThermo top = decode_cell(grid, state, grid.ns-1);
-            const MixtureThermo ghost = decode_outer_ghost(grid, grid.mix_outer_boundary0);
-            if (decouple) EXPECT_REL(ghost.T, top.T, 2e-6);   // T_hydro_g0 = T_top,ref
-            for (int step = 0; step < 20; ++step) {
-                model_column_update_bc(grid, state);
-                const MixtureField f = mixture_decode(grid, state);
-                const Vec dt = mixture_timestep(grid, state, f);
-                state = mixture_advance(grid, state, dt, f);
-                grid.sim_time += dt(0);
-                EXPECT_TRUE(!state.has_nan());
-            }
-            const auto sz = arma::size(grid.ns, num_of_mixture_eq);
-            double vmax = 0.0;
-            for (arma::uword i = 0; i < grid.ns; ++i) {
-                const double momentum = state(arma::sub2ind(sz, i, mix::MOM));
-                const double rho = state(arma::sub2ind(sz, i, mix::RHO));
-                vmax = std::max(vmax, std::abs(momentum/rho));
-            }
-            return vmax;
-        };
-        const double v_baseline  = max_speed_after_steps(false);
-        const double v_decoupled = max_speed_after_steps(true);
-        // Same order of magnitude as baseline — no new boundary residual, no launch.
-        EXPECT_TRUE(v_decoupled < 10.0*std::max(v_baseline, 1.0e-6));
-    }
-
-    clear_decoupling_env();
+    // Both hydro ghosts carry the fixed outer temperature ISO_T_TOP, and the
+    // conduction override stays disarmed, so conduction reads the same ghost.
+    Grid grid;
+    Vec state = setup_release_test_column(grid, ns);
+    EXPECT_TRUE(!grid.outer_conduction_temperature_override);
+    const MixtureThermo g0 = decode_outer_ghost(grid, grid.mix_outer_boundary0);
+    const MixtureThermo g1 = decode_outer_ghost(grid, grid.mix_outer_boundary1);
+    EXPECT_REL(g0.T, 22000.0, 1e-5);
+    EXPECT_REL(g1.T, 22000.0, 1e-5);
+    // Move the live top cell well off the wall: the ghost must NOT follow it,
+    // and its pressure stays the captured reservoir back-pressure.
+    const double p_back = g0.p;
+    const MixtureThermo top = decode_cell(grid, state, grid.ns-1);
+    set_cell_state(grid, state, grid.ns-1, 1.05*top.rho, 0.0, 1.20*top.T);
+    model_column_update_bc(grid, state);
+    const MixtureThermo moved = decode_outer_ghost(grid, grid.mix_outer_boundary0);
+    EXPECT_REL(moved.T, 22000.0, 1e-5);
+    EXPECT_REL(moved.p, p_back, 2e-6);
+    EXPECT_REL(moved.rho, saha_density_from_pressure(p_back, moved.T), 2e-6);
+    EXPECT_TRUE(!grid.outer_conduction_temperature_override);
+    clear_release_test_env();
 }
 
 // Grid::capture_face_flux must (a) never change a number and (b) hand back the
@@ -2219,7 +2103,7 @@ static void test_upper_bc_hydro_conduction_temperature_decoupling() {
 static void test_face_flux_capture_matches_production_continuity() {
     const arma::uword ns = 200;
     Grid grid;
-    Vec state = setup_decoupling_column(grid, false, ns);
+    Vec state = setup_release_test_column(grid, ns);
     add_test_upflow(grid, state);
     model_column_update_bc(grid, state);
     MixtureField field = mixture_decode(grid, state);
@@ -2275,14 +2159,14 @@ static void test_face_flux_capture_matches_production_continuity() {
     grid.capture_face_flux = false;
     EXPECT_TRUE(std::abs(c.f_total[ns-1] - before) > 0.0);
 
-    clear_decoupling_env();
+    clear_release_test_env();
 }
 
 // Release policy: a normal Gamma/Saha model_column run must select the SWMF
-// exact-Riemann Godunov flux and the (ln rho,V,ln p) primitive set with NO
-// environment override. The Roe, Rusanov and lnT reference configurations must
-// remain reachable explicitly, invalid choices must fail loudly, and the
-// non-gamma path must be untouched by the promotion.
+// exact-Riemann Godunov flux and the hydrostatic (ln rho,V,ln p) primitive set
+// with NO environment override. The Roe reference flux must remain reachable
+// explicitly, invalid choices must fail loudly, and the non-gamma path must be
+// untouched by the promotion.
 static void test_model_column_release_numerics_defaults() {
     auto build = [](bool gamma_mode) {
         unsetenv("ISO_GAMMA");
@@ -2306,24 +2190,20 @@ static void test_model_column_release_numerics_defaults() {
     auto clear = [] {
         unsetenv("ISO_COOLING");   unsetenv("ISO_CORONA");
         unsetenv("ISO_TRAC");      unsetenv("ISO_HEAT_FLUX");
-        unsetenv("ISO_RIEMANN");   unsetenv("ISO_RECONSTRUCTION");
+        unsetenv("ISO_RIEMANN");
     };
 
-    unsetenv("ISO_RIEMANN"); unsetenv("ISO_RECONSTRUCTION");
-    {   // 1+2: release defaults, no environment variables set.
+    unsetenv("ISO_RIEMANN");
+    {   // release defaults, no environment variables set.
         const auto grid = build(true);
         EXPECT_TRUE(grid->swmf_godunov_flux);
         EXPECT_TRUE(!grid->roe_characteristic_flux);
-        EXPECT_TRUE(grid->pressure_reconstruct);
         EXPECT_TRUE(grid->hydrostatic_reconstruct);
-    }
-    {   // The retired hydrostatic-reconstruction switch is rejected, not ignored.
-        setenv("ISO_HSE_RECON","0",1);
-        EXPECT_TRUE(throws_any([&] { (void)build(true); }));
-        unsetenv("ISO_HSE_RECON");
+        EXPECT_TRUE(grid->mc3_limiter);
+        EXPECT_NEAR(grid->limiter_beta, 2.0f, 0.0f);
     }
 #ifdef CHROMO_ENABLE_LEGACY
-    {   // 6: the non-gamma path keeps Rusanov + (ln rho,V,ln T) — neither the Roe
+    {   // the non-gamma path keeps Rusanov + (ln rho,V,ln T) — neither the Roe
         // linearization nor the Godunov flux may leak onto the two-fluid path.
         const auto grid = build(false);
         EXPECT_TRUE(!grid->swmf_godunov_flux);
@@ -2331,33 +2211,21 @@ static void test_model_column_release_numerics_defaults() {
         EXPECT_TRUE(!grid->pressure_reconstruct);
     }
 #endif
-    {   // 3+4: the reference solver / reference primitive set stay reachable.
-        setenv("ISO_RIEMANN","rusanov",1);
-        setenv("ISO_RECONSTRUCTION","lnrho-v-lnt",1);
-        const auto grid = build(true);
-        EXPECT_TRUE(!grid->swmf_godunov_flux);
-        EXPECT_TRUE(!grid->roe_characteristic_flux);
-        EXPECT_TRUE(!grid->pressure_reconstruct);
-        EXPECT_TRUE(!grid->hydrostatic_reconstruct);   // needs the ln p slot
-    }
-    {   // Explicitly requesting the release pair is a no-op.
+    {   // Explicitly requesting the release flux is a no-op.
         setenv("ISO_RIEMANN","swmf-godunov",1);
-        setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
         const auto grid = build(true);
         EXPECT_TRUE(grid->swmf_godunov_flux);
         EXPECT_TRUE(!grid->roe_characteristic_flux);
-        EXPECT_TRUE(grid->pressure_reconstruct);
         EXPECT_TRUE(grid->hydrostatic_reconstruct);
     }
     {   // The Roe characteristic flux stays reachable as the reference solver, and
         // is mutually exclusive with the release Godunov flux, so the face Riemann
         // solver is the only variable it changes.
         setenv("ISO_RIEMANN","roe-local",1);
-        setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
         const auto grid = build(true);
         EXPECT_TRUE(grid->roe_characteristic_flux);
         EXPECT_TRUE(!grid->swmf_godunov_flux);
-        EXPECT_TRUE(grid->pressure_reconstruct);
+        EXPECT_TRUE(grid->hydrostatic_reconstruct);
     }
     {   // ... and it never leaks into a run that did not ask for it.
         unsetenv("ISO_RIEMANN");
@@ -2373,18 +2241,11 @@ static void test_model_column_release_numerics_defaults() {
         EXPECT_TRUE(throws_any([&] { (void)build(false); }));
     }
 #endif
-    {   // 5: invalid choices, and Gamma-only choices off the Gamma path, throw.
+    {   // invalid choices throw, including the removed whole-domain Rusanov.
         setenv("ISO_RIEMANN","hll",1);
-        setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
         EXPECT_TRUE(throws_any([&] { (void)build(true); }));
-        setenv("ISO_RIEMANN","swmf-godunov",1);
-        setenv("ISO_RECONSTRUCTION","lnrho-v-lnrho",1);
+        setenv("ISO_RIEMANN","rusanov",1);
         EXPECT_TRUE(throws_any([&] { (void)build(true); }));
-#ifdef CHROMO_ENABLE_LEGACY
-        unsetenv("ISO_RIEMANN");
-        setenv("ISO_RECONSTRUCTION","lnrho-v-lnp",1);
-        EXPECT_TRUE(throws_any([&] { (void)build(false); }));
-#endif
     }
     clear();
 }
@@ -2392,7 +2253,7 @@ static void test_model_column_release_numerics_defaults() {
 static void test_roe_local_face_flux_and_projection() {
     const arma::uword ns = 80;
     Grid grid;
-    Vec state = setup_decoupling_column(grid, false, ns);
+    Vec state = setup_release_test_column(grid, ns);
     add_test_upflow(grid, state);
     model_column_update_bc(grid, state);
     const MixtureField field = mixture_decode(grid, state);
@@ -2449,7 +2310,7 @@ static void test_roe_local_face_flux_and_projection() {
     for (const MixtureThermo& th : decoded_after.cells)
         EXPECT_TRUE(th.rho > 0.0 && th.T > 0.0 && std::isfinite(th.T));
 
-    clear_decoupling_env();
+    clear_release_test_env();
 }
 
 // ---------------------------------------------------------------------------
@@ -2628,7 +2489,7 @@ static void test_swmf_exact_riemann_solver() {
 static void test_swmf_godunov_flux_mode() {
     const arma::uword ns = 80;
     Grid grid;
-    Vec state = setup_decoupling_column(grid, false, ns);
+    Vec state = setup_release_test_column(grid, ns);
     add_test_upflow(grid, state);
     model_column_update_bc(grid, state);
     const MixtureField field = mixture_decode(grid, state);
@@ -2704,7 +2565,6 @@ static void test_swmf_godunov_flux_mode() {
             EosGammaTable::load(production_gamma_table_path());
         Grid uniform_grid;
         const Vec uniform = setup_gamma_equilibrium(uniform_grid, table, 8, false);
-        uniform_grid.pressure_reconstruct = true;
         uniform_grid.mc3_limiter = true;
         uniform_grid.limiter_beta = 2.0f;
         const MixtureField ud = mixture_decode(uniform_grid, uniform);
@@ -2726,7 +2586,6 @@ static void test_swmf_godunov_flux_mode() {
             EosGammaTable::load(production_gamma_table_path());
         Grid fallback;
         Vec extreme = setup_gamma_equilibrium(fallback, table, 8, true);
-        fallback.pressure_reconstruct = true;
         fallback.swmf_godunov_flux = true;
         fallback.godunov_stats.clear();
         const auto fsz = arma::size(fallback.ns, num_of_mixture_eq);
@@ -2744,7 +2603,7 @@ static void test_swmf_godunov_flux_mode() {
         EXPECT_TRUE(fallback.godunov_stats.fallback_vacuum > 0u);
     }
 
-    clear_decoupling_env();
+    clear_release_test_env();
 }
 
 // RELEASE CFL CONSISTENCY. The timestep must be sized from the signal speed of
@@ -2757,7 +2616,7 @@ static void test_swmf_godunov_flux_mode() {
 static void test_release_timestep_uses_frozen_signal_speed() {
     const arma::uword ns = 80;
     Grid grid;
-    Vec state = setup_decoupling_column(grid, false, ns);
+    Vec state = setup_release_test_column(grid, ns);
     model_column_update_bc(grid, state);
     const MixtureField field = mixture_decode(grid, state);
     const auto sz = arma::size(grid.ns, num_of_mixture_eq);
@@ -2819,18 +2678,18 @@ static void test_release_timestep_uses_frozen_signal_speed() {
     std::cout << "        [release CFL] dt_roe/dt_godunov=" << (dt_roe/dt_godunov)
               << "  max cellwise c_frozen/c_eq=" << worst_local_ratio << '\n';
 
-    clear_decoupling_env();
+    clear_release_test_env();
 }
 
 // Grid::capture_outer_conduction must (a) never change a number and (b) report the
-// physical-boundary-face quantities the conduction solve actually used. In the
-// decoupled model_column path the 22 kK Dirichlet datum is located half a top-cell
-// width from the live centre, and kappa is evaluated at the physical face state
-// (fixed external pressure + T_face), not at a fictitious reflected ghost centre.
+// outer-face quantities the conduction solve actually used. In the release the
+// 22 kK Dirichlet datum is the outer ghost itself, one mirrored cell width from
+// the live centre, and the face conductivity is the mean of the top-cell and
+// ghost conductivities (arithmetic on this uniform test mesh).
 static void test_outer_conduction_capture_matches_solver_face() {
     const arma::uword ns = 200;
     Grid grid;
-    Vec state = setup_decoupling_column(grid, true, ns);
+    Vec state = setup_release_test_column(grid, ns);
     model_column_update_bc(grid, state);
     EXPECT_TRUE(grid.enable_conduction);
     EXPECT_TRUE(!grid.impose_outer_heat_flux);
@@ -2853,20 +2712,23 @@ static void test_outer_conduction_capture_matches_solver_face() {
     EXPECT_TRUE(!oc.imposed_neumann);
 
     // (b) the formula, rebuilt from independent pieces.
-    EXPECT_REL(oc.T_wall, grid.outer_conduction_temperature, 1e-12);
-    EXPECT_REL(oc.ds_face, 0.5*grid.ds_i(ns-1), 1e-12);
+    const MixtureThermo ghost = decode_outer_ghost(grid, grid.mix_outer_boundary0);
+    EXPECT_REL(oc.T_wall, ghost.T, 1e-9);
+    EXPECT_REL(oc.T_wall, 22000.0, 1e-5);
+    EXPECT_REL(oc.ds_face, grid.ds_iph_i(ns-1), 1e-12);
     EXPECT_REL(grid.ds_iph_i(ns-1), grid.ds_i(ns-1), 1e-12); // hydro ghost remains mirrored
     EXPECT_REL(oc.area_ratio, 1.0, 1e-12);                    // straight column, B ≡ 1
 
-    // Physical-face kappa: fixed external pressure, evaluated at T_face.
-    const MixtureThermo ghost = decode_outer_ghost(grid, grid.mix_outer_boundary0);
-    const double p_face = ghost.p;
-    const double rho_face = equilibrium_density_from_pressure(p_face, oc.T_wall);
-    const double n_h_face = rho_face/eos_constants::m_h;
-    const double x_face = saha_ionization_fraction_n_h(n_h_face, oc.T_wall);
-    const double k_face = physical_conductivity(
-        x_face*n_h_face, (1.0-x_face)*n_h_face, oc.T_wall);
-    EXPECT_REL(oc.kappa_face, k_face, 1e-6);
+    // Face kappa: mean of the top-cell and ghost conductivities. The top cell is
+    // read from the conducted state's temperature, so compare against the
+    // captured T_top at the top cell's density.
+    const MixtureThermo top = decode_cell(grid, after_off, ns-1);
+    const double n_h_top = top.rho/eos_constants::m_h;
+    const double x_top = saha_ionization_fraction_n_h(n_h_top, oc.T_top);
+    const double k_top = physical_conductivity(
+        x_top*n_h_top, (1.0-x_top)*n_h_top, oc.T_top);
+    const double k_ghost = physical_conductivity(ghost.n_e, ghost.n_HI, ghost.T);
+    EXPECT_REL(oc.kappa_face, 0.5*(k_top+k_ghost), 1e-6);
     EXPECT_REL(oc.q_face, oc.kappa_face*(oc.T_wall-oc.T_top)/oc.ds_face, 1e-12);
     // The wall is hotter than the top cell here, so the flux heats the top cell,
     // while the live top cell remains an evolved unknown rather than a pinned value.
@@ -2884,35 +2746,13 @@ static void test_outer_conduction_capture_matches_solver_face() {
     }));
     unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
 
-    clear_decoupling_env();
-}
-
-static void test_outer_conduction_physical_face_is_mesh_independent() {
-    for (const arma::uword ns : {80u, 160u}) {
-        Grid grid;
-        Vec state = setup_decoupling_column(grid, true, ns);
-        model_column_update_bc(grid, state);
-        grid.capture_outer_conduction = true;
-        {
-            const MixtureField gf = mixture_decode(grid, state, 1);
-            mixture_advance(grid, state, mixture_timestep(grid, state, gf), gf);
-        }
-        grid.capture_outer_conduction = false;
-        const OuterConductionCapture& oc = grid.outer_conduction_capture;
-        EXPECT_TRUE(oc.valid);
-        EXPECT_REL(oc.T_wall, 22000.0, 1e-12);
-        EXPECT_REL(oc.ds_face, 0.5*grid.ds_i(ns-1), 1e-12);
-        // The conduction boundary is the same physical domain face at both
-        // resolutions; only the centre-to-face half-cell distance changes.
-        EXPECT_REL(grid.phi_g_iph(ns-1)/grid.g, 553000.0, 2e-6);
-        clear_decoupling_env();
-    }
+    clear_release_test_env();
 }
 
 static void test_model_column_gamma_ic_uses_cell_average_temperature() {
     constexpr arma::uword ns = 40;
     Grid grid;
-    Vec state = setup_decoupling_column(grid, true, ns);
+    Vec state = setup_release_test_column(grid, ns);
     const arma::uword top = ns-1;
     const double h_lo = 1600.0 + 553.0*static_cast<double>(top)/ns;
     const double h_hi = 2153.0;
@@ -2926,7 +2766,7 @@ static void test_model_column_gamma_ic_uses_cell_average_temperature() {
     const double actual = decode_cell(grid, state, top).T;
     EXPECT_REL(actual, expected, 2e-5);
     EXPECT_TRUE(std::abs(actual-centre_sample) > 1.0e-2);
-    clear_decoupling_env();
+    clear_release_test_env();
 }
 
 #ifdef CHROMO_ENABLE_LEGACY
@@ -4678,23 +4518,24 @@ static void test_mesh_outer_profile_edge_cases() {
 }
 
 static void test_refine_params_env_aliases() {
-    // ISO_REFINE_* override GRID_REFINE_*; both parsed. Restore env after.
-    setenv("GRID_REFINE_FACTOR", "2", 1);
-    setenv("GRID_REFINE_S_HI_KM", "500", 1);
-    RefineParams g = refine_params_from_env(/*iso_alias=*/false);
+    // Each scenario reads its own five names; a missing one keeps the default.
+    // Restore env after.
+    const RefineEnvNames names{"TEST_REFINE_FACTOR", "TEST_REFINE_START_KM",
+                               "TEST_REFINE_END_KM", "TEST_REFINE_GRADE_KM",
+                               "TEST_REFINE_PROFILE"};
+    setenv("TEST_REFINE_FACTOR", "2", 1);
+    setenv("TEST_REFINE_END_KM", "500", 1);
+    RefineParams g = refine_params_from_env(names);
     EXPECT_NEAR(g.factor, 2.0, 1e-9);
     EXPECT_NEAR(g.s_hi_km, 500.0, 1e-9);
-    setenv("ISO_REFINE_FACTOR", "4", 1);
-    RefineParams a = refine_params_from_env(/*iso_alias=*/true);
-    EXPECT_NEAR(a.factor, 4.0, 1e-9);       // ISO_ override
-    EXPECT_NEAR(a.s_hi_km, 500.0, 1e-9);    // falls through to GRID_
-    EXPECT_TRUE(a.profile == RefineProfile::Lower);   // default profile
-    setenv("GRID_REFINE_PROFILE", "outer", 1);
-    EXPECT_TRUE(refine_params_from_env(false).profile == RefineProfile::Outer);
-    setenv("ISO_REFINE_PROFILE", "lower", 1);        // ISO_ overrides GRID_
-    EXPECT_TRUE(refine_params_from_env(true).profile == RefineProfile::Lower);
-    unsetenv("GRID_REFINE_FACTOR"); unsetenv("GRID_REFINE_S_HI_KM"); unsetenv("ISO_REFINE_FACTOR");
-    unsetenv("GRID_REFINE_PROFILE"); unsetenv("ISO_REFINE_PROFILE");
+    EXPECT_NEAR(g.s_lo_km, 0.0, 1e-9);                // default
+    EXPECT_TRUE(g.profile == RefineProfile::Lower);   // default profile
+    setenv("TEST_REFINE_PROFILE", "OUTER", 1);        // case-insensitive
+    EXPECT_TRUE(refine_params_from_env(names).profile == RefineProfile::Outer);
+    // The release names are not the test names.
+    EXPECT_NEAR(refine_params_from_env(kReleaseRefineEnv).factor, 1.0, 1e-9);
+    unsetenv("TEST_REFINE_FACTOR"); unsetenv("TEST_REFINE_END_KM");
+    unsetenv("TEST_REFINE_PROFILE");
 }
 
 // =========================================================================
@@ -4968,7 +4809,7 @@ static void test_uniform_regression_refinement_unset() {
     // With refinement UNSET, model_column builds a uniform grid and the step is
     // bitwise-reproducible (deterministic) — the regression guard that the static-mesh
     // machinery is a no-op on the uniform path (the best-WB reconstruction is always on).
-    unsetenv("ISO_REFINE_FACTOR"); unsetenv("GRID_REFINE_FACTOR");
+    unsetenv("ISO_REFINE_FACTOR");
     auto run_once = [&]() {
         Grid grid; grid.init(200, 0.25f);
         Vec xn = model_gentle_ic(grid);
@@ -5312,7 +5153,7 @@ int main() {
 #endif
     RUN(test_stage8_gamma_model_column_saha_hse_and_ghosts);
     RUN(test_hydrostatic_reconstruction_exact_fixed_point);
-    RUN(test_upper_bc_hydro_conduction_temperature_decoupling);
+    RUN(test_upper_bc_single_fixed_temperature);
     RUN(test_face_flux_capture_matches_production_continuity);
     RUN(test_model_column_release_numerics_defaults);
 RUN(test_roe_local_face_flux_and_projection);
@@ -5320,7 +5161,6 @@ RUN(test_roe_local_face_flux_and_projection);
     RUN(test_swmf_godunov_flux_mode);
 RUN(test_release_timestep_uses_frozen_signal_speed);
     RUN(test_outer_conduction_capture_matches_solver_face);
-    RUN(test_outer_conduction_physical_face_is_mesh_independent);
     RUN(test_model_column_gamma_ic_uses_cell_average_temperature);
 #ifdef CHROMO_ENABLE_LEGACY
     RUN(test_cons_prim_roundtrip);

@@ -125,15 +125,15 @@ const arma::uword num_of_mixture_eq = 3;
 const arma::uword num_of_eq = 7;
 
 // ============================================================================
-// Experimental two-temperature state — NON-RELEASE, see src/two_temp/
+// Legacy two-temperature state — NON-RELEASE, see legacy/two_temp/
 // ============================================================================
 //
-// The experimental (T_e != T_i) solver keeps its own four-row conserved state
+// The legacy (T_e != T_i) solver keeps its own four-row conserved state
 // (rho, rho u, E, E_e) and its own row indices in `tt::`
-// (src/two_temp/two_temp.hpp). Nothing about it is declared here except the two
+// (legacy/two_temp/two_temp.hpp). Nothing about it is declared here except the two
 // things the SHARED Grid must own: its four ghost buffers and the one flag that
 // selects it. Its scratch workspace lives in TwoTempWorkspace, owned by the
-// driver, so this experimental path adds no scratch to the Grid and cannot
+// driver, so this legacy path adds no scratch to the Grid and cannot
 // affect the release solver.
 
 /// Conserved-variable indices (writeup eq 61).
@@ -697,7 +697,8 @@ struct Grid {
     /// acoustic-scale dissipation -1/2 a Delta U is far too large for this
     /// very-low-Mach evaporation problem and leaves a persistent TR velocity ripple.
     /// Selected by ISO_RIEMANN=roe-local; mutually exclusive with
-    /// swmf_godunov_flux.
+    /// swmf_godunov_flux. With both flags false the whole corrector uses Rusanov,
+    /// which unit tests keep as the reference; no run configuration selects it.
     bool roe_characteristic_flux = false;
 
     /// RELEASE numerical flux. True (the model_column release setting) is the
@@ -721,24 +722,16 @@ struct Grid {
     /// research scenarios on Rusanov.
     bool swmf_godunov_flux = false;
 
-    /// RELEASE thermal reconstruction variable. True (the model_column release
-    /// setting) limits
-    ///   (log rho, u, log p)
-    /// and recovers the face temperature by inverting the same authoritative
-    /// closure (equilibrium_temperature_from_density_pressure). False limits
-    ///   (log rho, u, log T)
-    /// and obtains the face pressure afterwards from the nonlinear Saha mapping
-    /// p(rho,T) — so two independently limited variables set one mechanical
-    /// quantity, and a mechanically smooth (constant-p) state is NOT reproduced
-    /// across the partial-ionization transition; it is retained as a reference
-    /// configuration only. Both keep density and pressure positive by construction
-    /// and feed the identical equilibrium face builder, flux and source stages, so
-    /// this flag changes ONLY which pair of variables is authoritative at a face.
+    /// LEGACY label only: the frozen model_gentle and model_column_2t scenarios set
+    /// and print it. The release always reconstructs (log rho, u, log p); its
+    /// (log rho, u, log T) alternative was removed on 2026-11-16 (it manufactured
+    /// face-pressure mismatch across the partial-ionization transition), and no
+    /// release code reads this field.
     bool pressure_reconstruct = false;
 
-    /// Hydrostatic reconstruction (release: model_column always sets it, except
-    /// under the ln T reference reconstruction and in the two-temperature leg;
-    /// Grid default off; requires pressure_reconstruct). Each cell
+    /// Hydrostatic reconstruction of the release (log rho, u, log p) primitive set
+    /// (model_column always sets it; Grid default off, which leaves the plain
+    /// ln p reconstruction that unit tests use as a reference). Each cell
     /// carries its own local hydrostatic slope k_i = rho_i g_par,i / p_i [1/m] and
     /// half-cell step o_i = k_i ds_i/2 [dimensionless, in ln p]. The ln p slot then
     /// limits only the DEPARTURE from the discrete hydrostatic relation
@@ -1132,10 +1125,10 @@ struct Grid {
 
     ///@}
 
-    /** @name Experimental two-temperature ghost buffers (length 4) */
+    /** @name Legacy two-temperature ghost buffers (length 4) */
     ///@{
-    /// The two hydrodynamic ghost layers of the EXPERIMENTAL two-temperature
-    /// solver (`src/two_temp/`), in its own (rho, rho u, E, E_e) rows, nearest
+    /// The two hydrodynamic ghost layers of the legacy two-temperature
+    /// solver (`legacy/two_temp/`), in its own (rho, rho u, E, E_e) rows, nearest
     /// layer first. Written only by `model_column_2t`; untouched by both the
     /// release and the two-fluid paths.
     ///@{
@@ -1143,8 +1136,8 @@ struct Grid {
     Vec tt_inner_boundary0, tt_inner_boundary1;
     ///@}
 
-    /// EXPERIMENTAL TWO-TEMPERATURE ONLY. Select the separate-electron-temperature
-    /// solver of `src/two_temp/`, whose conserved state is the four rows
+    /// LEGACY TWO-TEMPERATURE ONLY. Select the separate-electron-temperature
+    /// solver of `legacy/two_temp/`, whose conserved state is the four rows
     /// (rho, rho u, E, E_e). Set ONLY by the `model_column_2t` scenario; the
     /// release `model_column` scenario leaves it false and the release solver
     /// never reads it, so a release run is byte-for-byte unaffected. This is not a
@@ -1153,7 +1146,7 @@ struct Grid {
     /// over the two-fluid one.
     bool two_temperature = false;
 
-    /// EXPERIMENTAL TWO-TEMPERATURE ONLY. Outer-face conduction boundary condition
+    /// LEGACY TWO-TEMPERATURE ONLY. Outer-face conduction boundary condition
     /// on the HEAVY-particle temperature. True (the default, and the
     /// characteristically and physically motivated choice) makes the outer face
     /// insulating for the heavy channel: the fully ionized plasma above the domain

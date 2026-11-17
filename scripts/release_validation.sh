@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # model_column release validation.
 #
-# Two checks, both using the NORMAL release invocation (no ISO_RIEMANN /
-# ISO_RECONSTRUCTION overrides — the SWMF exact-Riemann Godunov flux and
-# (ln rho,V,ln p) are the defaults):
+# Two checks, both using the NORMAL release invocation (no ISO_RIEMANN
+# override — the SWMF exact-Riemann Godunov flux on the hydrostatic
+# (ln rho,V,ln p) reconstruction is the default):
 #
 #   1. default-path equivalence — the no-override run must reproduce an explicit
-#      ISO_RIEMANN=swmf-godunov ISO_RECONSTRUCTION=lnrho-v-lnp run bitwise (apart
+#      ISO_RIEMANN=swmf-godunov run bitwise (apart
 #      from the self-referential sidecar path written into the snapshot header);
 #   2. release smoke — N500 (661 actual cells), 100 s, with the face-flux and
 #      outer-conduction sidecars, analysed by util/release/pressure_reconstruction_diag.py
@@ -29,7 +29,7 @@ run_column() {   # run_column <out> [extra env already exported by caller]
 
 echo "=== 1/2 default-path equivalence (T_END=20 s) ==="
 CHROMO_T_END=20 run_column "${TMP_DIR}/default.txt" > "${TMP_DIR}/default.log" 2>&1
-ISO_RIEMANN=swmf-godunov ISO_RECONSTRUCTION=lnrho-v-lnp \
+ISO_RIEMANN=swmf-godunov \
 CHROMO_T_END=20 run_column "${TMP_DIR}/explicit.txt" > "${TMP_DIR}/explicit.log" 2>&1
 
 "${PY}" - "${TMP_DIR}" <<'PY'

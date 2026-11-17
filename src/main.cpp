@@ -540,7 +540,9 @@ int main(int argc, char** argv) {
                   << " mc3=" << grid.mc3_limiter << " beta=" << grid.limiter_beta
                   << " roe=" << grid.roe_characteristic_flux
                   << " swmf_godunov=" << grid.swmf_godunov_flux
-                  << " pressure_reconstruct=" << grid.pressure_reconstruct
+                  // The release always reconstructs ln p; the key stays for
+                  // format stability with existing readers.
+                  << " pressure_reconstruct=1"
                   << " hydrostatic_reconstruct=" << grid.hydrostatic_reconstruct
                   << " ds_km=" << (grid.ds_i(0)*1.0e-3f)
                   << "\n# mass flux = the mix::RHO continuity row (total mass "

@@ -235,7 +235,7 @@ Vec model_gentle_ic(Grid& grid) {
     // Uniform mesh reproduced byte-for-byte.
     const arma::uword ns_coarse = grid.ns;
     const Real ds_m = (DH_km * 1000.0f) / static_cast<Real>(ns_coarse);   // coarse Δs [m]
-    const RefineParams rp = refine_params_from_env(/*iso_alias=*/true);
+    const RefineParams rp = refine_params_from_env(kLegacyRefineEnv);
 
     std::vector<double> face_m;   // canonical faces [m] from the inner face (empty ⇒ uniform)
     if (rp.enabled()) {

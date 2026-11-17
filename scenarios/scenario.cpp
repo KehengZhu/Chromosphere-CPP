@@ -88,11 +88,6 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
         set_env_default("ISO_NS",                         "500");
         set_env_default("ISO_HEAT_FLUX",                  "1");
         set_env_default("ISO_T_TOP",                      "22000");
-        // One fixed outer temperature: the hydro ghosts carry ISO_T_TOP and
-        // conduction reads it at the ghost centre. The decoupled closure
-        // (=1) differs by < 1 % in V_top on this mesh; see
-        // docs/studies/boundaries/outer_temperature_bc_single_t_recap.md.
-        set_env_default("ISO_HYDRO_T_DECOUPLE",           "0");
         set_env_default("ISO_REFINE_PROFILE",             "outer");
         set_env_default("ISO_REFINE_FACTOR",              "4");
         set_env_default("ISO_REFINE_S_LO_KM",             "500");

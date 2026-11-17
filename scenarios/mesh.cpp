@@ -106,20 +106,13 @@ void append_grade(std::vector<double>& faces, double seg_start, double fine_ds,
 
 } // namespace
 
-RefineParams refine_params_from_env(bool iso_alias) {
+RefineParams refine_params_from_env(const RefineEnvNames& names) {
     RefineParams rp;
-    rp.factor        = env_double("GRID_REFINE_FACTOR", rp.factor);
-    rp.s_lo_km       = env_double("GRID_REFINE_S_LO_KM", rp.s_lo_km);
-    rp.s_hi_km       = env_double("GRID_REFINE_S_HI_KM", rp.s_hi_km);
-    rp.transition_km = env_double("GRID_REFINE_TRANSITION_KM", rp.transition_km);
-    rp.profile       = env_profile("GRID_REFINE_PROFILE", rp.profile);
-    if (iso_alias) {
-        rp.factor        = env_double("ISO_REFINE_FACTOR", rp.factor);
-        rp.s_lo_km       = env_double("ISO_REFINE_S_LO_KM", rp.s_lo_km);
-        rp.s_hi_km       = env_double("ISO_REFINE_S_HI_KM", rp.s_hi_km);
-        rp.transition_km = env_double("ISO_REFINE_TRANSITION_KM", rp.transition_km);
-        rp.profile       = env_profile("ISO_REFINE_PROFILE", rp.profile);
-    }
+    rp.factor        = env_double(names.factor, rp.factor);
+    rp.s_lo_km       = env_double(names.start_km, rp.s_lo_km);
+    rp.s_hi_km       = env_double(names.end_km, rp.s_hi_km);
+    rp.transition_km = env_double(names.grade_km, rp.transition_km);
+    rp.profile       = env_profile(names.profile, rp.profile);
     return rp;
 }
 

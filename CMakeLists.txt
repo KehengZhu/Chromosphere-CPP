@@ -31,15 +31,6 @@ if(CHROMO_STATE_FLOAT32)
         "conserved state in double; do not quote release numbers from this tree.")
 endif()
 
-# Retired option name. Double is now the default, so silently accepting the old
-# flag would produce a build that looks configured and is not.
-if(DEFINED CHROMO_STATE_FLOAT64)
-    message(FATAL_ERROR
-        "CHROMO_STATE_FLOAT64 was retired: double is the release default. "
-        "Delete this build tree and reconfigure with no precision flag, or use "
-        "-DCHROMO_STATE_FLOAT32=ON for the diagnostic float build.")
-endif()
-
 # Vendored Armadillo (header-only path in include/).
 # Built without LAPACK/BLAS: the solver only uses element-wise ops, sqrt, abs,
 # min/max, and sub2ind, which are all header-only.

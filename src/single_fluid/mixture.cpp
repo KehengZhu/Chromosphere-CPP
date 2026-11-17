@@ -45,10 +45,8 @@ void MixtureFaceArrays::resize(arma::uword ns) {
 
 namespace {
 
-// Reconstruction slots. Slot 2 carries the THERMAL variable: log(p) with the
-// release reconstruction, log(T) with the reference one. The packing, limiter
-// arithmetic and extrapolation are identical either way; only the decode (which
-// quantity is written) and the face builder (how the state is closed) branch.
+// Reconstruction slots of the release primitive set (log rho, u, log p). The
+// face temperature is recovered from (rho, p) through the Saha closure.
 enum MixtureSlot : arma::uword { MIX_LOG_RHO = 0, MIX_U = 1, MIX_THERMAL = 2 };
 
 using Work = arma::Col<double>;
@@ -131,7 +129,6 @@ void mixture_decode_into(const Grid& grid, const Vec& state, MixtureField& out,
     out.extended_temperature.set_size(ext_n);
     const auto sz = state_size(grid);
     const auto ext_size = arma::size(ext_n, num_of_mixture_eq);
-    const bool log_p = grid.pressure_reconstruct;
     auto put = [&](arma::uword ext_i, double rho, double momentum,
                    double pressure, double temperature) {
         out.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_LOG_RHO)) =
@@ -139,7 +136,7 @@ void mixture_decode_into(const Grid& grid, const Vec& state, MixtureField& out,
         out.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_U)) =
             momentum/rho;
         out.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_THERMAL)) =
-            log_p ? std::log(pressure) : std::log(temperature);
+            std::log(pressure);
         out.extended_temperature(ext_i) = temperature;
     };
     const bool has_guesses = previous && previous->source_grid == &grid
@@ -270,15 +267,11 @@ void build_face_cell(const Grid& grid, const Work& w, const Vec& phi_face,
     const double log_rho = w(arma::sub2ind(sz, i, MIX_LOG_RHO));
     const double velocity = w(arma::sub2ind(sz, i, MIX_U));
     const double thermal = w(arma::sub2ind(sz, i, MIX_THERMAL));
-    const MixtureFaceState face = grid.pressure_reconstruct
-        ? equilibrium_mixture_face_state_from_log_pressure(
-              grid.eos_gamma_table, log_rho, velocity, thermal,
-              static_cast<double>(phi_face(i)), grid.eos_gamma_debug_clamp,
-              temperature_hint ? (*temperature_hint)(i)
-                               : std::numeric_limits<double>::quiet_NaN())
-        : equilibrium_mixture_face_state_from_logs(
-              grid.eos_gamma_table, log_rho, velocity, thermal,
-              static_cast<double>(phi_face(i)), grid.eos_gamma_debug_clamp);
+    const MixtureFaceState face = equilibrium_mixture_face_state_from_log_pressure(
+        grid.eos_gamma_table, log_rho, velocity, thermal,
+        static_cast<double>(phi_face(i)), grid.eos_gamma_debug_clamp,
+        temperature_hint ? (*temperature_hint)(i)
+                         : std::numeric_limits<double>::quiet_NaN());
     const std::array<double, num_of_mixture_eq> flux = equilibrium_mixture_flux(face);
     const double conserved[num_of_mixture_eq] = {
         face.rho, face.rho*face.velocity, face.energy};
@@ -614,21 +607,14 @@ void capture_face_flux(const Grid& grid, const Work& w, const Work& wl,
         c.rho_R[i]    = std::exp(W(wr, MIX_LOG_RHO));
         c.v_L[i]      = W(wl, MIX_U);
         c.v_R[i]      = W(wr, MIX_U);
-        // Both (T, p) pairs, whichever slot 2 actually carried. The missing member
-        // of the pair comes from the SAME authoritative closure the solver used for
-        // this face, so the mismatch diagnostic is directly comparable between the
-        // two reconstructions. Capture steps only.
+        // Both (T, p): slot 2 carries ln p, and the temperature comes from the
+        // SAME authoritative closure the solver used for this face. Capture steps
+        // only.
         auto thermal_pair = [&](const Work& v, double rho, double& temperature,
                                 double& pressure) {
-            const double slot = W(v, MIX_THERMAL);
-            if (grid.pressure_reconstruct) {
-                pressure = std::exp(slot);
-                temperature = equilibrium_temperature_from_density_pressure(
-                    rho, pressure);
-            } else {
-                temperature = std::exp(slot);
-                pressure = equilibrium_caloric_state(rho, temperature).pressure;
-            }
+            pressure = std::exp(W(v, MIX_THERMAL));
+            temperature = equilibrium_temperature_from_density_pressure(
+                rho, pressure);
         };
         thermal_pair(w,  c.rho_cell[i], c.T_cell[i], c.p_cell[i]);
         thermal_pair(wl, c.rho_L[i],    c.T_L[i],    c.p_L[i]);
@@ -669,7 +655,6 @@ void decode_predictor_into(const Grid& grid, const Vec& state,
     output.extended_temperature.set_size(ext_n);
     const auto sz = state_size(grid);
     const auto ext_size = arma::size(ext_n, num_of_mixture_eq);
-    const bool log_p = grid.pressure_reconstruct;
     auto put = [&](arma::uword ext_i, const CaloricMixtureThermo& th,
                    double momentum) {
         output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_LOG_RHO)) =
@@ -677,7 +662,7 @@ void decode_predictor_into(const Grid& grid, const Vec& state,
         output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_U)) =
             momentum/th.rho;
         output.extended_primitive(arma::sub2ind(ext_size, ext_i, MIX_THERMAL)) =
-            log_p ? std::log(th.p) : std::log(th.T);
+            std::log(th.p);
         output.extended_temperature(ext_i) = th.T;
     };
     parallel_for_cells(grid.ns, [&](std::size_t raw_i) {
@@ -726,17 +711,13 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
     Work& lp_r=m[20]; Work& lm_r=m[21];
     Work& lm_rip1=m[22]; Work& lp_rim1=m[23];
 
-    // Parent-cell temperature hints for the (rho,p)->T face inversion. Built only
-    // when the pressure reconstruction is active; the log(T) path never inverts.
-    const Work* h0 = nullptr;
-    const Work* h_ip1 = nullptr;
-    const Work* h_im1 = nullptr;
-    if (grid.pressure_reconstruct) {
-        temperature_stencil_view(grid, decoded,  0, t_hint_0);
-        temperature_stencil_view(grid, decoded,  1, t_hint_ip1);
-        temperature_stencil_view(grid, decoded, -1, t_hint_im1);
-        h0 = &t_hint_0; h_ip1 = &t_hint_ip1; h_im1 = &t_hint_im1;
-    }
+    // Parent-cell temperature hints for the (rho,p)->T face inversion.
+    temperature_stencil_view(grid, decoded,  0, t_hint_0);
+    temperature_stencil_view(grid, decoded,  1, t_hint_ip1);
+    temperature_stencil_view(grid, decoded, -1, t_hint_im1);
+    const Work* h0 = &t_hint_0;
+    const Work* h_ip1 = &t_hint_ip1;
+    const Work* h_im1 = &t_hint_im1;
     stencil_view(grid, decoded,  0, w);
     stencil_view(grid, decoded,  1, w_ip1);
     stencil_view(grid, decoded, -1, w_im1);
@@ -754,9 +735,6 @@ Vec mixture_rhs_explicit(const Grid& grid, const Vec& state,
         return arma::sub2ind(state_size(grid), i, MIX_THERMAL);
     };
     if (hse) {
-        if (!grid.pressure_reconstruct)
-            throw std::logic_error(
-                "hydrostatic_reconstruct requires the ln p reconstruction");
         build_hse_half_steps(grid, decoded, scratch.hse_half_step);
         hse_half = &scratch.hse_half_step;
         const Work& o = scratch.hse_half_step;

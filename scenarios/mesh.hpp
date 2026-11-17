@@ -60,11 +60,29 @@ struct RefineParams {
     bool enabled() const { return factor > 1.0 + 1.0e-9; }
 };
 
-/// Read `GRID_REFINE_FACTOR` / `_S_LO_KM` / `_S_HI_KM` / `_TRANSITION_KM` /
-/// `_PROFILE` (`lower` | `outer`, case-insensitive). When `iso_alias` is true the
-/// ISO_REFINE_* variables OVERRIDE their GRID_REFINE_* counterparts
-/// (model_column). Missing variables keep the struct defaults.
-RefineParams refine_params_from_env(bool iso_alias);
+/// Environment-variable names of the five refinement controls, in RefineParams
+/// order: factor, s_lo_km, s_hi_km, transition_km, profile.
+struct RefineEnvNames {
+    const char* factor;    ///< fine/coarse resolution ratio [dimensionless]
+    const char* start_km;  ///< inner edge of the refined band [km]
+    const char* end_km;    ///< outer edge of the refined band [km] (`lower` profile only)
+    const char* grade_km;  ///< minimum width of the graded transition [km]
+    const char* profile;   ///< `lower` or `outer`
+};
+
+/// The release `model_column` names.
+constexpr RefineEnvNames kReleaseRefineEnv{
+    "ISO_REFINE_FACTOR", "ISO_REFINE_S_LO_KM", "ISO_REFINE_S_HI_KM",
+    "ISO_REFINE_TRANSITION_KM", "ISO_REFINE_PROFILE"};
+
+/// The historical names the frozen legacy scenarios keep reading.
+constexpr RefineEnvNames kLegacyRefineEnv{
+    "ISO_REFINE_FACTOR", "ISO_REFINE_S_LO_KM", "ISO_REFINE_S_HI_KM",
+    "ISO_REFINE_TRANSITION_KM", "ISO_REFINE_PROFILE"};
+
+/// Read the five refinement controls under `names`; the profile is `lower` or
+/// `outer`, case-insensitive. Missing variables keep the struct defaults.
+RefineParams refine_params_from_env(const RefineEnvNames& names);
 
 /// Build canonical cell FACES [m], measured from the inner face: the returned
 /// vector has (ncells+1) entries, faces.front() == 0 and faces.back() == length_m

@@ -113,6 +113,7 @@ Studies and plans are historical records, so their plain-text file citations des
 | `chromosphere.hpp`, `eos.hpp`, `physics.hpp`, `parallel.hpp`, `profiling.hpp`, `run_control.hpp`, `src/{grid,eos,profiling}.cpp` | `src/core/` |
 | `src/two_fluid/`, and the older `src/{rhs,flux,state,integrators}.cpp` | `legacy/two_fluid/` |
 | `scenarios/{model_c7,model_flare,analytic_canopy,pfss_field_line}.*`, the `model_gentle` leg of `model_column` | `legacy/scenarios/` (C7 table: `scenarios/c7_profile.*`) |
-| `util/<script>` | `util/{release,two_temp,legacy,run,lib}/<script>` |
+| `util/<script>` | `util/{release,legacy,run,lib}/<script>` |
+| `src/two_temp/`, the `model_column_2t` leg of `scenarios/model_column.cpp`, `util/two_temp/` (until 2026-11-16) | `legacy/two_temp/`, `legacy/scenarios/model_column_2t.*`, `util/legacy/` |
 | `visualize_commands.md` | `viz_catalog/` |
 | `design/` | `standards/` and `plans/` |

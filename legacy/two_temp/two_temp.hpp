@@ -1,6 +1,6 @@
 /*!
  * @file legacy/two_temp/two_temp.hpp
- * @brief EXPERIMENTAL two-temperature (T_e != T_i) field-aligned solver.
+ * @brief LEGACY two-temperature (T_e != T_i) field-aligned solver.
  *        Conserved state U = (rho, rho u, E, E_e).
  * @ingroup two_temp_solver
  *
@@ -110,7 +110,7 @@
 
 namespace chromosphere {
 
-/** @defgroup two_temp_solver Experimental two-temperature solver
+/** @defgroup two_temp_solver Legacy two-temperature solver
  *  @brief Separate electron and heavy-particle temperatures on the release column.
  *  @{
  */

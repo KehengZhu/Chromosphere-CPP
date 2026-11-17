@@ -7,10 +7,10 @@ This file holds rules and pointers only. Measurements, arguments and study concl
 | What | Where |
 |---|---|
 | Core shared code (Grid, EOS, run control, OpenMP, profiling) | `src/core/` |
-| Release solver / experimental two-temperature solver | `src/single_fluid/` / `src/two_temp/` |
-| Release + experimental scenarios (`model_column`, `model_column_2t`); scenario input data | `scenarios/`; `scenarios/data/` |
-| Frozen two-fluid solver and its scenarios (`model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line`, `model_gentle`) | `legacy/` — built only with `-DCHROMO_ENABLE_LEGACY=ON` |
-| Python/shell tools | `util/release/`, `util/two_temp/`, `util/legacy/`, `util/run/`, shared helpers `util/lib/`, EOS validators `util/eos/` |
+| Release solver | `src/single_fluid/` |
+| Release scenario (`model_column`); scenario input data | `scenarios/`; `scenarios/data/` |
+| Frozen two-fluid solver and its scenarios (`model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line`, `model_gentle`); frozen two-temperature solver (`legacy/two_temp/`) and `model_column_2t` | `legacy/` — built only with `-DCHROMO_ENABLE_LEGACY=ON` |
+| Python/shell tools | `util/release/`, `util/legacy/`, `util/run/`, shared helpers `util/lib/`, EOS validators `util/eos/` |
 | Project scripts (build docs, run, validate, publish) | `scripts/` |
 | Measured evidence | `docs/studies/<subject>/` |
 | Forward-looking / in-progress plans | `docs/plans/` |

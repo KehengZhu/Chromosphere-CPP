@@ -70,9 +70,9 @@ TRAC, nonthermal beam heating, volumetric coronal heating, radiative cooling, an
 
 ---
 
-# The experimental two-temperature model {#two_temp_physics}
+# The legacy two-temperature model {#two_temp_physics}
 
-**Not release physics.** This is a test study, run only by `model_column_2t` on the solver in `src/two_temp/`, asking one question the release cannot answer from inside its own assumptions: **how far do the electron and heavy-particle temperatures drift apart in the modelled 1600–2153 km column?** The release path is unaffected by its presence.
+**Not release physics.** This is a closed test study, run only by the legacy `model_column_2t` on the solver in `legacy/two_temp/` (frozen, built only with `-DCHROMO_ENABLE_LEGACY=ON` since 2026-11-16), asking one question the release cannot answer from inside its own assumptions: **how far do the electron and heavy-particle temperatures drift apart in the modelled 1600–2153 km column?** The answer — they barely drift, so the release single-temperature closure holds for this column — is in @ref validation and `docs/studies/conduction/two_temperature_test_study.md`. The release path is unaffected by its presence.
 
 ## Governing equations
 

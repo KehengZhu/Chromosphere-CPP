@@ -136,10 +136,11 @@ The four `release_reject_*` cases check the *reason* for the failure, not merely
 Not a limitation but a positive result, and the only place in this document where a release
 assumption is checked against a *different solver* rather than against a refinement of itself.
 
-The release is a single-fluid equilibrium mixture with one temperature. A separate experimental
-two-temperature solver (`src/two_temp/`, scenario `model_column_2t`, @ref two_temp_physics) was
+The release is a single-fluid equilibrium mixture with one temperature. A separate two-temperature
+solver (now legacy: `legacy/two_temp/`, scenario `model_column_2t`, @ref two_temp_physics) was
 built and run on exactly the release column — same atmosphere, mesh, gravity, table, CFL and
-boundary geometry, one shared IC/BC implementation, so the temperature split is the only variable.
+boundary geometry, one IC/BC implementation shared with the release at the time, so the
+temperature split is the only variable.
 At `T_e = T_i` the two closures degenerate exactly: at t = 0 the two states are **bit-identical**
 in all three release rows.
 
@@ -157,10 +158,13 @@ more rarefied regime, where `tau_eq` rises and the electron heat flux is far lar
 run, so the decoupling itself is not grid-converged. Evidence:
 `docs/studies/conduction/two_temperature_test_study.md`.
 
-**The experimental solver itself has no registered CTest case** and is not exercised by
-`scripts/release_validation.sh` — it is a test study, not a shipped path. What *is* verified after
-adding it is that the release is unaffected: all 9 CTest cases pass and `release_validation.sh`
-completes clean with the two-temperature sources compiled in.
+**The study is closed and the solver is legacy.** On 2026-11-16 the solver moved to
+`legacy/two_temp/` and `model_column_2t` to `legacy/scenarios/` as a frozen copy of the column IC/BC
+at commit 7e06466; both are built only with `-DCHROMO_ENABLE_LEGACY=ON`, and the move left the
+release outputs and both `TT_OUTER_TI` legs byte-identical. The solver has no CTest case of its
+own and is not exercised by `scripts/release_validation.sh`; a default build rejecting the name is
+covered by `legacy_scenario_disabled`. When it was added, all 9 CTest cases passed and
+`release_validation.sh` completed clean with the two-temperature sources compiled in.
 
 ## Rejected approaches
 
@@ -192,4 +196,4 @@ The authoritative records live in `docs/`. Current code is always the source of 
 | `docs/studies/conduction/physical_conductive_flux_recap.md` | Diagnostic definition current, numbers historical | The plotted conductive flux is `q_phys = -(kappa_e + kappa_n) dT/ds` and excludes every solver-only term. |
 | `docs/studies/numerics/static_local_refinement.md` | Current | The static local-refinement mesh builder — not AMR. |
 | `docs/studies/performance/openmp_parallelization_recap.md` | Current | Thread-count scaling and the bit-identical serial/OpenMP result. |
-| `docs/studies/conduction/two_temperature_test_study.md` | Current; **EXPERIMENTAL, non-release** | That the release's single-temperature assumption holds on the release column to about 0.2 % in the evaporation observables, measured against a separate `T_e != T_i` solver. Also the characteristic derivation of the two-temperature boundary conditions, and two bugs found and fixed in the experimental path. |
+| `docs/studies/conduction/two_temperature_test_study.md` | **Historical** — complete; its solver and scenario are legacy (`legacy/two_temp/`, `-DCHROMO_ENABLE_LEGACY=ON`) since 2026-11-16. Its conclusion stands and is the evidence for the release single-temperature closure | That the release's single-temperature assumption holds on the release column to about 0.2 % in the evaporation observables, measured against a separate `T_e != T_i` solver. Also the characteristic derivation of the two-temperature boundary conditions, and two bugs found and fixed in the two-temperature path. |

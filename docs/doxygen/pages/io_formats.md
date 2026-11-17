@@ -8,7 +8,7 @@ A run writes at most six files: the main snapshot at the path given as `argv[1]`
 | --- | --- | --- |
 | `<out>` (main snapshot) | `CHROMO_OUTPUT` | on |
 | `<out>.gamma_diag` | `CHROMO_GAMMA_DIAG`, release solver only | on |
-| `<out>.twotemp` | `CHROMO_GAMMA_DIAG`, experimental two-temperature solver only | on |
+| `<out>.twotemp` | `CHROMO_GAMMA_DIAG`, legacy two-temperature solver only (`-DCHROMO_ENABLE_LEGACY=ON`) | on |
 | `<out>.faceflux` | `CHROMO_FACE_FLUX_DIAG`, release solver only | off |
 | `<out>.outercond` | `CHROMO_OUTER_COND_DIAG`, release solver only | off |
 | `outputs/output.log` | always | always |
@@ -57,9 +57,9 @@ The single-fluid equilibrium-mixture state `U = (rho, rho u, E)`, indices `mix::
 
 `e_int` includes the hydrogen ionization energy. The ionization fraction `x`, `n_e`, `n_HI`, `p_e` and `T` are **not** in this file — they are derived EOS diagnostics, and the `.gamma_diag` sidecar is where the driver writes them out.
 
-### `state_rows == 4` — experimental two-temperature snapshot
+### `state_rows == 4` — legacy two-temperature snapshot
 
-The four-row `(T_e != T_i)` state of `src/two_temp/`, indices `tt::`. Written only by `model_column_2t`.
+The four-row `(T_e != T_i)` state of `legacy/two_temp/`, indices `tt::`. Written only by the legacy `model_column_2t`, so only by a `-DCHROMO_ENABLE_LEGACY=ON` build.
 
 | Column | Symbol | Meaning | Units |
 | --- | --- | --- | --- |
@@ -132,7 +132,7 @@ Then, per frame, a `# t = <t> step = <step>` marker and `ns` rows of 10 values, 
 
 ## `<out>.twotemp`
 
-The experimental two-temperature sidecar, written when `CHROMO_GAMMA_DIAG` is on **and** the run is a `model_column_2t` run. Deliberately the same shape as `.gamma_diag` — a count/width line, a heights line, `#` provenance lines, then `# t = ... step = ...` frame markers followed by one row per cell — so analysis scripts can share a reader.
+The legacy two-temperature sidecar, written when `CHROMO_GAMMA_DIAG` is on **and** the run is a `model_column_2t` run (legacy build only; a default build compiles none of its writer). Deliberately the same shape as `.gamma_diag` — a count/width line, a heights line, `#` provenance lines, then `# t = ... step = ...` frame markers followed by one row per cell — so analysis scripts can share a reader.
 
 @verbatim
 661 14

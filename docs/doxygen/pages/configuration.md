@@ -22,7 +22,7 @@ Usage: `chromo_main [output_path] [mode] [ionization] [scenario] [data_path] [ti
 | 1 | `output_path` | any path | `outputs/output.txt` | Snapshot file. Sidecars are derived from it: `<out>.gamma_diag`, `<out>.faceflux`, `<out>.outercond`. See @ref io_formats. A one-line summary is always appended to `outputs/output.log`. |
 | 2 | `mode` | `full`, `explicit` | `full` | `explicit` selects the two-fluid explicit-only path (`advance_Euler_explicit_state`, R_I identically zero; legacy build only). Any string other than `explicit` means `full`. Combining `explicit` with a loaded `Gamma1` table is a hard error: "the release solver has no explicit-only mode". |
 | 3 | `ionization` | `ionization`, `no-ionization` | `no-ionization` for `model_column`, `ionization` for every other scenario | Sets `Grid::enable_ionization` (finite-rate Stage-E network). Any string other than the literal `no-ionization` counts as on. In release mode `ionization` is a hard error: the release closure is Saha equilibrium. |
-| 4 | `scenario` | `model_column`, `model_column_2t`; with `-DCHROMO_ENABLE_LEGACY=ON` also `model_gentle`, `model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line` | `model_column` | Selects the IC/BC pair via `make_scenario`. An unknown name is a hard error, and so is a legacy name in a build without the legacy code (the message names `-DCHROMO_ENABLE_LEGACY=ON`). See @ref scenario_reference. |
+| 4 | `scenario` | `model_column`; with `-DCHROMO_ENABLE_LEGACY=ON` also `model_column_2t`, `model_gentle`, `model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line` | `model_column` | Selects the IC/BC pair via `make_scenario`. An unknown name is a hard error, and so is a legacy name in a build without the legacy code (the message names `-DCHROMO_ENABLE_LEGACY=ON`). See @ref scenario_reference. |
 | 5 | `data_path` | path to a field-line `.dat` | `""` | Required by `pfss_field_line` (hard error if empty). Ignored by every other scenario. |
 | 6 | `time_mult` | float | `1.0` | Multiplier on the derived total time `10 * sum(ds_i) / 2e4 m/s`. Also drives the legacy step cap `max(10000, 10000*time_mult)` and the legacy frame stride `max(10, 10*max(1, time_mult/5))`. Both legacy rules are superseded when `CHROMO_T_END` / `CHROMO_STEP_CAP` / `CHROMO_FRAME_DT` are set. |
 | 7 | `cooling` | `cooling`, `no-cooling` | `no-cooling` for `model_column`, `cooling` for every other scenario | Sets `Grid::enable_radiative_cooling`. Any string other than the literal `no-cooling` counts as on. |
@@ -75,17 +75,17 @@ Sidecar layouts are documented on @ref io_formats.
 
 | Variable | Type / values | Default | Effect |
 | --- | --- | --- | --- |
-| `GAMMA_TABLE` | path to a `Gamma1` table | supplied unconditionally by `model_column` and `model_column_2t` as `data/eos/gamma1_hydrogen_v1.dat` (only the path is overridable) | **A loaded table is what selects a Saha/`Gamma1` solver** — the release single-fluid one, or the experimental two-temperature one when the scenario sets `Grid::two_temperature`. The driver SHA-256s the file and records the hash in the `gamma_diag` header. Setting it together with `ISO_GAMMA` is a hard error; setting it with `mode=explicit` is a hard error; setting it with any scenario other than `model_column` or `model_column_2t` is a hard error. Without a table the driver runs the historical two-fluid solver, which exists only in a `-DCHROMO_ENABLE_LEGACY=ON` build. |
+| `GAMMA_TABLE` | path to a `Gamma1` table | supplied unconditionally by `model_column` and the legacy `model_column_2t` as `data/eos/gamma1_hydrogen_v1.dat` (only the path is overridable) | **A loaded table is what selects a Saha/`Gamma1` solver** — the release single-fluid one, or (legacy build only) the two-temperature one when the scenario sets `Grid::two_temperature`. The driver SHA-256s the file and records the hash in the `gamma_diag` header. Setting it together with `ISO_GAMMA` is a hard error; setting it with `mode=explicit` is a hard error; setting it with any scenario other than `model_column` or `model_column_2t` is a hard error. Without a table the driver runs the historical two-fluid solver, which exists only in a `-DCHROMO_ENABLE_LEGACY=ON` build. |
 | `SINGLE_FLUID` | float, non-zero = on | unset | Two-fluid research knob: slaves neutrals to the ion fluid. Read only when no `Gamma1` table is loaded. **Rejected (exit 1) in release mode if present at all.** |
 | `ENABLE_TE` | float, non-zero = on | unset | Two-fluid research knob: separate electron temperature `T_e != T_i`. Read only when no `Gamma1` table is loaded. **Rejected (exit 1) in release mode if present at all.** |
 
 ### `model_column` / `model_gentle` model knobs (the `ISO_*` family)
 
-`model_column` and `model_column_2t` share one IC/BC implementation (`scenarios/model_column.cpp`); the legacy `model_gentle` has its own frozen copy of the same column (`legacy/scenarios/model_gentle.cpp`, legacy build only). The three never share a solver. All three install override-preserving defaults with `setenv(..., overwrite=0)` before the IC runs, so an explicit assignment in the environment always wins.
+`model_column` has its IC/BC in `scenarios/model_column.cpp`. The legacy `model_gentle` and `model_column_2t` each have their own frozen copy of the same column (`legacy/scenarios/model_gentle.cpp`; `legacy/scenarios/model_column_2t.cpp`, a copy at commit 7e06466 that still reads the historical `ISO_*` names; legacy build only). The three never share a solver. All three install override-preserving defaults with `setenv(..., overwrite=0)` before the IC runs, so an explicit assignment in the environment always wins.
 
 `model_column` presets: `GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat`, `ISO_H_BASE=1600`, `ISO_DH=553`, `ISO_NS=500`, `ISO_HEAT_FLUX=1`, `ISO_T_TOP=22000`, `ISO_HYDRO_T_DECOUPLE=0`, `ISO_REFINE_PROFILE=outer`, `ISO_REFINE_FACTOR=4`, `ISO_REFINE_S_LO_KM=500`, `ISO_REFINE_TRANSITION_KM=20`.
 
-`model_column_2t` presets: **exactly the same list**, deliberately — the experimental two-temperature leg must differ from the release in nothing but the temperature split, or the comparison is not controlled. It adds only `TT_OUTER_TI` (default `neumann`) and rejects `ISO_RIEMANN` / `ISO_RECONSTRUCTION`, which have no meaning for a solver with one flux and one primitive set.
+`model_column_2t` presets (legacy build only, in `legacy/scenarios/legacy_scenarios.cpp`): the release list as it stood at commit 7e06466, deliberately — the two-temperature test study had to differ from the release in nothing but the temperature split, or the comparison would not be controlled — except `ISO_HYDRO_T_DECOUPLE=1`, the outer hydro temperature closure it ran with. It adds only `TT_OUTER_TI` (default `neumann`) and rejects `ISO_RIEMANN` / `ISO_RECONSTRUCTION`, which have no meaning for a solver with one flux and one primitive set.
 
 `model_gentle` presets (in `legacy/scenarios/legacy_scenarios.cpp`): `ISO_CORONA=1`, `ISO_H_BASE=1003`, `ISO_HEAT_FLUX=1`, `ISO_COOLING=1`, `ISO_IONIZATION=1`, `ISO_TWO_FLUID=1`, `ISO_NS=600`. It never loads a `Gamma1` table.
 
@@ -109,7 +109,7 @@ Knobs valid in **both** modes:
 | `ISO_COND_KIRCHHOFF` | float, non-zero = on | `0` | Diagnostic only. Replaces the harmonic-mean face conductivity of the Spitzer electron part with the Kirchhoff secant `(2/7)(kappa_e,R T_R - kappa_e,L T_L)/(T_R - T_L)`, clipped to the two cell values. That secant is exact for a steady `kappa ∝ T^{5/2}` profile however steep it is, whereas the harmonic mean follows the cold side of a TR foot narrower than a cell. Tests whether the grid-locked TR pulses at hot walls (≥ 45 kK) come from the face conductivity. The neutral part and every other path are unchanged; unset reproduces the release byte for byte. |
 | `ISO_COND_ARITH` | float, non-zero = on | `0` | Diagnostic only. Arithmetic mean of the two total cell conductivities at every conduction face, on any mesh. At the base of the transition region neutral conduction dominates the cold side and Spitzer conduction the hot side, and the harmonic mean is pinned to the smaller one; the arithmetic mean lies near the Kirchhoff value of the total conductivity there. Cannot be combined with `ISO_COND_KIRCHHOFF` (which applies the Kirchhoff secant to the Spitzer part only and keeps the harmonic mean for the neutral part, so it *lowers* that face conductivity). Unset reproduces the release byte for byte. |
 | `ISO_INNER_T_NEUMANN` | float, non-zero = on | `0` (Dirichlet) | Conduction lower BC: Dirichlet fixed reservoir temperature vs Neumann (insulating). On the two-temperature leg it applies to **both** channels. |
-| `TT_OUTER_TI` | `neumann` \| `dirichlet` | `neumann` | **`model_column_2t` only.** Outer-face conduction BC on the **heavy-particle** temperature. `neumann` (the physically and characteristically motivated default) makes the top insulating for the heavy channel, because the fully ionized plasma above the domain has no neutral-hydrogen conductive flux to supply. `dirichlet` imposes the same 22,000 K wall on `T_i` that the electron channel gets, as the controlled comparison. The **electron** channel keeps the Dirichlet reservoir either way. Any other value throws. See @ref numerics-two-temp-bc. |
+| `TT_OUTER_TI` | `neumann` \| `dirichlet` | `neumann` | **Legacy `model_column_2t` only** (`-DCHROMO_ENABLE_LEGACY=ON`). Outer-face conduction BC on the **heavy-particle** temperature. `neumann` (the physically and characteristically motivated default) makes the top insulating for the heavy channel, because the fully ionized plasma above the domain has no neutral-hydrogen conductive flux to supply. `dirichlet` imposes the same 22,000 K wall on `T_i` that the electron channel gets, as the controlled comparison. The **electron** channel keeps the Dirichlet reservoir either way. Any other value throws. See @ref numerics-two-temp-bc. |
 
 Knobs read only by the **two-fluid** path (`model_gentle`, legacy build only); each is a hard error in release mode unless noted:
 
@@ -223,13 +223,13 @@ The numeric-method toggles that used to select the "bestwb" path — `ISO_LOG_RE
 
 ## Rejected in release mode
 
-"Release mode" means a loaded `Gamma1` table *and* a scenario that did not select the experimental two-temperature solver, which in practice means the `model_column` scenario. The guards fire in three places and every one of them stops the run.
+"Release mode" means a loaded `Gamma1` table *and* a scenario that did not select the legacy two-temperature solver, which in practice means the `model_column` scenario. The guards fire in three places and every one of them stops the run.
 
 `make_scenario` (before anything is allocated), for `model_column` only:
 
 - `ISO_GAMMA` present -> `std::runtime_error`: "model_column is the single-fluid release scenario and derives every thermodynamic index from the Saha/Gamma1 closure; ISO_GAMMA ... has no meaning here. Use the legacy model_gentle scenario for the historical fixed-gamma column."
 
-For `model_column_2t` only:
+For the legacy `model_column_2t` only (in `make_legacy_scenario`):
 
 - `ISO_GAMMA` present -> `std::runtime_error`: "model_column_2t is built on the Saha/Gamma1 closure; ISO_GAMMA ... has no meaning here."
 
@@ -237,10 +237,10 @@ For `model_column_2t` only:
 
 - `ISO_GAMMA` present together with `GAMMA_TABLE` -> "GAMMA_TABLE and explicitly supplied ISO_GAMMA are mutually exclusive".
 - `mode == "explicit"` -> "the release solver has no explicit-only mode".
-- any scenario other than `model_column` or `model_column_2t` -> "the Gamma1/Saha solvers currently support only model_column (release) and model_column_2t (experimental two-temperature)".
+- any scenario other than `model_column` or `model_column_2t` -> "the Gamma1/Saha solvers currently support only model_column (release) and the legacy model_column_2t (two-temperature)".
 - the positional `ionization` argument set to anything but `no-ionization` -> "finite-rate ionization was requested, but the release closure is Saha equilibrium; pass no-ionization".
 - `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID` or `ISO_IONIZATION` **present at all**, regardless of value -> "<name> is a legacy two-fluid setting and has no meaning for the single-fluid release solver".
-- a scenario IC returning a state whose element count is not `grid.n_mixture_state` -> "the scenario returned a state of N elements, expected M (rho, rho u, E per cell)". The two-temperature leg has the matching check against `grid.ns*num_of_two_temp_eq` -> "(rho, rho u, E, E_e per cell)".
+- a scenario IC returning a state whose element count is not `grid.n_mixture_state` -> "the scenario returned a state of N elements, expected M (rho, rho u, E per cell)". The two-temperature solver (legacy build only) has the matching check against `grid.ns*num_of_two_temp_eq` -> "(rho, rho u, E, E_e per cell)".
 
 `model_column_ic`, for every knob in `kNonReleaseKnobs` **present at all**, regardless of value, throwing `std::runtime_error` "<name> is historical two-fluid research configuration and has no meaning for the single-fluid release solver; run the legacy model_gentle scenario for that path (build with -DCHROMO_ENABLE_LEGACY=ON)": `ISO_GAMMA`, `ISO_TWO_FLUID`, `ISO_IONIZATION`, `ISO_COOLING`, `ISO_TRAC`, `ISO_CORONA`, `ISO_CHEAT`, `ISO_QFLUX`, `ISO_TBOOST`, `ISO_NUMERICAL_DIFFUSIVITY_MULT`.
 

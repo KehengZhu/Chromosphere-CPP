@@ -228,7 +228,7 @@ int main(int argc, char** argv) {
     }
     // A loaded Gamma1 table selects a Saha/Gamma1 solver; without it the driver
     // runs the historical two-fluid research solver. WHICH Gamma1 solver — the
-    // release single-fluid one or the experimental two-temperature one — is
+    // release single-fluid one or the legacy two-temperature one — is
     // decided by the scenario, below, after its IC has run.
     const bool gamma_mode = !grid.eos_gamma_table.empty();
     grid.enable_ionization = ionization_on;
@@ -253,7 +253,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         // ENABLE_TE is the HISTORICAL two-fluid three-temperature knob and stays
-        // rejected here. The experimental two-temperature solver is selected by
+        // rejected here. The legacy two-temperature solver is selected by
         // the `model_column_2t` scenario, not by a legacy flag on a release run.
         for (const char* legacy : {"SINGLE_FLUID", "ENABLE_TE", "ISO_TWO_FLUID",
                                    "ISO_IONIZATION"}) {

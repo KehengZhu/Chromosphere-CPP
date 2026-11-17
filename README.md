@@ -28,7 +28,7 @@ cmake --build build_omp -j
 
 On macOS with Apple Clang, install `libomp` first (`brew install libomp`); CMake finds it automatically, or point it at another install with `-DLIBOMP_ROOT=<path>`.
 
-**Legacy two-fluid code** (`model_gentle`, `model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line` and the solver they run on) is frozen under `legacy/` and not built by default; a default build refuses those scenarios with a message naming the option. Build it into its own tree:
+**Legacy code** (the two-fluid scenarios `model_gentle`, `model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line` and the solver they run on, plus the closed two-temperature test study `model_column_2t` and its solver) is frozen under `legacy/` and not built by default; a default build refuses those scenarios with a message naming the option. Build it into its own tree:
 
 ```sh
 cmake -S . -B build_legacy -DCMAKE_BUILD_TYPE=Release -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_ENABLE_LEGACY=ON
@@ -65,7 +65,7 @@ A run is `chromo_main [output_path] [mode] [ionization] [scenario] [data_path] [
 | Scenario | Solver | What it is |
 | --- | --- | --- |
 | `model_column` | release single-fluid | **The default and the release configuration.** Field-aligned chromosphere-to-corona column, conduction-driven evaporation. |
-| `model_column_2t` | experimental two-temperature | Test study: the same column with `T_e != T_i`. Not release. |
+| `model_column_2t` | two-temperature (legacy build) | Closed test study: the same column with `T_e != T_i`. Not release. |
 | `model_gentle` | two-fluid (legacy build) | Historical research preset on the same column. |
 | `model_c7` | two-fluid (legacy build) | Quiet-Sun Model C7 baseline. |
 | `model_flare` | two-fluid (legacy build) | Explosive evaporation driven by a nonthermal electron beam. |
@@ -105,13 +105,15 @@ scripts/run_chromo_realtime.sh outputs/model_column/run.txt \
 
 Always check the run ended with `termination=end_time`, which `chromo_main` prints alongside the requested end time, final time and final step.
 
-The legacy two-fluid scenarios run the same way from a legacy build:
+The legacy scenarios run the same way from a legacy build:
 
 ```sh
 build_legacy/chromo_main outputs/model_c7/out.txt      full ionization model_c7
 build_legacy/chromo_main outputs/model_flare/out.txt   full ionization model_flare
 build_legacy/chromo_main outputs/pfss/out.txt          full ionization pfss_field_line \
     scenarios/data/pfss_qs_20190801.dat
+CHROMO_BINARY=build_legacy/chromo_main CHROMO_T_END=1000 scripts/run_chromo_realtime.sh \
+    outputs/model_column_2t/out.txt full no-ionization model_column_2t - 20.0 no-cooling
 ```
 
 Simulation output goes under `outputs/`, organized per scenario.
@@ -139,12 +141,11 @@ scripts/release_validation.sh           # release-configuration acceptance check
 ```
 src/core/                                 shared: Grid, EOS closure, physics formulas, OpenMP/profiling
 src/single_fluid/                         RELEASE solver, U = (rho, rho u, E)
-src/two_temp/                             experimental two-temperature solver (model_column_2t)
 src/main.cpp                              CLI driver (builds chromo_main)
 scenarios/                                model_column IC/BC, static mesh, C7 profile, data tables
-legacy/                                   frozen two-fluid solver + its scenarios (-DCHROMO_ENABLE_LEGACY=ON)
+legacy/                                   frozen two-fluid and two-temperature solvers + their scenarios (-DCHROMO_ENABLE_LEGACY=ON)
 tests/                                    test suite
-util/                                     Python diagnostics: release/ two_temp/ legacy/ run/ lib/ eos/
+util/                                     Python diagnostics: release/ legacy/ run/ lib/ eos/
 docs/doxygen/                             code reference (config + narrative pages)
 docs/writeup-overleaf/                    write-up sources (separate Overleaf repo)
 docs/supporting-papers/                   reference PDFs

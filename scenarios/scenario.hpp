@@ -59,10 +59,10 @@ struct Scenario {
     std::string name;
 };
 
-/// Build a Scenario by name: `model_column` (release) or `model_column_2t`
-/// (experimental), or — only in a -DCHROMO_ENABLE_LEGACY=ON build — one of the
-/// legacy two-fluid scenarios `model_c7`, `model_flare`, `model_gentle`,
-/// `analytic_canopy`, `pfss_field_line`. `data_path` is required when the
+/// Build a Scenario by name: `model_column` (release), or — only in a
+/// -DCHROMO_ENABLE_LEGACY=ON build — one of the legacy scenarios: the
+/// two-fluid `model_c7`, `model_flare`, `model_gentle`, `analytic_canopy`,
+/// `pfss_field_line`, or the two-temperature `model_column_2t`. `data_path` is required when the
 /// scenario reads a tabulated input file (e.g. "pfss_field_line"); ignored
 /// otherwise. Throws std::runtime_error on an unknown name, a missing required
 /// data_path, or a legacy name in a build without the legacy code (the message

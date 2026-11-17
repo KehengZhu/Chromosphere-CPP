@@ -1,8 +1,11 @@
 # Two-temperature (T_e != T_i) test study on the release column
 
-**Status: CURRENT** — complete. EXPERIMENTAL, non-release. This records a test study, not a release
-capability. The release single-fluid solver is untouched and byte-identical with or without
-`src/two_temp/` compiled in.
+**Status: HISTORICAL** — the study is complete, and on 2026-11-16 its solver and scenario moved to
+`legacy/two_temp/` and `legacy/scenarios/model_column_2t.*` (frozen, built only with
+`-DCHROMO_ENABLE_LEGACY=ON`). Non-release; this records a test study, not a release capability.
+The release single-fluid solver was untouched and byte-identical with or without the
+two-temperature sources compiled in. Paths below are the current ones; the body is otherwise the
+record as written.
 
 **Question.** The release is a single-fluid equilibrium mixture with one temperature. How far do
 the electron and heavy-particle temperatures actually drift apart in the modelled 1600–2153 km
@@ -19,8 +22,9 @@ For this configuration the release's single-temperature assumption is validated.
 
 ## 1. What was built
 
-A third solver directory, `src/two_temp/`, with conserved state `U = (rho, rho u, E, E_e)`,
-selected only by the new scenario `model_column_2t`. Full formulation: `src/two_temp/two_temp.hpp`.
+A third solver directory, `src/two_temp/` (now `legacy/two_temp/`), with conserved state
+`U = (rho, rho u, E, E_e)`, selected only by the new scenario `model_column_2t`. Full formulation:
+`legacy/two_temp/two_temp.hpp`.
 Narrative documentation: @ref two_temp_physics (physics), @ref numerics-two-temp (numerics and the
 boundary-condition derivation), @ref scenario-model-column-2t (the scenario).
 
@@ -31,8 +35,9 @@ ionization reservoir and Saha is evaluated at `T_e`, because hydrogen ionization
 electron-impact process.
 
 **The comparison is controlled by construction.** `model_column_2t` takes exactly the release
-model and grid defaults and shares one IC/BC implementation with `model_column`, so the temperature
-split is the only variable. It presets the identical `ISO_*` list, runs at the same CFL 0.50, and
+model and grid defaults and shares one IC/BC implementation with `model_column` (as of the study;
+since 2026-11-16 a frozen copy of it at commit 7e06466, `legacy/scenarios/model_column_2t.cpp`, which
+reproduces these runs bit for bit), so the temperature split is the only variable. It presets the identical `ISO_*` list, runs at the same CFL 0.50, and
 rejects `ISO_GAMMA`, `ISO_RIEMANN` and `ISO_RECONSTRUCTION`.
 
 ## 2. Boundary conditions, from the characteristics
@@ -79,11 +84,15 @@ All terminated `termination=end_time` at exactly t = 4000 s.
 | Dense-cadence startup transient, 0.02 s frames over 5 s | `outputs/model_column_2t/twotemp_transient_5s.txt{,.twotemp}` |
 
 ```bash
+# Needs the legacy build: cmake -S . -B build_legacy -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_ENABLE_LEGACY=ON
+CHROMO_BINARY=build_legacy/chromo_main \
 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=20 CHROMO_T_END=4000 \
 scripts/run_chromo_realtime.sh outputs/model_column_2t/twotemp_N500_4000s_Ti_neumann.txt \
     full no-ionization model_column_2t - 20.0 no-cooling
-# TT_OUTER_TI=dirichlet for the comparison leg; scenario model_column for the reference.
+# TT_OUTER_TI=dirichlet for the comparison leg; scenario model_column (default build_omp binary) for the reference.
 ```
+
+Figures: `util/legacy/animate_two_temp.py`; exact commands in `docs/viz_catalog/_historical.md`.
 
 **Run integrity, both two-temperature legs.** `godunov_fallbacks = 0` of `9.413e8` face solves,
 `clamps = 0` (face_pe 0, decode_Te 0, decode_Ti 0), `conduction_iterations_max = 4`.

@@ -6,8 +6,11 @@ build*/
 writeup-overleaf/
 docs/presentation-build/
 docs/latex-build/
-# LaTeX build artifacts (LaTeX Workshop / latexmk -outdir) in any latex-build/ subfolder
+# LaTeX build artifacts (latexmk $aux_dir) in any latex-build/ subfolder; the built
+# poster PDF and SyncTeX files land next to the sources
 **/latex-build/
+*.synctex.gz
+docs/posters/*/poster*.pdf
 .ai-bridge/
 
 # Local convenience symlinks, deliberately untracked: both are meaningful only

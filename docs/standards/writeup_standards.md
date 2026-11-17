@@ -176,11 +176,11 @@ Compile with:
 
 ```bash
 cd docs/writeup-overleaf
-latexmk -xelatex -output-directory=latex-build paper.tex
-latexmk -xelatex -output-directory=latex-build main.tex
+latexmk paper.tex
+latexmk main.tex
 ```
 
-Keep all LaTeX auxiliary and generated files under `docs/writeup-overleaf/latex-build/`.
+No flags: the directory's `.latexmkrc` selects XeLaTeX, and `~/.latexmkrc` writes the PDFs next to the sources (`docs/writeup-overleaf/{paper,main}.pdf`, gitignored) and every other build file into `docs/writeup-overleaf/latex-build/`.
 
 ## 11. Scope discipline
 

@@ -4,9 +4,9 @@
 #   main.pdf   ->  docs/chromosphere_writeup.pdf   (deep engineering record)
 #   paper.pdf  ->  docs/chromosphere_paper.pdf     (concise current release)
 #
-# The build itself lives in docs/writeup-overleaf/latex-build/, which is
-# gitignored in BOTH repositories, so the copies made here are the only tracked
-# PDFs of the writeup.
+# The build writes docs/writeup-overleaf/{main,paper}.pdf, which are gitignored
+# in BOTH repositories, so the copies made here are the only tracked PDFs of
+# the writeup.
 #
 # Usage:
 #   scripts/sync_writeup_pdf.sh                 sync whichever PDFs already exist
@@ -24,7 +24,7 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-build_dir="$repo_root/docs/writeup-overleaf/latex-build"
+build_dir="$repo_root/docs/writeup-overleaf"
 docs_dir="$repo_root/docs"
 
 target_for() {

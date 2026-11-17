@@ -27,9 +27,9 @@
  */
 #include "core/chromosphere.hpp"
 #include "single_fluid/mixture.hpp"
-#include "two_temp/two_temp.hpp"
 #ifdef CHROMO_ENABLE_LEGACY
 #include "legacy/two_fluid/two_fluid.hpp"
+#include "legacy/two_temp/two_temp.hpp"
 #endif
 #include "core/physics.hpp"
 #include "core/profiling.hpp"
@@ -140,10 +140,10 @@ int main(int argc, char** argv) {
     //   ionization:   "ionization" or "no-ionization" (default: no-ionization for
     //                 the default model_column release, ionization otherwise)
     //   scenario:     "model_column" (default — the single-fluid RELEASE column) |
-    //                 "model_column_2t" (experimental two-temperature) |
+    //                 "model_column_2t" (two-temperature) |
     //                 "model_gentle" | "model_c7" | "model_flare" |
-    //                 "pfss_field_line" | "analytic_canopy"  (all two-fluid;
-    //                 legacy, built only with -DCHROMO_ENABLE_LEGACY=ON)
+    //                 "pfss_field_line" | "analytic_canopy"  (two-fluid)
+    //                 — all legacy, built only with -DCHROMO_ENABLE_LEGACY=ON
     //   data_path:    required for tabulated scenarios (e.g. pfss_field_line);
     //                 ignored otherwise (pass "-" or "" for scenarios that don't use it)
     //   time_mult:    multiplier on the default total_time (default 1.0). Step
@@ -220,7 +220,7 @@ int main(int argc, char** argv) {
             if (scenario_name != "model_column" && scenario_name != "model_column_2t")
                 throw std::logic_error(
                     "the Gamma1/Saha solvers currently support only model_column "
-                    "(release) and model_column_2t (experimental two-temperature)");
+                    "(release) and the legacy model_column_2t (two-temperature)");
         } catch (const std::exception& e) {
             std::cerr << "release-solver error: " << e.what() << std::endl;
             return 1;
@@ -266,17 +266,27 @@ int main(int argc, char** argv) {
         }
     }
     Vec xn = sc.ic(grid);
-    // The scenario's IC is what decides between the two Gamma1/Saha solvers.
+    // The scenario's IC is what decides between the two Gamma1/Saha solvers:
+    // the release one, or the legacy two-temperature one of model_column_2t.
     const bool two_temp_mode = grid.two_temperature;
     const bool release_mode = gamma_mode && !two_temp_mode;
+#ifdef CHROMO_ENABLE_LEGACY
     TwoTempWorkspace two_temp_work;
     if (two_temp_mode) two_temp_work.resize(grid.ns);
+#else
+    // Unreachable: make_scenario() rejects model_column_2t in a build without
+    // the legacy code, and no other scenario sets Grid::two_temperature.
+    if (two_temp_mode)
+        throw std::logic_error("the two-temperature solver is not built; "
+                               "reconfigure with -DCHROMO_ENABLE_LEGACY=ON");
+#endif
     if (release_mode && xn.n_elem != grid.n_mixture_state) {
         std::cerr << "release-solver error: the scenario returned a state of "
                   << xn.n_elem << " elements, expected " << grid.n_mixture_state
                   << " (rho, rho u, E per cell)" << std::endl;
         return 1;
     }
+#ifdef CHROMO_ENABLE_LEGACY
     if (two_temp_mode && xn.n_elem != grid.ns*num_of_two_temp_eq) {
         std::cerr << "two-temperature error: the scenario returned a state of "
                   << xn.n_elem << " elements, expected "
@@ -284,6 +294,7 @@ int main(int argc, char** argv) {
                   << " (rho, rho u, E, E_e per cell)" << std::endl;
         return 1;
     }
+#endif
 
     const Real c_s_target = 2.0e4f; // m/s, ion sound speed scale (writeup §4)
     Real total_time = time_mult * 10.0f * arma::sum(grid.ds_i) / c_s_target;
@@ -324,8 +335,12 @@ int main(int argc, char** argv) {
     //           the 1e-3 conversion)
     //   then, repeated: a "# t = T step = S" marker followed by ns lines of
     //   num_of_eq space-separated conserved-variable values.
+#ifdef CHROMO_ENABLE_LEGACY
     const arma::uword state_rows = two_temp_mode ? num_of_two_temp_eq
         : release_mode ? num_of_mixture_eq : num_of_eq;
+#else
+    const arma::uword state_rows = num_of_mixture_eq;
+#endif
     std::ofstream fout;
     if (write_output) fout.open(out_path);
     // NOTE: a default-constructed std::ofstream has goodbit, so `if (stream)` is
@@ -361,7 +376,8 @@ int main(int argc, char** argv) {
                    << "# columns=rho_total v_cm T x_eq n_e n_HI p_total Gamma1 kappa_physical kappa_solver\n";
     }
 
-    // EXPERIMENTAL two-temperature sidecar. Same frame layout as `.gamma_diag`
+#ifdef CHROMO_ENABLE_LEGACY
+    // LEGACY two-temperature sidecar. Same frame layout as `.gamma_diag`
     // (a header pair, a heights row, then `# t = ... step = ...` markers followed
     // by one row per cell), so the analysis scripts share a reader. `tau_eq` is
     // the LOCAL electron-heavy energy-equilibration time 1/(nu_ei + nu_en) that
@@ -390,6 +406,7 @@ int main(int argc, char** argv) {
                          "kappa_e kappa_i Q_ei tau_eq\n";
         two_temp_diag.precision(10);
     }
+#endif
 
     auto write_frame = [&](Real t_now, long long step_now) {
         ProfileScope output_timer(ProfileRegion::Output);
@@ -423,6 +440,7 @@ int main(int argc, char** argv) {
                            << '\n';
             }
         }
+#ifdef CHROMO_ENABLE_LEGACY
         if (two_temp_diag.is_open()) {
             two_temp_diag << "# t = " << t_now << " step = " << step_now << '\n';
             const auto sz = arma::size(grid.ns, num_of_two_temp_eq);
@@ -449,6 +467,7 @@ int main(int argc, char** argv) {
                               << "  " << tau_eq << '\n';
             }
         }
+#endif
     };
 
     // Scale snapshot cadence with run length so that frame count stays
@@ -604,7 +623,9 @@ int main(int argc, char** argv) {
     MixtureField decoded_storage[2];
     MixtureField* decoded=&decoded_storage[0];
     const MixtureField* previous_decoded=nullptr;
+#ifdef CHROMO_ENABLE_LEGACY
     TwoTempField two_temp_previous;
+#endif
     if (schedule.due(step, time)) {
         write_frame(time, step);
         schedule.note_written(step, time);
@@ -617,17 +638,19 @@ int main(int argc, char** argv) {
             sc.update_bc(grid, xn);
         }
         Vec dt;
-        if (two_temp_mode) {
-            two_temp_decode_into(grid, xn, two_temp_work.decoded,
-                                 two_temp_work.stats,
-                                 two_temp_previous.ns ? &two_temp_previous : nullptr);
-            dt = two_temp_timestep(grid, xn, two_temp_work.decoded);
-        } else if (release_mode) {
+        if (release_mode) {
             mixture_decode_into(grid,xn,*decoded,state_generation,previous_decoded);
             dt = mixture_timestep(grid,xn,*decoded);
         } else {
 #ifdef CHROMO_ENABLE_LEGACY
-            dt = cal_dt_i(grid,xn);
+            if (two_temp_mode) {
+                two_temp_decode_into(grid, xn, two_temp_work.decoded,
+                                     two_temp_work.stats,
+                                     two_temp_previous.ns ? &two_temp_previous : nullptr);
+                dt = two_temp_timestep(grid, xn, two_temp_work.decoded);
+            } else {
+                dt = cal_dt_i(grid,xn);
+            }
 #else
             // Unreachable: make_scenario() rejects every two-fluid scenario in a
             // build without the legacy code, and the Saha/Gamma1 scenarios
@@ -654,18 +677,20 @@ int main(int argc, char** argv) {
                       << "  T_c = " << grid.trac_cutoff_T << std::endl;
         }
 
-        if (two_temp_mode) {
-            xn = two_temp_advance(grid, xn, dt, two_temp_work.decoded,
-                                  two_temp_work);
-            // Keep this step's decode as the next step's Newton seed. The hint
-            // only accelerates the inversion; it never changes the root.
-            two_temp_previous = two_temp_work.decoded;
-        } else if (release_mode)
+        if (release_mode)
             xn = mixture_advance(grid,xn,dt,*decoded);
         else {
 #ifdef CHROMO_ENABLE_LEGACY
-            xn = explicit_only ? advance_Euler_explicit_state(grid,xn,dt)
-                               : advance_Euler_state(grid,xn,dt);
+            if (two_temp_mode) {
+                xn = two_temp_advance(grid, xn, dt, two_temp_work.decoded,
+                                      two_temp_work);
+                // Keep this step's decode as the next step's Newton seed. The
+                // hint only accelerates the inversion; it never changes the root.
+                two_temp_previous = two_temp_work.decoded;
+            } else {
+                xn = explicit_only ? advance_Euler_explicit_state(grid,xn,dt)
+                                   : advance_Euler_state(grid,xn,dt);
+            }
 #else
             throw std::logic_error("the two-fluid solver is not built; "
                                    "reconfigure with -DCHROMO_ENABLE_LEGACY=ON");
@@ -715,7 +740,7 @@ int main(int argc, char** argv) {
     }
     // Release swmf_godunov flux: report what the exact Riemann solver did, so a
     // silent fallback to Rusanov can never be mistaken for a Godunov result.
-    // (The experimental two-temperature solver keeps its own tally, below, and
+    // (The legacy two-temperature solver keeps its own tally, below, and
     // never touches grid.godunov_stats, so its zeros are not printed here.)
     if (grid.swmf_godunov_flux && !two_temp_mode) {
         const GodunovFluxStats& g = grid.godunov_stats;
@@ -737,7 +762,8 @@ int main(int argc, char** argv) {
                       << g.fallbacks() << " of " << g.faces << " face solves."
                       << std::endl;
     }
-    // EXPERIMENTAL two-temperature tally. `max_relative_decoupling` is the
+#ifdef CHROMO_ENABLE_LEGACY
+    // LEGACY two-temperature tally. `max_relative_decoupling` is the
     // headline measurement of the study; the clamp counters must all be zero for
     // the run to be quotable.
     if (two_temp_mode) {
@@ -760,6 +786,7 @@ int main(int argc, char** argv) {
                       << t.clamps() << " times; no number from this run is "
                          "quotable." << std::endl;
     }
+#endif
     print_runtime_profile(std::cout);
     if (eos_counting_on) {
         const EosOperationCounts counts = eos_operation_counts();

@@ -1,5 +1,5 @@
 /*!
- * @file two_temp/closure.cpp
+ * @file legacy/two_temp/closure.cpp
  * @brief EXPERIMENTAL two-temperature solver: thermodynamic closure, state
  *        decode/pack, and the algebraic face-state builder.
  * @ingroup two_temp_solver
@@ -29,7 +29,7 @@
  * bit up to one floating-point subtraction and addition.
  */
 
-#include "two_temp/two_temp.hpp"
+#include "legacy/two_temp/two_temp.hpp"
 #include "core/parallel.hpp"
 #include "core/profiling.hpp"
 
@@ -303,7 +303,7 @@ TwoTempThermo two_temp_face_state(const EosGammaTable& table, double rho,
 //
 // The two conductivities are the SAME expressions the release conduction operator
 // uses (physics.hpp::physical_kappa_e / physical_kappa_n, transcribed here so
-// src/two_temp/ depends only on chromosphere.hpp and eos.hpp, exactly as
+// legacy/two_temp/ depends only on chromosphere.hpp and eos.hpp, exactly as
 // src/single_fluid/integrator.cpp does). The experiment changes only which
 // temperature each channel is evaluated at, so kappa_e + kappa_n reproduces the
 // release total conductivity exactly whenever T_e = T_i.

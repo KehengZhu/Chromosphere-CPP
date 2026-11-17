@@ -795,3 +795,19 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
     util/release/plot_tr_pressure_conditioning.py \
     --out visualization/model_column/tr_pressure_conditioning.pdf
 ```
+
+---
+
+## Electron–ion temperature-equilibration time (`util/release/tau_ei_equilibration.py`)
+
+### `tau_ei_equilibration.png`
+
+Measured (not estimated) `tau_eq^{ei}(h)` for the release column, against the timescales it has to beat for `T_e = T_i` to be a defensible closure. Post-processing only — no new run. The source is the canonical release baseline `outputs/model_column/twall_sweep/twall_22kK_cfl0.50.txt` (N=500/R4, 661 cells, CFL 0.50, double-precision build, physical conduction only, 22 kK outer conductive reservoir, 4000 s, `termination=end_time`, 0 Godunov fallbacks); `T`, `x`, `n_e` and `n_HI` are read straight out of its `.gamma_diag` sidecar, so the ionization state is the run's own Saha closure and nothing is re-derived.
+
+Top panel: `tau_eq^{ei}` from the NRL Plasma Formulary rate `nu_eps = 3.2e-9 Z^2 n_i lnLambda / (mu T_e^{3/2})` with a **per-cell** Coulomb logarithm on the NRL branch that actually applies (branch 1, `23 - ln(n_e^{1/2} Z T_e^{-3/2})`, everywhere — the column never exceeds 10 Z^2 eV), plus the electron–neutral and ion–neutral energy-relaxation estimates and the three competing timescales: the solver `dt` parsed from the console log, the cell sound crossing `ds/c_s` at the release frozen sound speed, and the cell conduction time `ds^2/chi` from the run's own `kappa_physical`. `t = 0` dashed, `t = 4000 s` solid. Bottom panel: the actual `n_e(h)` against the 5e9–1e11 cm^-3 hand-estimate band, with `x(h)` on the right axis.
+
+```bash
+.venv/bin/python util/release/tau_ei_equilibration.py
+```
+
+Also writes `outputs/model_column/tau_ei_equilibration.json` (every tabulated scalar). Override the run with `--run`, the sampled heights with `--heights`, the cross-sections with `--sigma-en` / `--sigma-in`, and the labelled 1 MK **extrapolation** row with `--tr-ne` / `--tr-T`.

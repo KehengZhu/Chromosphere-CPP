@@ -21,9 +21,9 @@ namespace chromosphere {
  *  @{
  */
 
-/// Build a legacy two-fluid Scenario by name: `model_c7`, `model_flare`,
+/// Build a legacy Scenario by name: the two-fluid `model_c7`, `model_flare`,
 /// `model_gentle`, `analytic_canopy` or `pfss_field_line` (which requires
-/// `data_path`). Applies each scenario's override-preserving environment
+/// `data_path`), or the two-temperature `model_column_2t`. Applies each scenario's override-preserving environment
 /// preset. Throws std::runtime_error for any other name or a missing
 /// `data_path`.
 Scenario make_legacy_scenario(const std::string& name, const std::string& data_path);

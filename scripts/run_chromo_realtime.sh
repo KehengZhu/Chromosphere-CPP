@@ -45,7 +45,8 @@ export CHROMO_PROGRESS_STRIDE="${CHROMO_PROGRESS_STRIDE:-10000}"
 # scenarios retain the solver's conservative CHROMO_CFL=0.25 fallback unless
 # CHROMO_CFL is explicitly supplied.
 #
-# model_column_2t (the EXPERIMENTAL two-temperature test study) is included
+# model_column_2t (the two-temperature test study, legacy since 2026-11-16: run
+# it with CHROMO_BINARY=build_legacy/chromo_main) is included
 # because it is the SAME mesh, model shape and configuration as the release
 # column, and because its acoustic CFL rule is byte-for-byte the release rule:
 # the frozen signal speed sqrt(5/3 p/rho) depends only on the TOTAL pressure, so

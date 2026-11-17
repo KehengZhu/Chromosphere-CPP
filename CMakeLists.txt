@@ -48,14 +48,14 @@ add_compile_definitions(ARMA_DONT_USE_LAPACK ARMA_DONT_USE_BLAS)
 # Solvers by directory, over one shared infrastructure layer.
 #   src/core/             shared: Grid, EOS, profiling, OpenMP helpers, physics formulas
 #   src/single_fluid/     RELEASE: U = (rho, rho u, E) equilibrium mixture
-#   src/two_temp/         EXPERIMENTAL test study: U = (rho, rho u, E, E_e),
-#                         separate electron and heavy-particle temperatures.
-#                         Reuses only single_fluid/exact_rs.hpp (a standalone
-#                         port of the SWMF ideal-gas Riemann solver).
-#   scenarios/            model_column / model_column_2t IC+BC, mesh, C7 profile
+#   scenarios/            model_column IC+BC, mesh, C7 profile
 #   legacy/two_fluid/     HISTORICAL research: seven-row carrier state  (legacy only)
-#   legacy/scenarios/     its scenarios: model_c7, model_flare, model_gentle,
-#                         analytic_canopy, pfss_field_line            (legacy only)
+#   legacy/two_temp/      closed test study: U = (rho, rho u, E, E_e), separate
+#                         electron and heavy-particle temperatures. Reuses only
+#                         single_fluid/exact_rs.hpp (the standalone SWMF
+#                         ideal-gas Riemann solver port)              (legacy only)
+#   legacy/scenarios/     model_c7, model_flare, model_gentle, analytic_canopy,
+#                         pfss_field_line (two-fluid), model_column_2t (legacy only)
 # No solver directory depends on another's solver code.
 add_library(chromosphere STATIC
     src/core/profiling.cpp
@@ -64,9 +64,6 @@ add_library(chromosphere STATIC
     src/single_fluid/mixture.cpp
     src/single_fluid/exact_rs.cpp
     src/single_fluid/integrator.cpp
-    src/two_temp/closure.cpp
-    src/two_temp/hydro.cpp
-    src/two_temp/conduction.cpp
     scenarios/scenario.cpp
     scenarios/mesh.cpp
     scenarios/c7_profile.cpp
@@ -78,7 +75,7 @@ add_library(chromosphere STATIC
 # default, so a default build neither compiles nor links any of it; asking a
 # default build for a legacy scenario fails immediately with a message naming
 # this option.
-option(CHROMO_ENABLE_LEGACY "Build the frozen two-fluid solver and its scenarios" OFF)
+option(CHROMO_ENABLE_LEGACY "Build the frozen two-fluid and two-temperature solvers and their scenarios" OFF)
 if(CHROMO_ENABLE_LEGACY)
     target_sources(chromosphere PRIVATE
         legacy/two_fluid/state.cpp
@@ -91,6 +88,10 @@ if(CHROMO_ENABLE_LEGACY)
         legacy/scenarios/model_gentle.cpp
         legacy/scenarios/analytic_canopy.cpp
         legacy/scenarios/pfss_field_line.cpp
+        legacy/two_temp/closure.cpp
+        legacy/two_temp/hydro.cpp
+        legacy/two_temp/conduction.cpp
+        legacy/scenarios/model_column_2t.cpp
     )
     target_compile_definitions(chromosphere PUBLIC CHROMO_ENABLE_LEGACY=1)
 endif()

@@ -12,6 +12,7 @@
 #include "model_c7.hpp"
 #include "model_flare.hpp"
 #include "model_gentle.hpp"
+#include "model_column_2t.hpp"
 #include "pfss_field_line.hpp"
 
 #include <cstdlib>
@@ -112,6 +113,34 @@ Scenario make_legacy_scenario(const std::string& name, const std::string& data_p
         return sc;
     }
 
+    // The two-temperature (T_e != T_i) twin of the release column, retired to
+    // legacy/ on 2026-11-16 when its test study closed. The preset is the one it
+    // ran with: the release model/grid of commit 7e06466 plus the decoupled outer
+    // hydro temperature (both temperatures free-float with the top cell).
+    if (name == "model_column_2t") {
+        if (std::getenv("ISO_GAMMA"))
+            throw std::runtime_error(
+                "make_scenario: model_column_2t is built on the Saha/Gamma1 "
+                "closure; ISO_GAMMA (the historical fixed-gamma two-fluid index) "
+                "has no meaning here.");
+        set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
+        set_env_default("ISO_H_BASE",                     "1600");
+        set_env_default("ISO_DH",                         "553");
+        set_env_default("ISO_NS",                         "500");
+        set_env_default("ISO_HEAT_FLUX",                  "1");
+        set_env_default("ISO_T_TOP",                      "22000");
+        set_env_default("ISO_HYDRO_T_DECOUPLE",           "1");
+        set_env_default("ISO_REFINE_PROFILE",             "outer");
+        set_env_default("ISO_REFINE_FACTOR",              "4");
+        set_env_default("ISO_REFINE_S_LO_KM",             "500");
+        set_env_default("ISO_REFINE_TRANSITION_KM",       "20");
+        sc.peek_ns   = []() { return column_peek_ns(); };
+        sc.ic        = [](Grid& g) { return model_column_2t_ic(g); };
+        sc.update_bc = [](Grid& g, const Vec& xn) {
+            model_column_2t_update_bc(g, xn);
+        };
+        return sc;
+    }
     throw std::runtime_error("make_legacy_scenario: unknown legacy scenario name '" + name + "'");
 }
 

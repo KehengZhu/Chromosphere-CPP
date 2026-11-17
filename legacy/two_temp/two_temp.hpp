@@ -1,14 +1,17 @@
 /*!
- * @file two_temp/two_temp.hpp
+ * @file legacy/two_temp/two_temp.hpp
  * @brief EXPERIMENTAL two-temperature (T_e != T_i) field-aligned solver.
  *        Conserved state U = (rho, rho u, E, E_e).
  * @ingroup two_temp_solver
  *
- * two_temp/two_temp.hpp — the EXPERIMENTAL two-temperature solver.
+ * legacy/two_temp/two_temp.hpp — the two-temperature test-study solver (LEGACY).
  *
- * **Status: EXPERIMENTAL. This is not the release path and never runs from a
- * `model_column` command line.** It is a third, separate solver, selected only by
- * the `model_column_2t` scenario, and it exists to answer one question: how far
+ * **Status: LEGACY (frozen, built only with -DCHROMO_ENABLE_LEGACY=ON).** The
+ * test study is complete (docs/studies/conduction/two_temperature_test_study.md:
+ * the T_e/T_i drift supports the release single-temperature closure), so the
+ * solver moved out of `src/` on 2026-11-16. It is not the release path and never
+ * runs from a `model_column` command line. It is a third, separate solver,
+ * selected only by the `model_column_2t` scenario, and it existed to answer one question: how far
  * apart do the electron and heavy-particle temperatures actually drift in the
  * modelled 1600–2153 km column, where the release assumes a single temperature?
  * The release solver in `single_fluid/` is untouched by this file: no code in
@@ -231,7 +234,7 @@ inline double two_temp_total_energy(double rho, double momentum,
 
 /// Cell-centre gravitational potential [J kg^-1], the gauge every decode uses.
 /// Deliberately the same expression as the release `mixture_cell_phi`, restated
-/// here so `src/two_temp/` needs no header from `src/single_fluid/`.
+/// here so `legacy/two_temp/` needs no header from `src/single_fluid/`.
 inline double two_temp_cell_phi(const Grid& grid, arma::uword i) {
     return 0.5*(static_cast<double>(grid.phi_g_imh(i))
               + static_cast<double>(grid.phi_g_iph(i)));

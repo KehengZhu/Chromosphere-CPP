@@ -89,7 +89,7 @@ The authoritative index of which study is current and which is superseded is the
 
 ## `viz_catalog/` — how every figure was made
 
-The exact command behind every file in `visualization/`, split by scenario area: `model_column.md` (release), `model_column_2t.md`, `eos.md`, `reference.md`, `tutorials.md`, `presentations.md`, and `_historical.md` for retired scenarios and configurations. **Every file in `visualization/` has an entry**; add or update it in the same change that generates the figure. Index and conventions: `viz_catalog/README.md`. The scripts themselves live in `util/release/`, `util/two_temp/` and `util/legacy/`.
+The exact command behind every file in `visualization/`, split by scenario area: `model_column.md` (release), `eos.md`, `reference.md`, `tutorials.md`, `presentations.md`, and `_historical.md` for retired scenarios and configurations. **Every file in `visualization/` has an entry**; add or update it in the same change that generates the figure. Index and conventions: `viz_catalog/README.md`. The scripts themselves live in `util/release/` and `util/legacy/`.
 
 ## `supporting-papers/` — the literature collection
 

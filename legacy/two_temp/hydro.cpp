@@ -1,5 +1,5 @@
 /*!
- * @file two_temp/hydro.cpp
+ * @file legacy/two_temp/hydro.cpp
  * @brief EXPERIMENTAL two-temperature solver: MUSCL-Hancock reconstruction, the
  *        SWMF exact-Riemann Godunov flux on the three release rows, contact
  *        upwinding of the electron energy, the sources, and the CFL timestep.
@@ -46,7 +46,7 @@
  * splitting error is absorbed by the heavy pool rather than by the total.
  */
 
-#include "two_temp/two_temp.hpp"
+#include "legacy/two_temp/two_temp.hpp"
 #include "single_fluid/exact_rs.hpp"
 #include "core/parallel.hpp"
 #include "core/profiling.hpp"

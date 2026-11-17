@@ -1,5 +1,5 @@
 /*!
- * @file two_temp/conduction.cpp
+ * @file legacy/two_temp/conduction.cpp
  * @brief EXPERIMENTAL two-temperature solver: coupled implicit conduction on
  *        (T_e, T_i) with the collisional exchange, and the boundary conditions
  *        the characteristic budget of the 2T system implies.
@@ -79,7 +79,7 @@
  *     channels, keeping the release knob's meaning.
  */
 
-#include "two_temp/two_temp.hpp"
+#include "legacy/two_temp/two_temp.hpp"
 #include "core/profiling.hpp"
 
 #include <algorithm>

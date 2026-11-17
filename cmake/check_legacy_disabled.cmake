@@ -1,7 +1,7 @@
-# A build without -DCHROMO_ENABLE_LEGACY=ON must reject every legacy two-fluid
+# A build without -DCHROMO_ENABLE_LEGACY=ON must reject every legacy
 # scenario immediately, with a message that names the option.
 #   cmake -DEXE=<chromo_main> -DOUT=<unused output path> -P check_legacy_disabled.cmake
-foreach(SCENARIO IN ITEMS model_c7 model_flare model_gentle analytic_canopy pfss_field_line)
+foreach(SCENARIO IN ITEMS model_c7 model_flare model_gentle analytic_canopy pfss_field_line model_column_2t)
     execute_process(
         COMMAND ${EXE} ${OUT} full ionization ${SCENARIO} - 0 cooling
         RESULT_VARIABLE STATUS

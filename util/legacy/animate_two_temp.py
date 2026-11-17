@@ -31,7 +31,7 @@ decoupling lives there, the top of the domain gets its own zoom panels and is
 shaded on every full-column panel.
 
 Usage:
-  .venv/bin/python util/two_temp/animate_two_temp.py <run.txt.twotemp> [options]
+  .venv/bin/python util/legacy/animate_two_temp.py <run.txt.twotemp> [options]
 
     --ref PATH        release .gamma_diag sidecar to overlay (matched by nearest time)
     --out PATH        movie path, or PNG path with --snapshot

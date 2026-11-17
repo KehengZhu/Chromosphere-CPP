@@ -8,13 +8,12 @@ The exact command that regenerates every file under `visualization/`. It was a s
 
 | File | What it covers |
 | --- | --- |
-| [model_column.md](model_column.md) | The release `model_column` solver: release mesh and face-flux tools, the Godunov cutover, the storage-precision cutover, the conduction-wall (`T_wall`) sweep, the outer-face closure swap, the analytic `J` table and the `(T_wall, p_top)` sweep |
-| [model_column_2t.md](model_column_2t.md) | The experimental two-temperature column (`model_column_2t`) and the electron–ion equilibration time |
+| [model_column.md](model_column.md) | The release `model_column` solver: release mesh and face-flux tools, the Godunov cutover, the storage-precision cutover, the conduction-wall (`T_wall`) sweep, the outer-face closure swap, the analytic `J` table, the `(T_wall, p_top)` sweep and the electron–ion equilibration time |
 | [eos.md](eos.md) | The pure-hydrogen Saha closure and the CRASH `Gamma1` table |
 | [reference.md](reference.md) | Physics reference plots in `visualization/reference/` |
 | [tutorials.md](tutorials.md) | Educational Godunov and Roe face-flux animations |
 | [presentations.md](presentations.md) | Posters, crops and copies made for the dated decks under `docs/presentations/` |
-| [_historical.md](_historical.md) | Retired scenarios and configurations: two-fluid C7, open-BC / `rho_tot`, flare and loop, PFSS and event campaigns, synthetic Doppler, gentle evaporation, `model_isentropic`, the pre-release `model_column` development, and the **withdrawn** hybrid float32/float64 comparison |
+| [_historical.md](_historical.md) | Retired scenarios and configurations: two-fluid C7, open-BC / `rho_tot`, flare and loop, PFSS and event campaigns, synthetic Doppler, gentle evaporation, `model_isentropic`, the pre-release `model_column` development, the **withdrawn** hybrid float32/float64 comparison, and the two-temperature column `model_column_2t` |
 
 Put a new entry in the file for its scenario area. When a configuration is retired, move its entries to `_historical.md` in the same change that marks its study `SUPERSEDED` or `HISTORICAL`.
 
@@ -22,7 +21,7 @@ Put a new entry in the file for its scenario area. When a configuration is retir
 
 - Run every command **from the project root**.
 - The interpreter is the project venv: **`.venv/bin/python`** (see the root `README.md`).
-- Plotting and animation scripts live in `util/`, grouped as `util/release/` (release `model_column` diagnostics), `util/two_temp/` (`model_column_2t`), `util/legacy/` (retired scenarios), `util/run/` (sweep and ensemble drivers) and `util/lib/` (shared modules). Two physics-reference scripts live in `visualization/reference/` and write next to themselves. Outputs land in `visualization/` (gitignored).
+- Plotting and animation scripts live in `util/`, grouped as `util/release/` (release `model_column` diagnostics), `util/legacy/` (retired scenarios, including `model_column_2t`), `util/run/` (sweep and ensemble drivers) and `util/lib/` (shared modules). Two physics-reference scripts live in `visualization/reference/` and write next to themselves. Outputs land in `visualization/` (gitignored).
 - Commands recorded before the reorganization named the flat `util/<script>.py` path; they have been rewritten to the script's current location.
 - **Both `outputs/` and `visualization/` are organized into per-scenario subdirectories** mirroring `scenarios/`: `model_c7/`, `model_column/` (the unified column — absorbs the old `iso_*`/`gentle_*` runs), `model_flare/`, `analytic_canopy/`, `loops/`, `pfss/`, `events/` (real-event campaigns: 2024-08-01 AR13768, SOL2014, ensembles, `event_te/`, `sol2014/`, …), and `two_fluid/`. `visualization/` also has `reference/` (physics-reference plots). Dumps and figures produced by now-deleted diagnostic code (`dynamic_hse_*`, `cond_hydro_*`) and retired analytic-isentrope stages live under `_archive/`.
 - **Paths in this catalog are the paths a command *writes* to, which for an archived figure is no longer where the file sits.** Figures move to `visualization/<scenario>/_archive/<bucket>/` once the configuration they measured stops being current; the commands are left pointing at the top-level path so they still regenerate the figure in place. To locate an existing file, consult the `_archive/INDEX.md` of its scenario — `visualization/model_column/_archive/INDEX.md` lists which figures stayed release-facing and which bucket each of the rest went to (most recently on 2026-08-18, when the pre-Godunov Roe figures, the pre-cutover float32 figures, and the `q_ramp` two-fluid driver were archived).

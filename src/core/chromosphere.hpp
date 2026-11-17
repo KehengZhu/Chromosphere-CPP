@@ -76,18 +76,10 @@ namespace chromosphere {
 /// so `State_VGB` and its update are `float64` there too.
 /// Evidence: docs/studies/numerics/state_precision_release_cutover.md.
 ///
-/// `CHROMO_STATE_FLOAT32` reverts to the pre-cutover `float` storage. It is a
-/// DIAGNOSTIC ONLY — kept so the round-off sensitivity stays reproducible — is not
-/// exercised by the release validation, and must not be used for production or any
-/// quoted release number. Build it into a separate tree:
-///
-///     cmake -S . -B build_omp_f32 -DCMAKE_BUILD_TYPE=Release \
-///           -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT32=ON
-#ifdef CHROMO_STATE_FLOAT32
-typedef float Real;   // DIAGNOSTIC ONLY — see above
-#else
+/// The diagnostic `float` build (`CHROMO_STATE_FLOAT32`) that reproduced the
+/// pre-cutover round-off sensitivity was removed on 2026-11-16; its measurements
+/// are in docs/studies/numerics/float32_precision_control_experiment.md.
 typedef double Real;
-#endif
 /// Cell-wise storage vector; `Vec::elem_type` is always `Real`.
 typedef arma::Col<Real> Vec;
 

@@ -47,5 +47,4 @@ CHROMO_BINARY=build_legacy/chromo_main CHROMO_T_END=1000 scripts/run_chromo_real
 ```
 
 The option adds the files above to the `chromosphere` library and defines
-`CHROMO_ENABLE_LEGACY=1` for every target that links it. Combining it with
-`-DCHROMO_STATE_FLOAT32=ON` is allowed.
+`CHROMO_ENABLE_LEGACY=1` for every target that links it.

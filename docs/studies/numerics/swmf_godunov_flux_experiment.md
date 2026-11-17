@@ -1,6 +1,6 @@
 # SWMF-style Godunov flux — implementation, Roe comparison, and release cutover
 
-**Status: CURRENT** — released. The SWMF-style exact-Riemann Godunov flux is the `model_column` release numerical flux. The mixture Roe characteristic flux it replaced is retained as the reference/comparison solver, reachable with `ISO_RIEMANN=roe-local`.
+**Status: CURRENT** — released. The SWMF-style exact-Riemann Godunov flux is the `model_column` release numerical flux. The mixture Roe characteristic flux it replaced is retained as the reference/comparison solver, reachable with `CHROMO_NUM_RIEMANN=roe` (`ISO_RIEMANN=roe-local` until 2026-11-16; the `rusanov` option was removed then).
 
 Sections 1–4 are the original controlled experiment, written while the flux was still a comparison mode, and are preserved because they are the evidence base. Section 5 records the limitations as they stand for the release. **Section 8 is the release cutover** — the rationale, the CFL audit, the acceptance runs, and the corrections this document had to make to its own earlier conclusions. Where sections 1–4 and section 8 disagree, section 8 is current.
 

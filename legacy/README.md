@@ -28,6 +28,17 @@ buffers) and the two-temperature ones (`two_temperature`, `tt_outer_Ti_neumann`,
 the `tt_*` ghost buffers), none read by the release solver; splitting `Grid` per
 solver is a separate task.
 
+## Environment names
+
+The legacy scenarios keep the historical `ISO_*` environment names (and
+`ISO_REFINE_*` for the mesh, `TT_OUTER_TI` for `model_column_2t`) exactly as
+they stood at commit 7e06466. The release `model_column` was renamed to
+`CHROMO_*` names on 2026-11-16 and stops on any `ISO_*` variable, so the same
+shell cannot silently drive both. The one shared exception is the table path:
+the driver reads `CHROMO_EOS_TABLE` for every scenario, and the
+`model_column_2t` preset sets that name. The old-to-new table is in
+`docs/doxygen/pages/configuration.md`.
+
 ## How to build it
 
 Not built by default. A default build neither compiles nor links any file

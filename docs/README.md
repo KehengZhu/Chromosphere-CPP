@@ -12,7 +12,7 @@ Several kinds of document live here, and they are not interchangeable.
 | **What is planned or in progress** | `plans/` |
 | **The command behind a figure or movie in `visualization/`** | `viz_catalog/` |
 
-**Current code is always the source of truth for active behaviour.** The documents under `studies/` record how a decision was reached; several describe configurations that have since been retired. When a study and the code disagree, the code is right and the study is history.
+**Current code is always the source of truth for active behavior.** The documents under `studies/` record how a decision was reached; several describe configurations that have since been retired. When a study and the code disagree, the code is right and the study is history. Studies written before 2026-11-16 name the release knobs by their old `ISO_*` / `GAMMA_TABLE` names; translate them with the "Renamed and removed names" table in `doxygen/pages/configuration.md`.
 
 **Every study and plan opens with a Status line**, directly under its title, in one of five forms:
 

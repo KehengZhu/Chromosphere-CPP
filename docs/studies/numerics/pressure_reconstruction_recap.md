@@ -1,6 +1,6 @@
 # Pressure-based primitive reconstruction for the Gamma/Saha `model_column` path
 
-**Status: SUPERSEDED by [model_column_release_numerics_recap.md](model_column_release_numerics_recap.md)** — the `(ln rho, V, ln p)` reconstruction it recommended is now the release default and `ISO_RECONSTRUCTION=lnrho-v-lnt` is reference-only. Statements below describe the configuration in force when this study was run.
+**Status: SUPERSEDED by [model_column_release_numerics_recap.md](model_column_release_numerics_recap.md)** — the `(ln rho, V, ln p)` reconstruction it recommended is now the release default; the `ISO_RECONSTRUCTION=lnrho-v-lnt` reference was removed on 2026-11-16. Statements below describe the configuration in force when this study was run.
 
 **Outcome: GO** as a diagnostic option, with a recommendation to promote. Release defaults unchanged.
 

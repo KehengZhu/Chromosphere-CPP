@@ -79,11 +79,11 @@ Frozen since 2026-11-16, when its test study closed (`docs/studies/conduction/tw
 | Path | What it holds |
 | --- | --- |
 | `scenarios/scenario.hpp` | chromosphere::Scenario (`peek_ns`, `ic`, `update_bc`, `name`) and `make_scenario`. |
-| `scenarios/scenario.cpp` | Name dispatch and the override-preserving environment defaults of `model_column`, including the unconditional `GAMMA_TABLE` default that makes `model_column` the release scenario. Legacy names go to `make_legacy_scenario` in a legacy build and are rejected otherwise. |
+| `scenarios/scenario.cpp` | Name dispatch and the override-preserving environment defaults of `model_column`, including the unconditional `CHROMO_EOS_TABLE` default that makes `model_column` the release scenario. Legacy names go to `make_legacy_scenario` in a legacy build and are rejected otherwise. |
 | `scenarios/mesh.hpp` | Shared STATIC local-refinement face-grid construction (not AMR): generated once at IC time, never regridded. |
-| `scenarios/mesh.cpp` | Face-grid construction and its `ISO_REFINE_*` / `GRID_REFINE_*` environment parsing. |
+| `scenarios/mesh.cpp` | Face-grid construction and its environment parsing, under the release `CHROMO_MESH_REFINE_*` names or the legacy `ISO_REFINE_*` names (`kReleaseRefineEnv` / `kLegacyRefineEnv`). |
 | `scenarios/model_column.hpp` | `model_column` (RELEASE): the release column IC/BC. Its former two-fluid (`model_gentle`) and two-temperature (`model_column_2t`) twins are frozen copies under `legacy/scenarios/`. |
-| `scenarios/model_column.cpp` | The column IC and boundary closures, including the rejection of every historical two-fluid knob and of a Grid without a `Gamma1` table. |
+| `scenarios/model_column.cpp` | The column IC and boundary closures, including the retired-name guard (any `ISO_*` or `GRID_REFINE_*` variable, `TT_OUTER_TI` or `GAMMA_TABLE` stops a release run; see @ref config-renamed "Renamed and removed names") and the rejection of a Grid without a `Gamma1` table. It reads only `CHROMO_*` names. |
 | `scenarios/c7_profile.hpp` / `.cpp` | The shared C7 atmosphere library: the Avrett & Loeser (2008) Table 26 rows (`MODEL_C7` plus the photospheric rows), `c7_full_profile` and the PCHIP temperature `c7_full_temperature_pchip`. No solver or physics-rate dependency. |
 | `scenarios/data_file_parser.hpp` | Parser interface for the tabulated `[META]` / `[CELLS]` / `[GHOSTS]` scenario data-file format. |
 | `scenarios/data_file_parser.cpp` | The parser. `[CELLS]` rows are `i ds_m B_imh_T B_iph_T phi_g_imh phi_g_iph ne_im3 nn_im3 T_K`; `[GHOSTS]` is exactly four rows tagged `outer_0`, `outer_1`, `inner_0`, `inner_1`. |
@@ -135,8 +135,8 @@ Selection is by **data**, not by a flag: a non-empty `Grid::eos_gamma_table` sel
 
 The chain is:
 
-1. `make_scenario("model_column", ...)` in `scenarios/scenario.cpp` calls `set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat")` unconditionally, and rejects `ISO_GAMMA` outright. The legacy `model_column_2t` (`make_legacy_scenario`) does the same. `model_gentle` and the other two-fluid scenarios (legacy build only) never set it.
-2. The driver (`src/main.cpp`) reads `GAMMA_TABLE`, hashes the file and assigns `grid.eos_gamma_table = EosGammaTable::load(path)`. `gamma_mode` is then simply `!grid.eos_gamma_table.empty()`.
+1. `make_scenario("model_column", ...)` in `scenarios/scenario.cpp` calls `set_env_default("CHROMO_EOS_TABLE", "data/eos/gamma1_hydrogen_v1.dat")` unconditionally. The legacy `model_column_2t` (`make_legacy_scenario`) does the same and also rejects `ISO_GAMMA`. `model_gentle` and the other two-fluid scenarios (legacy build only) never set it.
+2. The driver (`src/main.cpp`) reads `CHROMO_EOS_TABLE` (rejecting a simultaneous `ISO_GAMMA`), hashes the file and assigns `grid.eos_gamma_table = EosGammaTable::load(path)`. `gamma_mode` is then simply `!grid.eos_gamma_table.empty()`.
 3. `xn = sc.ic(grid)` runs. `model_column_2t_ic` (legacy build only) sets `grid.two_temperature = true` and returns a four-row state; `model_column_ic` leaves the flag false and returns a three-row state. The driver then fixes `two_temp_mode = grid.two_temperature` and `release_mode = gamma_mode && !two_temp_mode`, and checks the returned state length against the width that choice implies (`grid.n_mixture_state` or `grid.ns*num_of_two_temp_eq`).
 4. Each solver guards its own entry points against the others' Grid, so a mismatch throws rather than silently computing nonsense:
 
@@ -161,7 +161,7 @@ The driver adds its own preconditions before the first step for either Saha solv
         |
   Grid::init(sc.peek_ns(), cfl)           src/core/grid.cpp -- allocate ns-sized fields
         |
-  [GAMMA_TABLE loaded?] -> gamma_mode     src/main.cpp
+  [CHROMO_EOS_TABLE?] -> gamma_mode       src/main.cpp
         |
   xn = sc.ic(grid)                        scenario IC: geometry, B, gravity,
         |                                 ghost buffers, initial conserved state;
@@ -225,16 +225,9 @@ Precision is **one knob**. `chromosphere::Real` is the scalar storage type and `
 
 *Consistency with the target coupling framework.* Every shipped SWMF/BATS-R-US build sets `PRECISION = ${DOUBLEPREC}` in `share/build/Makefile.<OS>.<compiler>` (all 23 templates, the nvfortran/GPU ones included), `Config.pl` defaults to double, and BATS-R-US declares `State_VGB`, `StateOld_VGB`, `Source_VC` and the fluxes as default `real` — so `U^{n+1} = U^n + dt*R` is a float64 accumulation there, with no compensated summation and no deviation formulation. A double-precision conserved state is the SWMF-consistent choice; the float32 state was the inconsistent one.
 
-`CHROMO_STATE_FLOAT32` (option, default `OFF`) reverts to the pre-cutover `float` storage. It is **DIAGNOSTIC ONLY** — kept so the round-off sensitivity stays reproducible — is not exercised by `scripts/release_validation.sh`, and no release number may be quoted from it. Build it into a separate tree so the release build is never shadowed:
+There is no precision option. The diagnostic `CHROMO_STATE_FLOAT32` build that reverted to the pre-cutover `float` storage was removed on 2026-11-16, once the precision question was closed, and `Real` is `double` unconditionally; the earlier `CHROMO_STATE_FLOAT64` flag and its hard-error tombstone are gone too. CMake no longer knows either name, so passing one only draws an unused-variable warning and gives an ordinary `double` build.
 
-```bash
-cmake -S . -B build_omp_f32 -DCMAKE_BUILD_TYPE=Release \
-      -DCHROMO_ENABLE_OPENMP=ON -DCHROMO_STATE_FLOAT32=ON
-```
-
-`CHROMO_STATE_FLOAT64` was **retired**: double is the default, so CMake hard-errors on the old flag rather than producing a build that looks configured and is not. There is no `build_omp_f64` tree any more.
-
-Both precisions pass the whole unit suite with no loosened tolerance. Evidence: `docs/studies/numerics/state_precision_release_cutover.md` for the cutover, `docs/studies/numerics/float32_precision_control_experiment.md` for the original diagnostic that motivated it, and Known limitations in @ref validation for what the cutover did and did not fix.
+While the `float` build existed, both precisions passed the whole unit suite with no loosened tolerance. Evidence: `docs/studies/numerics/state_precision_release_cutover.md` for the cutover, `docs/studies/numerics/float32_precision_control_experiment.md` for the original diagnostic that motivated it, and Known limitations in @ref validation for what the cutover did and did not fix.
 
 ### OpenMP
 

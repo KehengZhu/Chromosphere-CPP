@@ -10,8 +10,8 @@ CMake options, set at configure time (`cmake -S . -B <dir> -D<option>=ON`). Buil
 | --- | --- | --- |
 | `CHROMO_ENABLE_OPENMP` | `OFF` | Links OpenMP and defines `CHROMO_USE_OPENMP=1`. The production configuration is `ON` (tree `build_omp/`, which the run scripts use); the thread count comes from `OMP_NUM_THREADS` at run time. |
 | `CHROMO_ENABLE_LEGACY` | `OFF` | Also builds the frozen two-fluid solver and its scenarios under `legacy/` (`model_gentle`, `model_c7`, `model_flare`, `analytic_canopy`, `pfss_field_line`) and their tests, and defines `CHROMO_ENABLE_LEGACY=1`. With it `OFF` none of that code is compiled or linked, and requesting a legacy scenario fails immediately with a message naming `-DCHROMO_ENABLE_LEGACY=ON`. See `legacy/README.md`. |
-| `CHROMO_STATE_FLOAT32` | `OFF` | DIAGNOSTIC ONLY: stores the conserved state in `float`. No release number may be quoted from it. |
-| `CHROMO_STATE_FLOAT64` | — | Retired; configuring with it is a hard CMake error (double is the default). |
+
+There is no storage-precision option: `chromosphere::Real` is `double` unconditionally. The diagnostic `CHROMO_STATE_FLOAT32` build was removed on 2026-11-16, once the precision question was closed; its measurements stay in the two precision studies (see @ref validation). CMake no longer knows either precision flag, so passing one only draws CMake's unused-variable warning and gives an ordinary `double` build.
 
 ## Command line
 
@@ -33,11 +33,12 @@ Note on argument 7 in release mode: `model_column_ic` sets `Grid::enable_radiati
 
 ## Environment variables
 
-Two parsing conventions are used and they behave differently.
+Four parsing conventions are used, and they behave differently.
 
 - Driver booleans (`CHROMO_*` in `src/main.cpp`) use `env_enabled()`: unset takes the stated default; the values `0`, `false` and `off` disable; **every other value enables, including an empty string**.
-- Scenario knobs (`ISO_*`, `FLARE_*`, `GENTLE_*`, `C7_*`, `PFSS_FLARE`) use a local `env_f()`: the value is parsed with `std::stof` and an unparseable value silently falls back to the default. A knob is "on" when its float value is non-zero.
-- The release rejection lists test **presence only** (`std::getenv(name) != nullptr`), so `ISO_COOLING=0` is just as fatal as `ISO_COOLING=1`.
+- Numeric scenario knobs — the release `CHROMO_DOMAIN_*`, `CHROMO_MESH_*`, `CHROMO_CONDUCTION`, `CHROMO_BC_T_TOP_K` and `CHROMO_BC_VCAP_MACH`, and the legacy `ISO_*`, `FLARE_*`, `GENTLE_*`, `C7_*` and `PFSS_FLARE` — are parsed with `std::stof` / `std::stod` / `std::stoul`, and an unparseable value silently falls back to the **code default** (not the scenario preset). A knob is "on" when its numeric value is non-zero. `CHROMO_IC_P_TOP_PA` is the exception: an unparseable or non-positive value is rejected.
+- The release choice knobs `CHROMO_NUM_RIEMANN`, `CHROMO_BC_OUTER_P` and `CHROMO_COND_FACE` accept only their listed words and throw on anything else. `CHROMO_MESH_REFINE_PROFILE` keeps its code default on an unknown word.
+- The release rejection lists test **presence only** (`std::getenv(name) != nullptr`), so `ISO_COOLING=0` is just as fatal as `ISO_COOLING=1`, and so is any other `ISO_*` variable — see [Renamed and removed names](#config-renamed).
 
 ### Run control and output cadence
 
@@ -75,55 +76,69 @@ Sidecar layouts are documented on @ref io_formats.
 
 | Variable | Type / values | Default | Effect |
 | --- | --- | --- | --- |
-| `GAMMA_TABLE` | path to a `Gamma1` table | supplied unconditionally by `model_column` and the legacy `model_column_2t` as `data/eos/gamma1_hydrogen_v1.dat` (only the path is overridable) | **A loaded table is what selects a Saha/`Gamma1` solver** — the release single-fluid one, or (legacy build only) the two-temperature one when the scenario sets `Grid::two_temperature`. The driver SHA-256s the file and records the hash in the `gamma_diag` header. Setting it together with `ISO_GAMMA` is a hard error; setting it with `mode=explicit` is a hard error; setting it with any scenario other than `model_column` or `model_column_2t` is a hard error. Without a table the driver runs the historical two-fluid solver, which exists only in a `-DCHROMO_ENABLE_LEGACY=ON` build. |
+| `CHROMO_EOS_TABLE` | path to a `Gamma1` table | supplied unconditionally by `model_column` and the legacy `model_column_2t` as `data/eos/gamma1_hydrogen_v1.dat` (only the path is overridable) | **A loaded table is what selects a Saha/`Gamma1` solver** — the release single-fluid one, or (legacy build only) the two-temperature one when the scenario sets `Grid::two_temperature`. The driver SHA-256s the file and records path and hash in the sidecar headers, whose keys keep their historical spelling `# GAMMA_TABLE=` / `# GAMMA_TABLE_SHA256=` (see @ref io_formats). Setting it together with `ISO_GAMMA` is a hard error; setting it with `mode=explicit` is a hard error; setting it with any scenario other than `model_column` or `model_column_2t` is a hard error. Without a table the driver runs the historical two-fluid solver, which exists only in a `-DCHROMO_ENABLE_LEGACY=ON` build. Named `GAMMA_TABLE` until 2026-11-16. |
 | `SINGLE_FLUID` | float, non-zero = on | unset | Two-fluid research knob: slaves neutrals to the ion fluid. Read only when no `Gamma1` table is loaded. **Rejected (exit 1) in release mode if present at all.** |
 | `ENABLE_TE` | float, non-zero = on | unset | Two-fluid research knob: separate electron temperature `T_e != T_i`. Read only when no `Gamma1` table is loaded. **Rejected (exit 1) in release mode if present at all.** |
 
-### `model_column` / `model_gentle` model knobs (the `ISO_*` family)
+### `model_column` release knobs {#config-release-knobs}
 
-`model_column` has its IC/BC in `scenarios/model_column.cpp`. The legacy `model_gentle` and `model_column_2t` each have their own frozen copy of the same column (`legacy/scenarios/model_gentle.cpp`; `legacy/scenarios/model_column_2t.cpp`, a copy at commit 7e06466 that still reads the historical `ISO_*` names; legacy build only). The three never share a solver. All three install override-preserving defaults with `setenv(..., overwrite=0)` before the IC runs, so an explicit assignment in the environment always wins.
+`model_column` has its IC/BC in `scenarios/model_column.cpp` and reads only `CHROMO_*` names. `make_scenario` installs its presets with `setenv(..., overwrite=0)` before the IC runs, so an explicit assignment in the environment always wins, and selecting `model_column` with nothing set gives the release configuration:
 
-`model_column` presets: `GAMMA_TABLE=data/eos/gamma1_hydrogen_v1.dat`, `ISO_H_BASE=1600`, `ISO_DH=553`, `ISO_NS=500`, `ISO_HEAT_FLUX=1`, `ISO_T_TOP=22000`, `ISO_HYDRO_T_DECOUPLE=0`, `ISO_REFINE_PROFILE=outer`, `ISO_REFINE_FACTOR=4`, `ISO_REFINE_S_LO_KM=500`, `ISO_REFINE_TRANSITION_KM=20`.
+`CHROMO_EOS_TABLE=data/eos/gamma1_hydrogen_v1.dat`, `CHROMO_DOMAIN_BASE_KM=1600`, `CHROMO_DOMAIN_SPAN_KM=553`, `CHROMO_MESH_NS=500`, `CHROMO_CONDUCTION=1`, `CHROMO_BC_T_TOP_K=22000`, `CHROMO_MESH_REFINE_PROFILE=outer`, `CHROMO_MESH_REFINE_FACTOR=4`, `CHROMO_MESH_REFINE_START_KM=500`, `CHROMO_MESH_REFINE_GRADE_KM=20`.
 
-`model_column_2t` presets (legacy build only, in `legacy/scenarios/legacy_scenarios.cpp`): the release list as it stood at commit 7e06466, deliberately — the two-temperature test study had to differ from the release in nothing but the temperature split, or the comparison would not be controlled — except `ISO_HYDRO_T_DECOUPLE=1`, the outer hydro temperature closure it ran with. It adds only `TT_OUTER_TI` (default `neumann`) and rejects `ISO_RIEMANN` / `ISO_RECONSTRUCTION`, which have no meaning for a solver with one flux and one primitive set.
+The "code default" column is what the scenario falls back to when a preset is overridden with an unparseable value.
 
-`model_gentle` presets (in `legacy/scenarios/legacy_scenarios.cpp`): `ISO_CORONA=1`, `ISO_H_BASE=1003`, `ISO_HEAT_FLUX=1`, `ISO_COOLING=1`, `ISO_IONIZATION=1`, `ISO_TWO_FLUID=1`, `ISO_NS=600`. It never loads a `Gamma1` table.
+| Variable | Type [unit] | Release preset | Code default | Effect |
+| --- | --- | --- | --- | --- |
+| `CHROMO_DOMAIN_BASE_KM` | float [km] | `1600` | `0` | Height of the lower truncation face above the photosphere, which serves as the height gauge only. The face is a **mid-chromospheric truncation** of the modeled domain, never the photosphere. Also sets `Grid::out_base_km`, the height label offset in the output file. |
+| `CHROMO_DOMAIN_SPAN_KM` | float [km] | `553` | `1303` | Domain span above the base; the release top face sits at 2153 km. |
+| `CHROMO_MESH_NS` | unsigned integer [cells] | `500` | `600` | Coarse-equivalent cell count read by `peek_ns` before the IC. With refinement on this is the coarse-grid equivalent, not the allocated cell count (661 at the release preset). |
+| `CHROMO_CONDUCTION` | float, non-zero = on | `1` | `0` | Non-zero: implicit physical conduction from t = 0, driven by the outer reservoir temperature, with the Mach-capped open top. `0`: conduction off and a static outer reservoir (`V = 0` in the outer ghosts), for adiabatic hydrostatic checks; pair it with `CHROMO_BC_T_TOP_K=0`. There is no relaxation phase: the initial condition is exactly balanced at rest. |
+| `CHROMO_BC_T_TOP_K` | float [K] | `22000` | `0` | Fixed outer reservoir temperature, held in both upper hydro ghosts and read by conduction as its Dirichlet datum at the first ghost center (see [Outer temperature](#config-outer-temperature)). `0`, or any non-positive value, uses the initial top-cell temperature instead, which is what a conduction-off hydrostatic check needs. The column is *very* sensitive to it: the quasi-steady top-of-domain velocity goes as roughly `T_wall^3` and reverses sign near 10 kK — see [Sensitivity to the wall temperature](#config-twall-sensitivity). |
+| `CHROMO_BC_VCAP_MACH` | float [dimensionless, fraction of the `Gamma1` sound speed] | — | `0.1` | Outer outflow cap: the ghost copies the top-cell velocity, clamped to `abs(V) <= CHROMO_BC_VCAP_MACH * c_s`. Active only with conduction on. |
+| `CHROMO_IC_P_TOP_PA` | float [Pa] | unset | unset (the C7 column, top-cell `p` = 0.0102877 Pa) | Rebuilds the initial column with the **same** C7 `T(h)` but a base pressure chosen by secant iteration so the IC top cell sits at this pressure; both boundary reservoirs (`kOuterPRef`, `kInnerPRes0/1`) are then captured from the rebuilt column, so the pressure changes consistently through the domain instead of as a one-cell mismatch at the outer face. `p_top` is not proportional to `p_base` under Saha (a denser column is less ionized and has a shorter scale height): 0.003 Pa needs 0.22x the C7 base pressure, 0.08 Pa needs 12.1x. The achieved pressures are printed as `[model_column] CHROMO_IC_P_TOP_PA: ...`. Non-positive or unparseable values are rejected. Unset reproduces the C7 column byte for byte. The TR stays at the C7 height, so across a pressure sweep the initial `L_TR` is fixed by construction and the chromospheric temperature `T_c` stays at the C7 plateau; CFL 0.50 is validated only at the C7 pressure. A 5000 s sweep over `CHROMO_BC_T_TOP_K` 18–70 kK × `CHROMO_IC_P_TOP_PA` 0.003–0.08 Pa ends cleanly with zero Godunov fallbacks. At `CHROMO_BC_T_TOP_K >= 50000` with `CHROMO_IC_P_TOP_PA >= 0.04` (and at 70 kK already at 0.02), however, the N=500 upper chromosphere carries intermittent grid-scale flux noise, with top-face reversals. It is a resolution artifact of the sub-cell TR foot: it is locked to the foot crossing cell faces, is unchanged by CFL 0.25 or by moving the mesh grade, and is 4x weaker at N=1000. The 500 s mean flux is unaffected to 1.5 %. At 18–25 kK and 0.04–0.08 Pa the initial TR has still not relaxed by 5000 s. See `docs/studies/boundaries/tp_sweep_evaporation_closure_validation.md`. |
 
-Knobs valid in **both** modes:
+The diagnostic choices `CHROMO_NUM_RIEMANN`, `CHROMO_BC_OUTER_P` and `CHROMO_COND_FACE` are listed under [Reference-only overrides](#config-reference-overrides).
 
-| Variable | Type | Default (bare, before presets) | Effect |
-| --- | --- | --- | --- |
-| `ISO_NS` | unsigned integer | `1000` if `ISO_CORONA` is set and non-empty and not `0`, else `600` | Coarse-equivalent cell count read by `peek_ns` before the IC. With refinement on this is the coarse-grid equivalent, not the allocated cell count. |
-| `ISO_H_BASE` | float, km | `0` | Height of the lower truncation face above the photosphere. It is a truncation of the modeled domain, not the photosphere. Also sets `Grid::out_base_km`, the height label offset in the output file. |
-| `ISO_DH` | float, km | `1303` (or `ISO_CORONA_TOP_KM - ISO_H_BASE` when `ISO_CORONA` is on) | Domain span above the base. |
-| `ISO_HEAT_FLUX` | float, non-zero = on | `0` | `0` = Stage-1 adiabatic relaxation (conduction off); non-zero = conduction on. |
-| `ISO_RELAX_TIME` | float, seconds | `0` | Length of an initial Stage-1 adiabatic relaxation phase before conduction and the top jump switch on. |
-| `ISO_T_TOP` | float, K | `0` (= use the IC top-cell temperature) | Any positive value is an **absolute** imposed outer-boundary temperature and is not re-anchored across a relax phase. Release preset 22000. The column is *very* sensitive to it: the quasi-steady top-of-domain velocity goes as roughly `T_wall^3` and reverses sign near 10 kK — see [Sensitivity to the wall temperature](#config-twall-sensitivity). |
-| `ISO_P_TOP` | float, Pa | unset (the C7 column, top-cell `p` = 0.0102877 Pa) | Release only. Rebuilds the initial column with the **same** C7 `T(h)` but a base pressure chosen by secant iteration so the IC top cell sits at this pressure; both boundary reservoirs (`kOuterPRef`, `kInnerPRes0/1`) are then captured from the rebuilt column, so the pressure changes consistently through the domain instead of as a one-cell mismatch at the outer face. `p_top` is not proportional to `p_base` under Saha (a denser column is less ionized and has a shorter scale height): 0.003 Pa needs 0.22x the C7 base pressure, 0.08 Pa needs 12.1x. The achieved pressures are printed as `[model_column] ISO_P_TOP: ...`. Non-positive or unparsable values are rejected, and so is any use outside the release solver. Unset reproduces the C7 column byte for byte. The TR stays at the C7 height, so across a pressure sweep the initial `L_TR` is fixed by construction and the chromospheric temperature `T_c` stays at the C7 plateau; CFL 0.50 is validated only at the C7 pressure. A 5000 s sweep over `ISO_T_TOP` 18–70 kK × `ISO_P_TOP` 0.003–0.08 Pa ends cleanly with zero Godunov fallbacks. At `ISO_T_TOP >= 50000` with `ISO_P_TOP >= 0.04` (and at 70 kK already at 0.02), however, the N=500 upper chromosphere carries intermittent grid-scale flux noise, with top-face reversals. It is a resolution artefact of the sub-cell TR foot: it is locked to the foot crossing cell faces, is unchanged by CFL 0.25 or by moving the mesh grade, and is 4x weaker at N=1000. The 500 s mean flux is unaffected to 1.5 %. At 18–25 kK and 0.04–0.08 Pa the initial TR has still not relaxed by 5000 s. See `docs/studies/boundaries/tp_sweep_evaporation_closure_validation.md`. |
-| `ISO_TJUMP_A` | float | `1.0` | Outer ghost temperature jump `T_ghost1 = a * T_ref`. |
-| `ISO_TJUMP_B` | float | `1.0` | Second ghost jump `T_ghost2 = b * T_ghost1`. |
-| `ISO_HYDRO_T_DECOUPLE` | float, non-zero = on | `0` | Release preset `0`: one fixed outer temperature `ISO_T_TOP` in both hydro ghosts, which conduction also reads as its Dirichlet datum at the ghost centre. `1` lets the **hydro** ghost temperature zero-gradient-extrapolate the live top cell while conduction keeps a fixed wall at the physical outer face (the release until 2026-09-22; `model_column_2t` preset). See [Outer temperature](#config-outer-temperature). |
-| `ISO_OUTER_T_HYDRO_WALL` | float, non-zero = on | `0` | Diagnostic only. In decoupled mode, pins the outer **hydro** ghost temperature back to the conduction wall (`T_hydro = T_cond = ISO_T_TOP`) while the wall stays a physical-face conduction datum. Only useful together with `ISO_OUTER_P_NEUMANN` — see [Which variable carries the outer condition](#config-outer-closure-swap). |
-| `ISO_OUTER_P_NEUMANN` | integer, `0`\|`1`\|`2` | `0` (fixed reservoir back-pressure) | Diagnostic only. Replaces the fixed outer back-pressure `kOuterPRef` with a Neumann pressure closure extrapolated off the live top cell: `1` = `dp/ds = 0`, `2` = `dp/ds = -rho g` (the release ladder re-anchored on the live top cell). Rejected unless the hydro ghost temperature is fixed, since otherwise the face would impose nothing. Mode `1` **destroys the model** — see [Which variable carries the outer condition](#config-outer-closure-swap). |
-| `ISO_VCAP` | float, Mach | `0.1` | Outer outflow velocity cap as a fraction of the sound speed. |
-| `ISO_COND_KIRCHHOFF` | float, non-zero = on | `0` | Diagnostic only. Replaces the harmonic-mean face conductivity of the Spitzer electron part with the Kirchhoff secant `(2/7)(kappa_e,R T_R - kappa_e,L T_L)/(T_R - T_L)`, clipped to the two cell values. That secant is exact for a steady `kappa ∝ T^{5/2}` profile however steep it is, whereas the harmonic mean follows the cold side of a TR foot narrower than a cell. Tests whether the grid-locked TR pulses at hot walls (≥ 45 kK) come from the face conductivity. The neutral part and every other path are unchanged; unset reproduces the release byte for byte. |
-| `ISO_COND_ARITH` | float, non-zero = on | `0` | Diagnostic only. Arithmetic mean of the two total cell conductivities at every conduction face, on any mesh. At the base of the transition region neutral conduction dominates the cold side and Spitzer conduction the hot side, and the harmonic mean is pinned to the smaller one; the arithmetic mean lies near the Kirchhoff value of the total conductivity there. Cannot be combined with `ISO_COND_KIRCHHOFF` (which applies the Kirchhoff secant to the Spitzer part only and keeps the harmonic mean for the neutral part, so it *lowers* that face conductivity). Unset reproduces the release byte for byte. |
-| `ISO_INNER_T_NEUMANN` | float, non-zero = on | `0` (Dirichlet) | Conduction lower BC: Dirichlet fixed reservoir temperature vs Neumann (insulating). On the two-temperature leg it applies to **both** channels. |
-| `TT_OUTER_TI` | `neumann` \| `dirichlet` | `neumann` | **Legacy `model_column_2t` only** (`-DCHROMO_ENABLE_LEGACY=ON`). Outer-face conduction BC on the **heavy-particle** temperature. `neumann` (the physically and characteristically motivated default) makes the top insulating for the heavy channel, because the fully ionized plasma above the domain has no neutral-hydrogen conductive flux to supply. `dirichlet` imposes the same 22,000 K wall on `T_i` that the electron channel gets, as the controlled comparison. The **electron** channel keeps the Dirichlet reservoir either way. Any other value throws. See @ref numerics-two-temp-bc. |
+### Mesh refinement
 
-Knobs read only by the **two-fluid** path (`model_gentle`, legacy build only); each is a hard error in release mode unless noted:
+Static local refinement, not AMR: the mesh is generated once at IC time and never regridded. Read by `refine_params_from_env(kReleaseRefineEnv)` in `scenarios/mesh.cpp`; the legacy `model_gentle` and `model_column_2t` read the same five controls under their historical `ISO_REFINE_*` names (`kLegacyRefineEnv`). No other scenario calls the builder, and PFSS field lines carry their own externally specified mesh.
+
+| Variable | Type [unit] | Release preset | Code default | Effect |
+| --- | --- | --- | --- | --- |
+| `CHROMO_MESH_REFINE_FACTOR` | float [dimensionless] | `4` | `1.0` | Fine/coarse resolution ratio. `<= 1` disables refinement, and the builder then returns the exact uniform `CHROMO_MESH_NS` grid. |
+| `CHROMO_MESH_REFINE_START_KM` | float [km from the inner face] | `500` | `0.0` | Inner edge of the refined band. |
+| `CHROMO_MESH_REFINE_END_KM` | float [km from the inner face] | unset | `700.0` | Outer edge of the refined band. Used by the `lower` profile only; the `outer` profile always runs fine to the domain top. |
+| `CHROMO_MESH_REFINE_GRADE_KM` | float [km] | `20` | `100.0` | **Minimum** width of the geometric fine/coarse grade. The actual width is set by the adjacent-cell-width ratio cap `MESH_MAX_RATIO = 1.1`, so a requested width the cap cannot support is widened, never narrowed. |
+| `CHROMO_MESH_REFINE_PROFILE` | `lower` or `outer`, case-insensitive | `outer` | `lower` | `lower`: coarse, fine over `[start, end]`, grade back to coarse, coarse. `outer`: coarse, grade over `[start - tau, start]`, fine from `start` to the domain top. Any other string keeps the code default. |
+
+Refinement only **adds** cells: `CHROMO_MESH_NS` remains the coarse-grid-equivalent count and `Grid::resize` grows the allocation to match the generated face grid. The release preset (`outer`, factor 4, start 500 km, grade 20 km, `CHROMO_MESH_NS=500`, `CHROMO_DOMAIN_SPAN_KM=553`) yields 661 actual cells. If the requested window does not fit strictly inside the domain, the builder silently falls back to the uniform grid.
+
+### Legacy column knobs (`ISO_*`) — read only by the legacy scenarios {#config-legacy-iso}
+
+Everything in this subsection is read **only** by the legacy column scenarios, in a `-DCHROMO_ENABLE_LEGACY=ON` build; a release run stops on any of these names (see [Renamed and removed names](#config-renamed)). `model_gentle` (`legacy/scenarios/model_gentle.cpp`) and `model_column_2t` (`legacy/scenarios/model_column_2t.cpp`) are frozen copies of the column IC/BC as it stood at commit 7e06466. They read the complete historical `ISO_*` set of that commit, with the meaning documented there: the old names of the release knobs, the switches since removed from the release (`ISO_RELAX_TIME`, `ISO_TJUMP_A/B`, `ISO_HYDRO_T_DECOUPLE`, `ISO_OUTER_T_HYDRO_WALL`, `ISO_OUTER_P_NEUMANN`, `ISO_INNER_T_NEUMANN`, `ISO_RIEMANN`, `ISO_RECONSTRUCTION`, `ISO_LIMITER`, `ISO_MC3_BETA`) and the two-fluid knobs tabulated below. The two never share a solver, and both install override-preserving presets in `legacy/scenarios/legacy_scenarios.cpp`.
+
+`model_column_2t` presets: `CHROMO_EOS_TABLE=data/eos/gamma1_hydrogen_v1.dat` (the driver reads the table path under that name), `ISO_H_BASE=1600`, `ISO_DH=553`, `ISO_NS=500`, `ISO_HEAT_FLUX=1`, `ISO_T_TOP=22000`, `ISO_HYDRO_T_DECOUPLE=1`, `ISO_REFINE_PROFILE=outer`, `ISO_REFINE_FACTOR=4`, `ISO_REFINE_S_LO_KM=500`, `ISO_REFINE_TRANSITION_KM=20`. That is the release list as it stood at commit 7e06466, deliberately — the two-temperature test study had to differ from the release in nothing but the temperature split, or the comparison would not be controlled — except `ISO_HYDRO_T_DECOUPLE=1`, the decoupled outer hydro temperature closure it ran with. It adds `TT_OUTER_TI` (below) and rejects `ISO_GAMMA`.
+
+`model_gentle` presets: `ISO_CORONA=1`, `ISO_H_BASE=1003`, `ISO_HEAT_FLUX=1`, `ISO_COOLING=1`, `ISO_IONIZATION=1`, `ISO_TWO_FLUID=1`, `ISO_NS=600`. It never loads a `Gamma1` table.
 
 | Variable | Type | Default | Effect |
 | --- | --- | --- | --- |
-| `ISO_GAMMA` | float | `Grid::gamma_mono` (5/3) | Fixed adiabatic index of the two-fluid solver. Rejected three separate times in release mode: by `make_scenario` for `model_column`, by the `GAMMA_TABLE` branch of the driver, and by `model_column_ic`. Not to be confused with the fixed `gamma = 5/3` of the release Godunov flux: that is the frozen-composition index of the *face Riemann problem only*, is not user-settable, and does not replace the Saha closure anywhere else in the solver. |
+| `TT_OUTER_TI` | `neumann` \| `dirichlet` | `neumann` | **Legacy `model_column_2t` only.** Outer-face conduction BC on the **heavy-particle** temperature. `neumann` (the physically and characteristically motivated default) makes the top insulating for the heavy channel, because the fully ionized plasma above the domain has no neutral-hydrogen conductive flux to supply. `dirichlet` imposes the same 22,000 K wall on `T_i` that the electron channel gets, as the controlled comparison. The **electron** channel keeps the Dirichlet reservoir either way. Any other value throws. See @ref numerics-two-temp-bc. |
+
+Knobs read only by the **two-fluid** path (`model_gentle`); each one stops a release run:
+
+| Variable | Type | Default | Effect |
+| --- | --- | --- | --- |
+| `ISO_GAMMA` | float | `Grid::gamma_mono` (5/3) | Fixed adiabatic index of the two-fluid solver. Stopped twice on a release run: by the `CHROMO_EOS_TABLE` branch of the driver (the preset always loads the table) and by `model_column_ic`. Not to be confused with the fixed `gamma = 5/3` of the release Godunov flux: that is the frozen-composition index of the *face Riemann problem only*, is not user-settable, and does not replace the Saha closure anywhere else in the solver. |
 | `ISO_TWO_FLUID` | float, non-zero = on | `0` | Evolve ion and neutral as separate fluids. Rejected in release mode by the driver. |
 | `ISO_IONIZATION` | float, non-zero = on | `0` | Stage-E finite-rate ionization/recombination network. Rejected in release mode by the driver. |
 | `ISO_COOLING` | float, non-zero = on | `0` | Radiative sink; only takes effect when `ISO_HEAT_FLUX` is also on. Rejected in release mode. |
-| `ISO_CORONA` | float, non-zero = on | `0` | Extend the domain into a resolved ~1 MK corona. Rejected in release mode. |
-| `ISO_CORONA_TOP_KM` | float, km | `10000` | Coronal top used to derive the default `ISO_DH` when `ISO_CORONA` is on. Read but inert in release mode (`ISO_CORONA` cannot be set there, and `ISO_DH` is preset). |
+| `ISO_CORONA` | float, non-zero = on | `0` | Extend the domain into a resolved ~1 MK corona; also raises the bare legacy `ISO_NS` default from 600 to 1000. Rejected in release mode. |
+| `ISO_CORONA_TOP_KM` | float, km | `10000` | Coronal top used to derive the default `ISO_DH` when `ISO_CORONA` is on. |
 | `ISO_TRAC` | float | `-1` = auto (`ISO_COOLING || ISO_CORONA`) | Force TRAC TR-broadening on or off. Rejected in release mode. |
-| `ISO_TRAC_TCHROM` | float, K | `2.0e4` | TRAC chromospheric base temperature. Read only on the two-fluid branch. |
-| `ISO_TRAC_TCMAXFRAC` | float | `0.2` | TRAC cutoff cap as a fraction of the peak temperature. Read only on the two-fluid branch. |
+| `ISO_TRAC_TCHROM` | float, K | `2.0e4` | TRAC chromospheric base temperature. |
+| `ISO_TRAC_TCMAXFRAC` | float | `0.2` | TRAC cutoff cap as a fraction of the peak temperature. |
 | `ISO_QFLUX` | float, non-zero = on | `0` | Impose the coronal conductive flux `q(T)` as a Neumann outer BC instead of the ghost-T jump. Rejected in release mode. |
 | `ISO_QFLUX0` | float, W/m^2 | C7's own top-gradient flux `kappa0 T^{5/2} dT/ds` | Base flux. Read only when `ISO_QFLUX` is on. |
 | `ISO_QFLUX_ENHANCE` | float | `1.0` | Ramp amplitude on the imposed flux. |
@@ -141,20 +156,6 @@ Knobs read only by the **two-fluid** path (`model_gentle`, legacy build only); e
 | `ISO_TBOOST_TC` | float, K | `3.0e5` | Selector centre temperature. |
 | `ISO_TBOOST_W` | float, K | `1.0e5` | Selector width. |
 | `ISO_NUMERICAL_DIFFUSIVITY_MULT` | float | `0` | Multiplier on the historical mesh-scaled artificial conduction (`1` restores the legacy `C_num = 2000 m/s`, 4x in the resolved-corona testbed). Rejected in release mode; the release conduction operator is structurally physical-only and sets `numerical_diffusivity_per_length = 0`. |
-
-### Mesh refinement
-
-Static local refinement, not AMR: the mesh is generated once at IC time and never regridded. Read by `refine_params_from_env` in `scenarios/mesh.cpp`, and used **only** by `model_column` / `model_gentle` — no other scenario calls the builder, and PFSS field lines carry their own externally specified mesh. The `ISO_REFINE_*` aliases are applied after the `GRID_REFINE_*` values and therefore override them.
-
-| Variable | Alias | Type | Default | Effect |
-| --- | --- | --- | --- | --- |
-| `GRID_REFINE_FACTOR` | `ISO_REFINE_FACTOR` | float | `1.0` | Fine/coarse resolution ratio. `<= 1` disables refinement, and the builder then returns the exact uniform `ns_coarse` grid. |
-| `GRID_REFINE_S_LO_KM` | `ISO_REFINE_S_LO_KM` | float, km from the inner face | `0.0` | Inner edge of the refined band. |
-| `GRID_REFINE_S_HI_KM` | `ISO_REFINE_S_HI_KM` | float, km | `700.0` | Outer edge of the refined band. Used by the `lower` profile only; the `outer` profile always runs fine to the domain top. |
-| `GRID_REFINE_TRANSITION_KM` | `ISO_REFINE_TRANSITION_KM` | float, km | `100.0` | **Minimum** width of the geometric fine/coarse grade. The actual width is set by the adjacent-cell-width ratio cap `MESH_MAX_RATIO = 1.1`, so a requested width the cap cannot support is widened, never narrowed. |
-| `GRID_REFINE_PROFILE` | `ISO_REFINE_PROFILE` | `lower` or `outer`, case-insensitive | `lower` | `lower`: coarse, fine over `[s_lo, s_hi]`, grade back to coarse, coarse. `outer`: coarse, grade over `[s_lo - tau, s_lo]`, fine from `s_lo` to the domain top. Any other string keeps the current value. |
-
-Refinement only **adds** cells: `ISO_NS` remains the coarse-grid-equivalent count and `Grid::resize` grows the allocation to match the generated face grid. The release preset (`outer`, factor 4, `s_lo = 500 km`, transition 20 km, `ISO_NS=500`, `ISO_DH=553`) yields 661 actual cells. If the requested window does not fit strictly inside the domain, the builder silently falls back to the uniform grid.
 
 ### Flare, PFSS and C7 knobs
 
@@ -208,43 +209,69 @@ The program reads no OpenMP variable itself except to echo it: it prints `[openm
 
 `scripts/run_chromo_omp.sh` applies these three as override-preserving defaults; `scripts/run_chromo_realtime.sh` adds low-I/O output defaults (`CHROMO_OUTPUT=0`, `CHROMO_GAMMA_DIAG=0`, `CHROMO_FACE_FLUX_DIAG=0`, `CHROMO_OUTER_COND_DIAG=0`, `CHROMO_EOS_COUNTS=0`, `CHROMO_PROFILE=1`, `CHROMO_PROGRESS_STRIDE=10000`) and, when the fourth positional argument is exactly `model_column`, `CHROMO_CFL=0.50`. Explicit environment assignments always win over all of these.
 
-## Reference-only overrides — never use in production
+## Reference-only overrides — never use in production {#config-reference-overrides}
 
-These exist so a numerical result can be attributed to (or cleared of) a specific scheme choice without hand-editing the scenario. They are not needed for any production run, they print a loud override line to stderr when set, and `scripts/release_validation.sh` checks that the default path reproduces the explicit `swmf-godunov` / `lnrho-v-lnp` run bitwise.
+These exist so a numerical result can be attributed to (or cleared of) a specific scheme or boundary choice without hand-editing the scenario. They are not needed for any production run, and `scripts/release_validation.sh` checks that the default path reproduces an explicit `CHROMO_NUM_RIEMANN=godunov` run bitwise.
 
 | Variable | Values | Release default | Effect |
 | --- | --- | --- | --- |
-| `ISO_RIEMANN` | `swmf-godunov`, `roe-local`, `rusanov` | `swmf-godunov` | The release value is the SWMF-style exact-Riemann Godunov flux at frozen composition described under [Numerics](@ref numerics). `roe-local` selects the mixture Roe characteristic flux — the equilibrium-`Gamma1` linearization that was the previous release flux, kept as the controlled comparison solver. `rusanov` restores the local Lax-Friedrichs flux (excessively dissipative at the low Mach numbers of this problem), which is also the automatic per-face fallback of the other two. The three are mutually exclusive, so the face Riemann solver is the only thing this variable changes — **including the timestep**, which `mixture_timestep` sizes from the signal speed of whichever flux is in force (frozen `sqrt(5/3 p/rho)` for `swmf-godunov`, equilibrium `sqrt(Gamma1 p/rho)` otherwise). `swmf-godunov` and `roe-local` require Gamma/Saha mode. Any other value throws `std::invalid_argument`. |
-| `ISO_RECONSTRUCTION` | `lnrho-v-lnt`, `lnrho-v-lnp` | `lnrho-v-lnp` | `lnrho-v-lnt` restores the temperature-based primitive set, which closes pressure through the nonlinear EOS and manufactures face-pressure mismatch across the partial-ionization transition. It also turns off the hydrostatic reconstruction, which lives in the `ln p` slot, so the initial condition and ghosts revert to the trapezoidal hydrostatic form. `lnrho-v-lnp` requires Gamma/Saha mode. Any other value throws. |
-| `ISO_LIMITER` | `mc3`, `minmod`, `first` | `mc3` with beta = 2 | `minmod` selects the symmetric minmod limiter; `first` sets beta = 0 with MC3, giving phi identically 0, i.e. piecewise-constant first order. Any other value throws. |
-| `ISO_MC3_BETA` | float | `2.0` | Read **only** when `ISO_LIMITER=mc3` is explicitly set. Setting `ISO_MC3_BETA` alone has no effect. |
+| `CHROMO_NUM_RIEMANN` | `godunov`, `roe` | `godunov` | `godunov` is the SWMF-style exact-Riemann Godunov flux at frozen composition described under [Numerics](@ref numerics). `roe` selects the mixture Roe characteristic flux — the equilibrium-`Gamma1` linearization that was the previous release flux, kept as the controlled comparison solver and the only reference flux. The face Riemann solver is the only thing this variable changes — **including the timestep**, which `mixture_timestep` sizes from the signal speed of whichever flux is in force (frozen `sqrt(5/3 p/rho)` for `godunov`, equilibrium `sqrt(Gamma1 p/rho)` for `roe`). Local Rusanov survives only as the automatic per-face fallback of both. Setting the variable prints a `[model_column] Riemann override:` line on stderr; any other value throws `std::invalid_argument`. |
+| `CHROMO_BC_OUTER_P` | `reservoir`, `hydrostatic` | `reservoir` | `reservoir` is the release outer closure: the fixed back-pressure `kOuterPRef` captured once from the initial condition. `hydrostatic` re-anchors the same EOS-closed hydrostatic ghost ladder (`dp/ds = -rho g`) on the live top cell, so the fixed ghost temperature becomes the one externally imposed condition. It survives 4000 s but cuts the evaporation signal ~19x — see [Which variable carries the outer condition](#config-outer-closure-swap). Any other value throws. |
+| `CHROMO_COND_FACE` | `harmonic`, `kirchhoff`, `arithmetic` | `harmonic` | Face conductivity of the implicit conduction solve. `harmonic` is the release rule: the distance-weighted harmonic mean of the two cell conductivities on a non-uniform mesh such as the release mesh, and the arithmetic mean on a uniform one. `kirchhoff` replaces the Spitzer electron part with the Kirchhoff secant `(2/7)(kappa_e,R T_R - kappa_e,L T_L)/(T_R - T_L)` [W m^-1 K^-1], clipped to the two cell values; that secant is exact for a steady `kappa ∝ T^{5/2}` profile however steep it is, whereas the harmonic mean follows the cold side of a TR foot narrower than a cell. The neutral part keeps the release rule, so at the TR base `kirchhoff` *lowers* the face conductivity. `arithmetic` takes the plain arithmetic mean of the two total cell conductivities at every face, on any mesh; at the base of the transition region, where neutral conduction dominates the cold side and Spitzer conduction the hot side, it lies near the Kirchhoff value of the total conductivity. Both test whether the grid-locked TR pulses at hot walls (≥ 45 kK) come from the face conductivity. Any other value throws. |
 
-The numeric-method toggles that used to select the "bestwb" path — `ISO_LOG_RECON`, `ISO_MC3`, `ISO_EQ_WB`, `ISO_INNER_WB`, `ISO_INNER_WB_RHO`, `ISO_C7_IC`, `ISO_C7_HSE` — are now **unconditional** in `model_column` / `model_gentle` and are simply ignored if set, so old command lines still run. Log-space `(ln rho, u, ln p)` MUSCL, the MC3/Koren limiter at beta = 2, the C7 IC and its hydrostatic density rebuild are always on (the two-fluid `well_balanced` φ_g pressure correction has no counterpart in the release, whose reconstruction decodes each cell with its own potential; the release's balance at rest comes from its hydrostatic reconstruction instead — see @ref numerics); the equilibrium-reference well-balancing that `ISO_EQ_WB` used to select was **retired** from the release, which is reference-free (`Grid::eq_wb` survives for the two-fluid research solver only and must never be set on a release Grid). The diagnostic toggles `ISO_DIAG_*`, the base sponge `ISO_SPONGE_*`, `ISO_TRAC_TC_FIXED` and the analytic-isentrope toy IC knobs (`ISO_T_BASE`, `ISO_N_BASE`, `ISO_F_ION`) were removed outright and are not read anywhere.
+The reconstruction has no switch. `(ln rho, u, ln p)` MUSCL-Hancock with the `ln p` slot hydrostatic, the MC3/Koren limiter at beta = 2, the C7 initial condition and its hydrostatic density rebuild are always on, and every run names them on its `[model_column] numerics:` stderr line. The temperature-based primitive set, whole-domain Rusanov and the limiter diagnostics were removed on 2026-11-16 (see [Renamed and removed names](#config-renamed)). The two-fluid `well_balanced` φ_g pressure correction has no counterpart in the release, whose reconstruction decodes each cell with its own potential; the release's balance at rest comes from its hydrostatic reconstruction instead — see @ref numerics. The equilibrium-reference well-balancing that `ISO_EQ_WB` used to select was **retired** from the release, which is reference-free (`Grid::eq_wb` survives for the two-fluid research solver only and must never be set on a release Grid). The older toggles `ISO_LOG_RECON`, `ISO_MC3`, `ISO_EQ_WB`, `ISO_INNER_WB`, `ISO_INNER_WB_RHO`, `ISO_C7_IC`, `ISO_C7_HSE`, `ISO_DIAG_*`, `ISO_SPONGE_*`, `ISO_TRAC_TC_FIXED`, `ISO_T_BASE`, `ISO_N_BASE` and `ISO_F_ION` are read nowhere; on a release run they now stop it like every other `ISO_*` name.
+
+## Renamed and removed names (2026-11-16) {#config-renamed}
+
+Until 2026-11-16 the release knobs carried the `ISO_` prefix of a retired experimental model. The release now reads only `CHROMO_<GROUP>_<NAME>` names, with the unit in the name where there is one. Release outputs are byte-identical under the new names. To translate an old script:
+
+| Old name | New name | Values |
+| --- | --- | --- |
+| `ISO_H_BASE` | `CHROMO_DOMAIN_BASE_KM` | km |
+| `ISO_DH` | `CHROMO_DOMAIN_SPAN_KM` | km |
+| `ISO_NS` | `CHROMO_MESH_NS` | cells |
+| `ISO_REFINE_FACTOR`, `GRID_REFINE_FACTOR` | `CHROMO_MESH_REFINE_FACTOR` | unchanged |
+| `ISO_REFINE_PROFILE`, `GRID_REFINE_PROFILE` | `CHROMO_MESH_REFINE_PROFILE` | `lower` / `outer` |
+| `ISO_REFINE_S_LO_KM`, `GRID_REFINE_S_LO_KM` | `CHROMO_MESH_REFINE_START_KM` | km |
+| `ISO_REFINE_S_HI_KM`, `GRID_REFINE_S_HI_KM` | `CHROMO_MESH_REFINE_END_KM` | km |
+| `ISO_REFINE_TRANSITION_KM`, `GRID_REFINE_TRANSITION_KM` | `CHROMO_MESH_REFINE_GRADE_KM` | km |
+| `ISO_HEAT_FLUX` | `CHROMO_CONDUCTION` | `1` / `0` |
+| `ISO_P_TOP` | `CHROMO_IC_P_TOP_PA` | Pa |
+| `ISO_T_TOP` | `CHROMO_BC_T_TOP_K` | K; `0` = initial top-cell temperature |
+| `ISO_VCAP` | `CHROMO_BC_VCAP_MACH` | unchanged |
+| `ISO_OUTER_P_NEUMANN=0` / `=2` | `CHROMO_BC_OUTER_P=reservoir` / `=hydrostatic` | mode `1` removed |
+| `ISO_COND_KIRCHHOFF=1` / `ISO_COND_ARITH=1` | `CHROMO_COND_FACE=kirchhoff` / `=arithmetic` | default `harmonic` |
+| `ISO_RIEMANN=swmf-godunov` / `=roe-local` | `CHROMO_NUM_RIEMANN=godunov` / `=roe` | `rusanov` removed |
+| `GAMMA_TABLE` | `CHROMO_EOS_TABLE` | path; the sidecar header keys are unchanged |
+
+Removed without replacement: `ISO_RIEMANN=rusanov` (whole-domain Rusanov left a persistent TR velocity ripple), `ISO_RECONSTRUCTION` (the `ln T` primitive set manufactured face-pressure mismatch), `ISO_OUTER_P_NEUMANN=1` (`dp/ds = 0` destroyed the model), `ISO_RELAX_TIME` (the initial condition is exactly balanced at rest), `ISO_TJUMP_A/B` (two-fluid-era ghost-temperature cascade, always 1 in the release), `ISO_LIMITER` / `ISO_MC3_BETA` (ripple-study diagnostics), `ISO_INNER_T_NEUMANN` (never tested in the release), `ISO_HYDRO_T_DECOUPLE` / `ISO_OUTER_T_HYDRO_WALL` (the release has one fixed outer temperature; a conduction-off check now uses `CHROMO_BC_T_TOP_K=0`), the `ISO_HSE_RECON` and `CHROMO_STATE_FLOAT64` tombstones, and the `CHROMO_STATE_FLOAT32` build option (`Real` is `double` unconditionally).
+
+**Retired-name guard.** A stale name that was silently ignored would quietly run the release default instead. So `model_column_ic` stops a release run if the environment contains **any** `ISO_*` or `GRID_REFINE_*` variable, `TT_OUTER_TI` or `GAMMA_TABLE`, whatever its value, with one of three messages:
+
+- a renamed name -> "model_column: <old> was renamed to <new>; unset it (the release reads only CHROMO_* names)";
+- a historical two-fluid knob (`ISO_GAMMA`, `ISO_TWO_FLUID`, `ISO_IONIZATION`, `ISO_COOLING`, `ISO_TRAC`, `ISO_CORONA`, `ISO_CHEAT`, `ISO_QFLUX`, `ISO_TBOOST`, `ISO_NUMERICAL_DIFFUSIVITY_MULT`) -> "model_column: <name> is historical two-fluid research configuration and has no meaning for the single-fluid release solver; run the legacy model_gentle scenario for that path (build with -DCHROMO_ENABLE_LEGACY=ON)";
+- anything else -> "model_column: <name> is not a release setting (it was removed, or it belongs to a legacy scenario); unset it."
+
+The legacy scenarios are unaffected and keep reading `ISO_*` (see [Legacy column knobs](#config-legacy-iso)).
 
 ## Rejected in release mode
 
-"Release mode" means a loaded `Gamma1` table *and* a scenario that did not select the legacy two-temperature solver, which in practice means the `model_column` scenario. The guards fire in three places and every one of them stops the run.
-
-`make_scenario` (before anything is allocated), for `model_column` only:
-
-- `ISO_GAMMA` present -> `std::runtime_error`: "model_column is the single-fluid release scenario and derives every thermodynamic index from the Saha/Gamma1 closure; ISO_GAMMA ... has no meaning here. Use the legacy model_gentle scenario for the historical fixed-gamma column."
+"Release mode" means a loaded `Gamma1` table *and* a scenario that did not select the legacy two-temperature solver, which in practice means the `model_column` scenario. The guards live in the driver and in `model_column_ic` (plus one in the legacy `model_column_2t` preset), and every one of them stops the run.
 
 For the legacy `model_column_2t` only (in `make_legacy_scenario`):
 
 - `ISO_GAMMA` present -> `std::runtime_error`: "model_column_2t is built on the Saha/Gamma1 closure; ISO_GAMMA ... has no meaning here."
 
-`chromo_main`, in the `GAMMA_TABLE` branch and immediately after (all print `release-solver error:` and exit 1):
+`chromo_main`, in the `CHROMO_EOS_TABLE` branch and immediately after (all print `release-solver error:` and exit 1):
 
-- `ISO_GAMMA` present together with `GAMMA_TABLE` -> "GAMMA_TABLE and explicitly supplied ISO_GAMMA are mutually exclusive".
+- `ISO_GAMMA` present together with `CHROMO_EOS_TABLE` -> "CHROMO_EOS_TABLE and explicitly supplied ISO_GAMMA are mutually exclusive". Because `model_column` always presets the table, this is what stops `ISO_GAMMA` on a release run, before the IC is reached.
 - `mode == "explicit"` -> "the release solver has no explicit-only mode".
 - any scenario other than `model_column` or `model_column_2t` -> "the Gamma1/Saha solvers currently support only model_column (release) and the legacy model_column_2t (two-temperature)".
 - the positional `ionization` argument set to anything but `no-ionization` -> "finite-rate ionization was requested, but the release closure is Saha equilibrium; pass no-ionization".
-- `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID` or `ISO_IONIZATION` **present at all**, regardless of value -> "<name> is a legacy two-fluid setting and has no meaning for the single-fluid release solver".
+- `SINGLE_FLUID`, `ENABLE_TE`, `ISO_TWO_FLUID` or `ISO_IONIZATION` **present at all**, regardless of value -> "<name> is a legacy two-fluid setting and has no meaning for the single-fluid release solver". This fires before the retired-name guard for those four.
 - a scenario IC returning a state whose element count is not `grid.n_mixture_state` -> "the scenario returned a state of N elements, expected M (rho, rho u, E per cell)". The two-temperature solver (legacy build only) has the matching check against `grid.ns*num_of_two_temp_eq` -> "(rho, rho u, E, E_e per cell)".
 
-`model_column_ic`, for every knob in `kNonReleaseKnobs` **present at all**, regardless of value, throwing `std::runtime_error` "<name> is historical two-fluid research configuration and has no meaning for the single-fluid release solver; run the legacy model_gentle scenario for that path (build with -DCHROMO_ENABLE_LEGACY=ON)": `ISO_GAMMA`, `ISO_TWO_FLUID`, `ISO_IONIZATION`, `ISO_COOLING`, `ISO_TRAC`, `ISO_CORONA`, `ISO_CHEAT`, `ISO_QFLUX`, `ISO_TBOOST`, `ISO_NUMERICAL_DIFFUSIVITY_MULT`.
-
-`model_column_ic` also rejects `ISO_HSE_RECON` **present at all** ("ISO_HSE_RECON was removed; the hydrostatic reconstruction is the release scheme and has no switch"): it selected that reconstruction while it was a prototype, and a stale `ISO_HSE_RECON=0` must not silently run the release.
+`model_column_ic`, first thing: the [retired-name guard](#config-renamed) above, for any `ISO_*` / `GRID_REFINE_*` variable, `TT_OUTER_TI` or `GAMMA_TABLE` **present at all**, throwing `std::runtime_error`.
 
 `model_column_ic` also refuses a Grid with no `Gamma1` table loaded ("no Gamma1 table is loaded ... the historical fixed-gamma two-fluid column is the legacy model_gentle scenario"); the two-fluid leg it used to contain is `model_gentle_ic` in `legacy/scenarios/model_gentle.cpp`.
 
@@ -279,13 +306,13 @@ Known limitation to keep in mind when choosing a configuration: N500 long-durati
 
 ## Sensitivity to the wall temperature {#config-twall-sensitivity}
 
-`ISO_T_TOP` is the most consequential single knob in the release configuration, so it deserves a number rather than a warning. With everything else fixed at the release configuration of the time (C7 initial condition, N = 500/R4, `ISO_HYDRO_T_DECOUPLE = 1` — the previous decoupled closure, not re-run under the current single-temperature release — physical conduction only, 4000 s, double-precision state) a one-parameter sweep of the wall over 8–100 K gives a quasi-steady top-of-domain velocity of
+`CHROMO_BC_T_TOP_K` is the most consequential single knob in the release configuration, so it deserves a number rather than a warning. With everything else fixed at the release configuration of the time (C7 initial condition, N = 500/R4, the decoupled outer temperature closure of the time — removed on 2026-11-16 and not re-run under the current single-temperature release — physical conduction only, 4000 s, double-precision state) a one-parameter sweep of the wall over 8–100 K gives a quasi-steady top-of-domain velocity of
 
-| `ISO_T_TOP` [kK] | 8 | 10 | 12 | 15 | 18 | **22** | 30 | 45 | 70 | 100 |
+| `CHROMO_BC_T_TOP_K` [kK] | 8 | 10 | 12 | 15 | 18 | **22** | 30 | 45 | 70 | 100 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | `V_top` [m/s] | −0.44 | −0.10 | +0.54 | +2.1 | +4.6 | **+9.6** | +27.6 | +93.5 | +310 | +792 |
 
-Four decades of velocity for one decade of wall temperature. The response is a smooth power law on the upflow branch — a fit over `ISO_T_TOP >= 15000` gives `V ~ T_wall^3.09`, with the local exponent falling from 3.7 at the 22 kK release point to 2.6 at 100 kK — and it reverses sign near 10 kK, below which the column drains instead of evaporating. There is no saturation anywhere in the tested range and the `ISO_VCAP` outflow cap never binds (at most 15 % of the cap, at 100 kK).
+Four decades of velocity for one decade of wall temperature. The response is a smooth power law on the upflow branch — a fit over `CHROMO_BC_T_TOP_K >= 15000` gives `V ~ T_wall^3.09`, with the local exponent falling from 3.7 at the 22 kK release point to 2.6 at 100 kK — and it reverses sign near 10 kK, below which the column drains instead of evaporating. There is no saturation anywhere in the tested range and the `CHROMO_BC_VCAP_MACH` outflow cap never binds (at most 15 % of the cap, at 100 kK).
 
 The mechanism is entirely conductive: the wall thermostats the top cell to within 0.3 %, Spitzer conductivity supplies the `T^2.5`, and a column with no radiative sink must export the resulting conductive flux as the enthalpy flux of the evaporating material, so `V ~ q_wall / [rho_top (h + x chi_H/m_H)]` to within a factor of two over the whole range. Two practical consequences: any quantitative evaporation result is a statement about the chosen wall temperature as much as about the chromosphere, and a wall below about 8 kK drives the top of the column below the `Gamma1` table temperature floor and aborts the run.
 
@@ -295,9 +322,9 @@ Full study, including the time-convergence and CFL caveats: `docs/studies/bounda
 
 ## Outer temperature: one fixed ghost-cell temperature {#config-outer-temperature}
 
-The release (`ISO_HYDRO_T_DECOUPLE=0`) puts one fixed temperature, `T_c = ISO_T_TOP = 22 000 K`, in both upper hydro ghosts. Together with the fixed back-pressure `kOuterPRef`, the ghost state is a coronal reservoir at `(p_ref, T_c)`. Conduction reads its Dirichlet datum from the same first ghost, at the ghost centre, one top-cell width (276 m) from the top-cell centre: `q_top = kappa_face (T_c - T_top) / ds_top`, with `kappa_face` the harmonic mean of the top-cell and ghost conductivities.
+The release puts one fixed temperature, `T_c = CHROMO_BC_T_TOP_K = 22 000 K`, in both upper hydro ghosts. Together with the fixed back-pressure `kOuterPRef`, the ghost state is a coronal reservoir at `(p_ref, T_c)`. Conduction reads its Dirichlet datum from the same first ghost, at the ghost center, one top-cell width (276 m) from the top-cell center: `q_top = kappa_face (T_c - T_top) / ds_top`, with `kappa_face` the harmonic mean of the top-cell and ghost conductivities.
 
-Formally that is two conditions on a subsonic outflow face, which admits one. It makes no measurable difference here because conduction resets the top-cell temperature far faster than the flow renews it. The top cell's thermal relaxation time `tau_th = rho c_v ds_top d / kappa_face` is 0.08 s, against a top-cell advection time `ds_top / V` of 7–29 s. So `T_top` is set by the conductive balance whatever the ghost carries, and at an outflow face the Riemann solution samples the interior entropy anyway. Against the previous decoupled closure (hydro ghost T from the top cell, conduction datum at the physical face) on the release mesh at 4000 s:
+Formally that is two conditions on a subsonic outflow face, which admits one. It makes no measurable difference here because conduction resets the top-cell temperature far faster than the flow renews it. The top cell's thermal relaxation time `tau_th = rho c_v ds_top d / kappa_face` is 0.08 s, against a top-cell advection time `ds_top / V` of 7–29 s. So `T_top` is set by the conductive balance whatever the ghost carries, and at an outflow face the Riemann solution samples the interior entropy anyway. Against the previous decoupled closure (hydro ghost T from the top cell, conduction datum at the physical face; the release until 2026-09-22, removed from the release on 2026-11-16 and kept only in the legacy `model_column_2t`) on the release mesh at 4000 s:
 
 | | decoupled (previous) | pinned hydro T, face datum | **single T (release)** |
 |---|---:|---:|---:|
@@ -305,22 +332,22 @@ Formally that is two conditions on a subsonic outflow face, which admits one. It
 | `T_c - T_top` [K] | 69.7 | — | 139.4 |
 | top-face `f_total` [kg m⁻² s⁻¹] | 2.702e−10 | — | 2.683e−10 |
 
-Pinning the hydro ghost temperature is inert (+0.15 %). Nearly all of the −0.86 % comes from moving the conduction datum half a cell outward, a first-order offset in the top-cell width that converges away under refinement. **The equivalence needs conduction.** With `ISO_HEAT_FLUX=0` the fixed 22 kK ghost is inconsistent with the 22.67 kK initial top cell and nothing relaxes it: the 20 s conduction-off residual rises from 5.7e−3 to 1.4e−2 m/s and its refinement order falls from ~2 to ~1. With the ghost matched to the initial top cell it returns to the decoupled values to four digits. Full study: `docs/studies/boundaries/outer_temperature_bc_single_t_recap.md`.
+Pinning the hydro ghost temperature is inert (+0.15 %). Nearly all of the −0.86 % comes from moving the conduction datum half a cell outward, a first-order offset in the top-cell width that converges away under refinement. **The equivalence needs conduction.** With `CHROMO_CONDUCTION=0` the fixed 22 kK ghost is inconsistent with the 22.67 kK initial top cell and nothing relaxes it: the 20 s conduction-off residual rises from 5.7e−3 to 1.4e−2 m/s and its refinement order falls from ~2 to ~1. With the ghost matched to the initial top cell (`CHROMO_BC_T_TOP_K=0`) it returns to the decoupled values to four digits. Full study: `docs/studies/boundaries/outer_temperature_bc_single_t_recap.md`.
 
 ## Which variable carries the outer condition {#config-outer-closure-swap}
 
-Subsonic outflow at the 2153 km face admits exactly one incoming characteristic. This study was run under the previous decoupled closure, which put that one condition in the **pressure** (fixed reservoir back-pressure `kOuterPRef`) and left the hydro ghost temperature free. `ISO_OUTER_T_HYDRO_WALL` and `ISO_OUTER_P_NEUMANN` exist to put it in the **temperature** instead, and both outcomes are worth knowing before anyone tries it again. The current release fixes both the pressure and the ghost temperature; the temperature is inert on the release mesh (see [Outer temperature](#config-outer-temperature)), and the pressure is the condition that cannot be dropped.
+Subsonic outflow at the 2153 km face admits exactly one incoming characteristic. This study was run under the previous decoupled closure, which put that one condition in the **pressure** (fixed reservoir back-pressure `kOuterPRef`) and left the hydro ghost temperature free. Its two switches of the time, `ISO_OUTER_T_HYDRO_WALL=1` (pin the hydro ghost temperature to the wall) and `ISO_OUTER_P_NEUMANN` (release the pressure), put it in the **temperature** instead, and both outcomes are worth knowing before anyone tries it again. Mode 1 (`dp/ds = 0`) destroyed the model and was removed on 2026-11-16. Mode 2 (`dp/ds = -rho g`) is now `CHROMO_BC_OUTER_P=hydrostatic`; the current release already fixes the hydro ghost temperature, so it needs no separate wall switch, and its outputs are byte-identical to the old `ISO_OUTER_P_NEUMANN=2` on the current release. The current release fixes both the pressure and the ghost temperature; the temperature is inert on the release mesh (see [Outer temperature](#config-outer-temperature)), and the pressure is the condition that cannot be dropped.
 
-| | decoupled (previous release) | `T_HYDRO_WALL=1`, `P_NEUMANN=1` (`dp/ds = 0`) | `T_HYDRO_WALL=1`, `P_NEUMANN=2` (`dp/ds = -rho g`) |
+| | decoupled (previous release) | `T_HYDRO_WALL=1`, `P_NEUMANN=1` (`dp/ds = 0`, removed) | `T_HYDRO_WALL=1`, `P_NEUMANN=2` (`dp/ds = -rho g`, now `hydrostatic`) |
 |---|---:|---:|---:|
 | column mass at 4000 s | 99.994 % | **49.94 %** | 98.97 % |
-| `V_top` [m/s] | +9.50 | **−2462.5** (= the `ISO_VCAP` cap) | +0.49 |
+| `V_top` [m/s] | +9.50 | **−2462.5** (= the `CHROMO_BC_VCAP_MACH` cap) | +0.49 |
 | top-face `f_total` [kg m⁻² s⁻¹] | +2.70e−10 | **−4.13e−07** | +1.47e−11 |
 | `T` at 1900 km [K] | 6654 | **23694** (fully ionized) | 6670 |
 | `p_top` drift over 4000 s | ~0 % | +493 % | +5.8 %, still rising |
 | termination | `end_time` | `end_time` | `end_time` |
 
-`dp/ds = 0` **destroys the model.** The interior needs `dp/ds = -rho g`, so a zero-gradient face permanently withholds the top cell's hydrostatic support; the column collapses inward, the transition region marches down past 1900 km within 200 s, half the column mass is pushed out through the base, and by 1000 s the run is a perfectly steady 23.7 kK fully ionized downdraft whose velocity is set by `ISO_VCAP` and nothing else. It never crashes and it reports `godunov.fallbacks=0`: **a clean termination is not evidence that a boundary closure is sound.**
+`dp/ds = 0` **destroys the model.** The interior needs `dp/ds = -rho g`, so a zero-gradient face permanently withholds the top cell's hydrostatic support; the column collapses inward, the transition region marches down past 1900 km within 200 s, half the column mass is pushed out through the base, and by 1000 s the run is a perfectly steady 23.7 kK fully ionized downdraft whose velocity is set by the outflow Mach cap and nothing else. It never crashes and it reports `godunov.fallbacks=0`: **a clean termination is not evidence that a boundary closure is sound.**
 
 `dp/ds = -rho g` is hydrostatically consistent and survives 4000 s, but with the pressure *level* unpinned it drifts secularly and the conduction-driven evaporation signal — the thing the model exists to measure — falls by a factor of ~19. Stability was not the reason to prefer the fixed back-pressure; measurability is.
 
@@ -336,4 +363,4 @@ That last point was then tested where it matters, on a wall-temperature comparis
 
 The two-point exponent of `V ~ T_wall^n` is 2.911 anchored and 2.802 unanchored, so the **shape** of the wall response survives while every absolute value is ~20x too small (17.8x at 22 kK, 21.0x at 100 kK). Meanwhile the top and base mass fluxes take opposite signs — the column drains downward with an evaporative trickle on top — and at 100 kK the transition region migrates down to 1900 km and destroys the chromosphere there. A closure that reproduces the right power law and the wrong everything else is the worst kind to leave available without this warning.
 
-Both knobs are diagnostic only and no release number may be quoted from them. Full study, including the controls that place the failure in the missing hydrostatic slope rather than the missing anchor: `docs/studies/boundaries/outer_bc_pressure_temperature_swap_recap.md`.
+`CHROMO_BC_OUTER_P=hydrostatic` is diagnostic only and no release number may be quoted from it. Full study, including the controls that place the failure in the missing hydrostatic slope rather than the missing anchor: `docs/studies/boundaries/outer_bc_pressure_temperature_swap_recap.md`.

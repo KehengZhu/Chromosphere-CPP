@@ -109,7 +109,7 @@ The EOS-decoded cell-centred state of a release run. Written independently of th
 Line 1 is `ns 10`; line 2 repeats the snapshot's height line verbatim (same `out_base_km` offset, same upper-face convention). Then eight `#` provenance lines:
 
 - `# EOS_MODE=gamma_table` — the closure in force.
-- `# GAMMA_TABLE=<path>` — the table path exactly as `GAMMA_TABLE` supplied it.
+- `# GAMMA_TABLE=<path>` — the table path exactly as `CHROMO_EOS_TABLE` supplied it. The key keeps its historical spelling: the variable was named `GAMMA_TABLE` until 2026-11-16, and the output format did not change with the rename.
 - `# GAMMA_TABLE_SHA256=<64 hex>` — SHA-256 of the table's bytes, computed by the driver at run time (its own implementation, no external tool). This pins which table produced the run.
 - `# potential=cell_center_mean_of_phi_g_imh_phi_g_iph` — the gravitational-potential convention used to decode the state. `mixture_cell_phi(grid,i) = 0.5*(phi_g_imh(i) + phi_g_iph(i))`; `E` carries `rho phi_g`, so the decode is only meaningful with the matching gauge.
 - Three lines recording that release conduction is physical only, so `kappa_solver` is identically `kappa_physical`. The column is retained solely for format stability with existing analysis scripts and carries no independent information.
@@ -191,7 +191,7 @@ What it captures is one explicit RHS evaluation: the decoded cell-centred inputs
 1600.552368 1601.104736 9.705339865e-10 0 6631.354019 ...
 @endverbatim
 
-Header keys on line 2: `ns` (cell count), `first_cell` (index of the first row in each record), `uniform_mesh`, `mc3` (MC3/Koren limiter on), `beta` (limiter beta), `roe` (Roe characteristic reference flux on), `swmf_godunov` (release SWMF exact-Riemann Godunov flux on — `1` on a default release run), `pressure_reconstruct` (`(ln rho, u, ln p)` reconstruction on), `ds_km` (width of cell 0, km).
+Header keys on line 2: `ns` (cell count), `first_cell` (index of the first row in each record), `uniform_mesh`, `mc3` (MC3/Koren limiter on), `beta` (limiter beta), `roe` (Roe characteristic reference flux on), `swmf_godunov` (release SWMF exact-Riemann Godunov flux on — `1` on a default release run), `pressure_reconstruct` (a format-stability label: always `1` on a release run, which has no other reconstruction), `hydrostatic_reconstruct` (`ln p` slot in hydrostatic form — `1` on a release run), `ds_km` (width of cell 0, km).
 
 The 28 columns, in order:
 
@@ -210,9 +210,9 @@ The 28 columns, in order:
 | 10 | `T_R` | reconstructed temperature, right state |
 | 11 | `cs_L` | **equilibrium** sound speed `sqrt(Gamma1 p/rho)` of the left face state [m s<sup>-1</sup>]. This is the closure derivative, not the frozen `sqrt(5/3 p/rho)` the release Riemann solve and the CFL use. |
 | 12 | `cs_R` | same, right face state |
-| 13 | `a_face` | equilibrium acoustic spectral radius `max(|v_L|+cs_L, |v_R|+cs_R)`. It is the Rusanov coefficient when Rusanov is selected, and the per-face fallback coefficient of both other solvers; under the release Godunov flux and under Roe it is otherwise diagnostic only. |
+| 13 | `a_face` | equilibrium acoustic spectral radius `max(|v_L|+cs_L, |v_R|+cs_R)`. It is the coefficient of the per-face Rusanov fallback of both fluxes; under the release Godunov flux and under Roe it is otherwise diagnostic only. |
 | 14 | `f_central` | central (averaged-physical-flux) part of the mass flux |
-| 15 | `f_diff` | dissipative part of the mass flux. The release `swmf-godunov` flux and the Roe reference flux are only defined as a whole, so this is whatever they add to `f_central`; in Rusanov mode it is instead the closed form `-1/2 a (U_R - U_L)`. |
+| 15 | `f_diff` | dissipative part of the mass flux. The release `swmf-godunov` flux and the Roe reference flux are only defined as a whole, so this is whatever they add to `f_central`. (The whole-domain Rusanov mode, in which it was the closed form `-1/2 a (U_R - U_L)`, was removed from the release on 2026-11-16.) |
 | 16 | `f_total` | the production numerical mass flux at this face, `f_central + f_diff` [kg m<sup>-2</sup> s<sup>-1</sup>] |
 | 17 | `r_rho` | limiter slope ratio for the density slot, building `L` from cell `i` |
 | 18 | `phi_plus_rho` | limiter value applied for that `L` state |
@@ -294,7 +294,7 @@ godunov.fallbacks=0 (bad_input=0 vacuum=0 negative_p=0 no_converge=0 bad_sample=
 godunov.iterations_max=1 mean=1
 @endverbatim
 
-`faces` counts every face solve attempted over the whole run (two per cell per RHS evaluation), `exact` those the exact Riemann solve supplied, and the parenthesised breakdown attributes each fallback to its cause. `iterations_max` / `mean` are the Newton-iteration counts of the star-pressure solve. A nonzero `fallbacks` additionally emits a stderr `WARNING`, and `scripts/release_validation.sh` fails the release smoke on it. These lines are absent only from a run that overrode the flux with `ISO_RIEMANN=roe-local` or `ISO_RIEMANN=rusanov`.
+`faces` counts every face solve attempted over the whole run (two per cell per RHS evaluation), `exact` those the exact Riemann solve supplied, and the parenthesised breakdown attributes each fallback to its cause. `iterations_max` / `mean` are the Newton-iteration counts of the star-pressure solve. A nonzero `fallbacks` additionally emits a stderr `WARNING`, and `scripts/release_validation.sh` fails the release smoke on it. These lines are absent only from a run that overrode the flux with `CHROMO_NUM_RIEMANN=roe`.
 
 ## Reading these in Python
 

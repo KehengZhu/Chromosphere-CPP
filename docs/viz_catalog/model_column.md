@@ -42,8 +42,8 @@ and the panels are synchronous by construction.
 
 Definitions (index `i` = the UPPER face `i+1/2` of cell `i`; see also the
 face-flux decomposition section in [_historical.md](_historical.md)): `rhoV_cell = rho_cell * v_cell` plotted at
-the cell centres; `f_total` = the production numerical face mass flux (Roe here; the release flux is now the SWMF Godunov flux,
-Rusanov if selected); `f_ref` = `f_total` at `t = 0`, a **diagnostic baseline**;
+the cell centres; `f_total` = the production numerical face mass flux (Roe here; the release flux is now the SWMF Godunov flux;
+whole-domain Rusanov was removed as an option on 2026-11-16); `f_ref` = `f_total` at `t = 0`, a **diagnostic baseline**;
 `f_eff = f_total - f_ref` = the change in face mass transport since initialization.
 Since the reference-free release (`docs/studies/numerics/reference_free_release_recap.md`) the solver
 subtracts nothing — `f_total` is what the update sees — so `f_ref`/`f_eff` are now
@@ -121,12 +121,14 @@ python util/release/plot_column_sloshing.py \
 Supporting conduction-off control run used by the same diagnosis (no figure):
 
 ```bash
-ISO_NS=1000 ISO_HEAT_FLUX=0 \
+CHROMO_MESH_NS=1000 CHROMO_CONDUCTION=0 \
 CHROMO_T_END=1000 CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT=20 \
 scripts/run_chromo_realtime.sh outputs/model_column/eqctl_lnp_roe_N1000_1000s.txt \
   full no-ionization model_column - 20.0 no-cooling \
   > outputs/model_column/eqctl_lnp_roe_N1000_1000s.console.log 2>&1
 ```
+
+Environment names as renamed on 2026-11-16 (the run used `ISO_NS=1000 ISO_HEAT_FLUX=0`). The run predates the Godunov cutover, so it used the then-default Roe flux; the same command today runs the release Godunov flux (`CHROMO_NUM_RIEMANN=roe` selects Roe).
 
 ---
 
@@ -154,7 +156,7 @@ worst mismatch).
 The 4000 s N500 release run under the **new release numerics** — SWMF exact-Riemann
 Godunov flux at frozen composition, `(ln rho, V, ln p)` MUSCL reconstruction with
 MC3/beta=2, Gamma/Saha EOS, R4 outer refinement, 22,000 K physical-face conductive
-boundary, physical conduction only, CFL 0.50. No `ISO_RIEMANN` override: this is the
+boundary, physical conduction only, CFL 0.50. No `ISO_RIEMANN` (now `CHROMO_NUM_RIEMANN`) override: this is the
 default. Reached `termination=end_time` at 4000 s, step 712,314 (the identical step
 count to the Roe run, as expected from the CFL audit), 502 s wall on 12 threads,
 941,679,108 exact face solves with **zero fallbacks**. Snapshot cadence 20 s gives
@@ -236,6 +238,8 @@ pre-cutover release run `outputs/model_column/lnp_godunov_N500_4000s.*` in all
 three files, so the refactor is semantics-neutral and every difference below is a
 genuine precision effect.
 
+> The float32 leg used a configuration removed on 2026-11-16: the `CHROMO_STATE_FLOAT32` CMake option is gone and `Real` is always `double`. Reproducing that leg needs commit `7e06466`.
+
 ```bash
 # release (double) — no precision flag
 cmake -S . -B build_omp -DCMAKE_BUILD_TYPE=Release -DCHROMO_ENABLE_OPENMP=ON
@@ -299,6 +303,8 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python \
 ## Upper-boundary conduction-wall temperature sensitivity (`docs/studies/boundaries/upper_wall_temperature_sensitivity_recap.md`)
 
 One-parameter sweep of the imposed conduction-wall temperature `ISO_T_TOP` at the 2153 km outer face, with the C7 IC and every other piece of release physics/numerics fixed and `ISO_HYDRO_T_DECOUPLE=1` (so only `Grid::outer_conduction_temperature` moves). Double-precision release build (`build_omp`), N=500/R4, 4000 s. All four figures come from one invocation of `util/release/twall_sweep_diag.py`.
+
+> Every run in this section, including the 2026-10-13 rerun below, used the decoupled outer closure (`ISO_HYDRO_T_DECOUPLE=1`), a configuration removed on 2026-11-16. `util/run/run_twall_sweep.sh` now sets `CHROMO_BC_T_TOP_K` and runs the single-T release closure, so the commands below no longer reproduce these runs. Reproducing them needs commit `7e06466` with `ISO_HYDRO_T_DECOUPLE=1` set explicitly (its default there was already 0).
 
 Prerequisite runs (about 3 h wall on 16 cores; ~260 MB of dumps under `outputs/model_column/twall_sweep/`):
 
@@ -380,7 +386,7 @@ The absolute-pressure overlay movie below, rendered from the sweep rerun with th
 At every wall temperature the evaporation is unchanged to ≤ 0.6 % in top flux. The largest relative velocity change is +1.3 % at 10 kK, where the top velocity is only −0.08 m/s. The first-interior-face artifact is gone at every wall temperature.
 
 ```bash
-# runs (mac-mini)
+# runs (mac-mini); needs commit 7e06466: ISO_HYDRO_T_DECOUPLE was removed on 2026-11-16
 ISO_HYDRO_T_DECOUPLE=1 SWEEP_FACE_FLUX=1 \
 SWEEP_CASES="8000:0.50 10000:0.50 11000:0.50 12000:0.50 13000:0.50 14000:0.50 15000:0.50 18000:0.50 22000:0.50 30000:0.50 45000:0.50 70000:0.50 100000:0.25" \
   util/run/run_twall_sweep.sh outputs/model_column/twall_sweep_hse_recon 4000 20
@@ -454,6 +460,8 @@ Walls ≤ 14 kK sit at the flow reversal, where `F → 0` makes every ratio mean
 
 The release outer face imposes its one admissible external condition as a **fixed reservoir back-pressure** and lets the hydro ghost temperature free-float. These two movies put the opposite choice on the same axes: hydro ghost temperature **pinned** to the 22 kK conduction wall (`ISO_OUTER_T_HYDRO_WALL=1`) and the pressure **Neumann**, in both readings — `ISO_OUTER_P_NEUMANN=1` (`dp/ds = 0`) and `=2` (`dp/ds = -rho g`, the release hydrostatic ladder re-anchored on the live top cell) — plus the control that pins the temperature and keeps the release back-pressure, which isolates the pressure closure as the cause. Canonical release configuration otherwise (N=500/R4, double state, CFL 0.50, physical conduction only); the release baseline is the 22 kK run of the section-16 sweep, so the IC, mesh, flux and snapshot cadence are shared exactly.
 
+> "Release" in this section is the decoupled release of early 2026-09 (free `T_hydro`, `ISO_HYDRO_T_DECOUPLE=1`), not the current single-T closure. The section's runs used configurations removed on 2026-11-16 (`ISO_HYDRO_T_DECOUPLE`, `ISO_OUTER_T_HYDRO_WALL`, `ISO_OUTER_P_NEUMANN=1`; mode 2 is now `CHROMO_BC_OUTER_P=hydrostatic`, but only with the single-T ghost). The commands below are the record; reproducing them needs commit `7e06466`, where the release-leg and swap runs also need `ISO_HYDRO_T_DECOUPLE=1`, since its default there was already 0.
+
 Prerequisite runs (~45 min wall total on 12 threads; ~1.3 GB under `outputs/model_column/outer_bc_swap/`):
 
 ```bash
@@ -489,7 +497,7 @@ Panels follow `util/release/animate_twall_sweep.py` with three deliberate differ
 
 The mass-flux panel is the conservative face flux `f_total` from the `.faceflux` sidecars (`ANIM_MASS_FLUX=cell` forces the cell-centred `rho*V`; the panel title always says which). Its symlog linear band is 10x wider than the sweep overlay's because the collapse run sits at ~1e-7 while the release sits at ~1e-10, and the tighter threshold collided the +/- decade labels around zero.
 
-What it shows: the `dp/ds = 0` run leaves the release solution within the first 60 s and never returns — by 200 s the transition region has marched down past 1900 km, and from ~700 s the whole domain is a stationary 23.7 kK fully ionized downdraft at the `ISO_VCAP` cap carrying `f_top = f_base = -4.13e-07` kg m⁻² s⁻¹, 1530x the release flux and pointing the wrong way, with half the column mass gone. The `dp/ds = -rho g` run instead tracks the release in `T` and `rho` for the whole 4000 s and fails quietly: its `p` creeps upward, its `f_total` sits an order of magnitude below the release's and disagrees in sign between the top and base faces. The control is the release line.
+What it shows: the `dp/ds = 0` run leaves the release solution within the first 60 s and never returns — by 200 s the transition region has marched down past 1900 km, and from ~700 s the whole domain is a stationary 23.7 kK fully ionized downdraft at the `ISO_VCAP` (now `CHROMO_BC_VCAP_MACH`) cap carrying `f_top = f_base = -4.13e-07` kg m⁻² s⁻¹, 1530x the release flux and pointing the wrong way, with half the column mass gone. The `dp/ds = -rho g` run instead tracks the release in `T` and `rho` for the whole 4000 s and fails quietly: its `p` creeps upward, its `f_total` sits an order of magnitude below the release's and disagrees in sign between the top and base faces. The control is the release line.
 
 ```bash
 MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_outer_bc_compare.py \
@@ -498,7 +506,7 @@ MPLCONFIGDIR=/tmp/chromosphere2026-mpl .venv/bin/python util/release/animate_out
 
 ### `outer_bc_singleT_vs_release_1500s.mp4`
 
-The release outer temperature BC (single T: one fixed 22 kK temperature in the hydro ghost cells, which is also the conduction Dirichlet datum at the ghost centre, `ISO_HYDRO_T_DECOUPLE=0`) overlaid on the previous decoupled release (free `T_hydro`, 22 kK conduction datum at the physical face). Same six panels as `outer_bc_closure_swap_4000s.mp4`. 0–1500 s from the two 4000 s runs `outputs/model_column/release_singleT_N500_4000s` and `outputs/model_column/twall_sweep/twall_22kK_cfl0.50`, 76 frames (20 s snapshot cadence), 8 fps, 9.5 s. Previous release dark grey and thick, release thin red. The mass-flux panel is the conservative face flux `f_total`. Face-flux captures are step-strided, so that panel can lag the other five by up to 3.9 s.
+The release outer temperature BC (single T: one fixed 22 kK temperature in the hydro ghost cells, which is also the conduction Dirichlet datum at the ghost centre; then `ISO_HYDRO_T_DECOUPLE=0`, now the only closure, the switch having been removed on 2026-11-16) overlaid on the previous decoupled release (free `T_hydro`, 22 kK conduction datum at the physical face). Same six panels as `outer_bc_closure_swap_4000s.mp4`. 0–1500 s from the two 4000 s runs `outputs/model_column/release_singleT_N500_4000s` and `outputs/model_column/twall_sweep/twall_22kK_cfl0.50`, 76 frames (20 s snapshot cadence), 8 fps, 9.5 s. Previous release dark grey and thick, release thin red. The mass-flux panel is the conservative face flux `f_total`. Face-flux captures are step-strided, so that panel can lag the other five by up to 3.9 s.
 
 What it shows: the lines coincide in every panel. V_top is 4 % lower under single T at 20 s, and the gap settles to about 0.9 % from 400 s on (11.98 vs 12.10 m/s at 1500 s). T_top is 80–200 K cooler, because the conduction datum sits a full cell away instead of half a cell. T differences above 0.1 % are confined to the top ~13 km. Analysis: `docs/studies/boundaries/outer_temperature_bc_single_t_recap.md`.
 
@@ -609,7 +617,7 @@ Follow-up at the unsteady 70 kK, 0.08 Pa corner. Four runs, each over 0–1500 s
 - the sweep run;
 - N=1000;
 - CFL 0.25;
-- the R4 grade moved to 1931–1949 km (`ISO_REFINE_S_LO_KM=350`).
+- the R4 grade moved to 1931–1949 km (`ISO_REFINE_S_LO_KM=350`, now `CHROMO_MESH_REFINE_START_KM`).
 
 The panels:
 - (a) `std_t F(z)` over 500–1500 s, divided by the column flux scale `median_z |mean_t F|`, with each case's grade band shaded and its TR base dotted;
@@ -678,11 +686,11 @@ printf '%s\n' 0.003 0.005 0.0103 0.02 0.04 0.08 | xargs -P 6 -I{} env \
 
 ## MC3 branch fix and experimental hydrostatic reconstruction (`visualization/model_column/`)
 
-Study: `docs/studies/numerics/hydrostatic_reconstruction_and_mc3_fix.md`. Inputs are the A/B/C runs under `outputs/model_column/hse_recon/` (A = binary built at `f01189b`, B = MC3 branch fixed, C = B + `ISO_HSE_RECON=1`); the run commands are in the study's Reproduce section.
+Study: `docs/studies/numerics/hydrostatic_reconstruction_and_mc3_fix.md`. Inputs are the A/B/C runs under `outputs/model_column/hse_recon/` (A = binary built at `f01189b`, B = MC3 branch fixed, C = B + `ISO_HSE_RECON=1`, the experimental switch for what became the release reconstruction; the tombstone was removed on 2026-11-16); the run commands are in the study's Reproduce section.
 
 ### `hse_recon_static_residual.pdf`
 
-Column at rest, conduction off, outer ghost matched to the IC (`ISO_T_TOP=0`), 20 s: log-scale bars of the t = 0 max|F^ρ| and the 20 s max|V| for A, B and C at 500 and 1000 cells. C sits at round-off.
+Column at rest, conduction off, outer ghost matched to the IC (`ISO_T_TOP=0`, now `CHROMO_BC_T_TOP_K=0`), 20 s: log-scale bars of the t = 0 max|F^ρ| and the 20 s max|V| for A, B and C at 500 and 1000 cells. C sits at round-off.
 
 ### `hse_recon_evaporation.pdf`
 
@@ -705,6 +713,8 @@ The same 500-cell runs at t = 1000 s as bars for A, B and C: mean V over 2130–
 All four figures and `outputs/model_column/hot_wall_resolution/tr_pulses_metrics.json` come from one invocation. The runs live on the mac-mini; run the script there and copy the PDFs back.
 
 Prerequisite runs (mac-mini, `build_omp` = b78ee95; face-conductivity runs from a separate `build_kirch` with the uncommitted `ISO_COND_KIRCHHOFF` / `ISO_COND_ARITH` patch):
+
+> Every run below used the decoupled outer closure (`ISO_HYDRO_T_DECOUPLE=1`) and, for the closure pair, `ISO_OUTER_T_HYDRO_WALL=1`: configurations removed on 2026-11-16. The commands are the record; reproducing them needs commit `7e06466` (which also carries the face-conductivity patch, so `build_kirch` is no longer needed there). The face-conductivity rules are now `CHROMO_COND_FACE=kirchhoff|arithmetic`, and the mesh size is `CHROMO_MESH_NS`, but only with the single-T release closure.
 
 ```bash
 B=outputs/model_column/outer_bc_swap_hse_recon
@@ -741,7 +751,7 @@ Top-cell velocity (log), top-cell pressure over its initial value, and column ma
 
 ### `tr_pulses_face_conductivity.pdf`
 
-The same layout for N500, 300–700 s, with three face-conductivity rules: the default harmonic mean, `ISO_COND_KIRCHHOFF=1` (Kirchhoff secant on the Spitzer part, harmonic neutral part; this *lowers* the face conductivity at the TR base) and `ISO_COND_ARITH=1`.
+The same layout for N500, 300–700 s, with three face-conductivity rules: the default harmonic mean, `ISO_COND_KIRCHHOFF=1` (now `CHROMO_COND_FACE=kirchhoff`; Kirchhoff secant on the Spitzer part, harmonic neutral part; this *lowers* the face conductivity at the TR base) and `ISO_COND_ARITH=1` (now `CHROMO_COND_FACE=arithmetic`).
 
 ### `outer_bc_rerun_22kK.mp4`, `outer_bc_rerun_100kK.mp4`
 

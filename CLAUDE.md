@@ -33,9 +33,9 @@ Full statements, numbers and evidence: **`docs/standards/release_facts.md` — r
 - Release configuration: `(ln rho, u, ln p)` MC3/Koren reconstruction with the `ln p` slot hydrostatic (`Grid::hydrostatic_reconstruct`, no switch), N=500/R4 mesh (661 cells), CFL 0.50, fixed outer reservoir with one 22 kK ghost temperature. The C++ default CFL stays 0.25.
 - The 1600 km lower boundary is a **mid-chromospheric truncation, never "photospheric"**.
 - The release is reference-free **and** exactly balanced at rest for `B = 1` (hydrostatic reconstruction, since 2026-10-12); "not well-balanced" describes the earlier plain `ln p` scheme only. `eq_wb` is legacy-only and never set on a release Grid.
-- Storage is **double**; nothing in the release path names `float`/`double` (use `Real`/`Vec`). `CHROMO_STATE_FLOAT32=ON` is diagnostic only. Any float32-era evaporation number is ~30 % high.
+- Storage is **double**; nothing in the release path names `float`/`double` (use `Real`/`Vec`). There is no float build (removed 2026-11-16). Any float32-era evaporation number is ~30 % high.
 - Do not overclaim double: it did not remove the first-interior-face artifact (the hydrostatic reconstruction did) or the ~13 % lower-chromosphere flux spread (physical: adiabatic contraction). N500 long-run evaporation flux is not established < 10 % grid-converged — a resolution limit, separate from precision.
-- `ISO_RIEMANN`, `ISO_RECONSTRUCTION` are reference-only overrides; never production. Rejected (need new evidence to revisit): the `ModTransitionRegion` momentum split, a characteristic lower boundary, selective mixed precision.
+- Release knobs are `CHROMO_*` only (renamed from `ISO_*` 2026-11-16; table in `docs/doxygen/pages/configuration.md`); any `ISO_*` stops a release run, legacy scenarios keep them. `CHROMO_NUM_RIEMANN=roe` is the only reference flux override; never production. Rejected (need new evidence to revisit): the `ModTransitionRegion` momentum split, a characteristic lower boundary, selective mixed precision.
 
 ## Running
 

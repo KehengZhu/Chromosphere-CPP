@@ -81,7 +81,7 @@ CHROMO_FRAME_DT=<seconds>  # snapshot cadence in physical seconds, not steps
 
 **CFL** — `CHROMO_CFL=0.50` is the validated production value for `model_column`, and `scripts/run_chromo_realtime.sh` applies it for you. The hard-coded solver default stays at the conservative 0.25.
 
-`model_column` needs **no** environment variable to select its physics or its numerical method — the scenario supplies all of it, and it rejects the historical two-fluid knobs outright. For every other variable, see the *Configuration reference* page in the Doxygen docs.
+`model_column` needs **no** environment variable to select its physics or its numerical method — the scenario supplies all of it. It reads only `CHROMO_*` names and stops on any `ISO_*` variable: the release knobs were renamed on 2026-11-16 (the old-to-new table is on the *Configuration reference* page), and the historical two-fluid knobs belong to the legacy scenarios. For every other variable, see the *Configuration reference* page in the Doxygen docs.
 
 ## 4. Run
 

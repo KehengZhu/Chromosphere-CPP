@@ -22,7 +22,7 @@
  * This solver IS on the release path: `single_fluid/mixture.cpp` calls it at every
  * face, at the frozen-composition index `gamma = 5/3`, with the ionization energy
  * carried in the passive offset. The mixture Roe solver it replaced is retained as
- * the equilibrium-linearization reference flux (`ISO_RIEMANN=roe-local`).
+ * the equilibrium-linearization reference flux (`CHROMO_NUM_RIEMANN=roe`).
  *
  * ## Deviations from the Fortran
  *

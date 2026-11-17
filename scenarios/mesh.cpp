@@ -126,7 +126,8 @@ std::vector<double> build_static_mesh_faces(double length_m, arma::uword ns_coar
     const bool   outer   = (rp.profile == RefineProfile::Outer);
 
     // The graded transition's width is set by the ratio cap; the requested
-    // ISO_REFINE_TRANSITION_KM is its MINIMUM (see make_grade).
+    // grade width (CHROMO_MESH_REFINE_GRADE_KM in the release) is its MINIMUM
+    // (see make_grade).
     const Grade grade = (rp.enabled() && fine_ds > 0.0)
                       ? make_grade(fine_ds, coarse_ds, rp.transition_km * 1000.0)
                       : Grade{};

@@ -1105,7 +1105,7 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     clear_model_column_release_defaults_env();
     Scenario gentle = make_scenario("model_gentle", "");
     (void)gentle;
-    EXPECT_TRUE(std::getenv("GAMMA_TABLE") == nullptr);
+    EXPECT_TRUE(std::getenv("CHROMO_EOS_TABLE") == nullptr);
     EXPECT_TRUE(std::string(std::getenv("ISO_TWO_FLUID")) == "1");
     EXPECT_TRUE(std::string(std::getenv("ISO_IONIZATION")) == "1");
     clear_model_column_release_defaults_env();
@@ -1789,7 +1789,7 @@ static void test_model_gentle_two_fluid_path() {
     clear_model_column_release_defaults_env();
     setenv("ISO_NS", "40", 1);
     Scenario sc = make_scenario("model_gentle", "");
-    EXPECT_TRUE(std::getenv("GAMMA_TABLE") == nullptr);   // never the release solver
+    EXPECT_TRUE(std::getenv("CHROMO_EOS_TABLE") == nullptr);   // never the release solver
 
     Grid grid;
     grid.init(sc.peek_ns(), 0.25f);

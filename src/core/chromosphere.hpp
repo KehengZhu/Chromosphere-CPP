@@ -688,7 +688,7 @@ struct Grid {
     /// per-face fallback whenever a Roe average is not admissible; Rusanov's
     /// acoustic-scale dissipation -1/2 a Delta U is far too large for this
     /// very-low-Mach evaporation problem and leaves a persistent TR velocity ripple.
-    /// Selected by ISO_RIEMANN=roe-local; mutually exclusive with
+    /// Selected by CHROMO_NUM_RIEMANN=roe; mutually exclusive with
     /// swmf_godunov_flux. With both flags false the whole corrector uses Rusanov,
     /// which unit tests keep as the reference; no run configuration selects it.
     bool roe_characteristic_flux = false;
@@ -830,7 +830,8 @@ struct Grid {
     /// photospheric reservoir's fixed T — a heat sink at the base). True ⇒ Neumann
     /// (zero conductive flux through the base, dT/ds = 0): the inner face coupling
     /// is dropped from the Stage-D tridiagonal so the base is insulating and the
-    /// photosphere heats freely. Set by model_column from ISO_INNER_T_NEUMANN.
+    /// photosphere heats freely. Set by the legacy scenarios (ISO_INNER_T_NEUMANN);
+    /// the release leaves it false, and unit tests use it for closed-end checks.
     bool  inner_conduction_neumann = false;
 
     /// Release conduction face conductivity. Default false ⇒ the existing rule:
@@ -841,7 +842,7 @@ struct Grid {
     /// is the exact face conductivity of a steady profile between the two centres
     /// however steep it is, whereas the harmonic mean is pinned to the cold side of
     /// an unresolved front. The neutral part keeps the default rule. Diagnostic
-    /// only; set by model_column from ISO_COND_KIRCHHOFF.
+    /// only; set by model_column from CHROMO_COND_FACE=kirchhoff.
     bool  conduction_kirchhoff_face = false;
 
     /// Release conduction face conductivity, second diagnostic variant. True ⇒
@@ -850,7 +851,7 @@ struct Grid {
     /// region the cold side is dominated by neutral conduction and the hot side by
     /// Spitzer conduction, and there the arithmetic mean lies near the Kirchhoff
     /// value of the total conductivity. Diagnostic only; set by model_column from
-    /// ISO_COND_ARITH. Cannot be combined with conduction_kirchhoff_face.
+    /// CHROMO_COND_FACE=arithmetic. Cannot be combined with conduction_kirchhoff_face.
     bool  conduction_arithmetic_face = false;
 
     /// Time-ramp on the imposed coronal conductive flux q(T) — the gentle

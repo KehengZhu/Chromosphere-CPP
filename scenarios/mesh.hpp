@@ -72,8 +72,9 @@ struct RefineEnvNames {
 
 /// The release `model_column` names.
 constexpr RefineEnvNames kReleaseRefineEnv{
-    "ISO_REFINE_FACTOR", "ISO_REFINE_S_LO_KM", "ISO_REFINE_S_HI_KM",
-    "ISO_REFINE_TRANSITION_KM", "ISO_REFINE_PROFILE"};
+    "CHROMO_MESH_REFINE_FACTOR", "CHROMO_MESH_REFINE_START_KM",
+    "CHROMO_MESH_REFINE_END_KM", "CHROMO_MESH_REFINE_GRADE_KM",
+    "CHROMO_MESH_REFINE_PROFILE"};
 
 /// The historical names the frozen legacy scenarios keep reading.
 constexpr RefineEnvNames kLegacyRefineEnv{

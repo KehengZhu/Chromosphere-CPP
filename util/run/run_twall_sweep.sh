@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # Upper-boundary conduction-wall temperature sweep for the model_column release.
 #
-# Everything except the conduction wall is held fixed: the same C7 initial
-# condition, the same N=500/R4 mesh, the release Godunov flux and reconstruction,
-# physical conduction only, and ISO_HYDRO_T_DECOUPLE=1 so the HYDRO ghost
-# temperature still free-floats with the live top cell. ISO_T_TOP therefore moves
-# exactly one thing: grid.outer_conduction_temperature, the fixed thermal datum
-# the implicit conduction stage sees at the PHYSICAL outer face.
+# Everything except the outer temperature is held fixed: the same C7 initial
+# condition, the same N=500/R4 mesh, the release Godunov flux and hydrostatic
+# reconstruction, and physical conduction only. CHROMO_BC_T_TOP_K sets the one
+# fixed outer temperature, which the hydro ghosts carry and conduction reads as
+# its Dirichlet datum at the ghost centre.
 #
-# The double-precision release build is mandatory here (build_omp, i.e.
-# CHROMO_STATE_FLOAT32=OFF): the float32 state quantizes the lower-chromosphere
-# mass update and would contaminate a 4000 s mass-flux/velocity comparison.
+# Use the double-precision release build (build_omp): a float32 state quantizes
+# the lower-chromosphere mass update and would contaminate a 4000 s
+# mass-flux/velocity comparison.
 #
 # CFL: 0.50 is the validated production value for this configuration and is used
 # for every case that tolerates it. The implicit conduction Newton iteration does
@@ -71,7 +70,7 @@ for case in "${CASES[@]}"; do
     (
         OMP_NUM_THREADS="${THREADS}" \
         CHROMO_CFL="${CFL}" \
-        ISO_T_TOP="${T}" \
+        CHROMO_BC_T_TOP_K="${T}" \
         CHROMO_T_END="${T_END}" \
         CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT="${FRAME_DT}" \
         CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=2000 \

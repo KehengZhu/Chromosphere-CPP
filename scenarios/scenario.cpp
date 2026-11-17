@@ -20,17 +20,11 @@ void set_env_default(const char* key, const char* value) {
     setenv(key, value, /*overwrite=*/0);
 }
 
-// Grid resolution for the column scenarios: a resolved corona (ISO_CORONA, a
-// two-fluid-only option the release rejects) needs more cells than the
-// chromosphere-only default. ISO_NS overrides, and the model_column release
-// preset pins it to 500.
+// Coarse-equivalent cell count of the release column: CHROMO_MESH_NS, default
+// 600 (the model_column preset pins it to 500).
 arma::uword column_peek_ns() {
-    auto set = [](const char* k) {
-        const char* e = std::getenv(k);
-        return e && std::string(e) != "0" && !std::string(e).empty();
-    };
-    arma::uword ns = set("ISO_CORONA") ? 1000 : 600;
-    if (const char* e = std::getenv("ISO_NS")) { try { ns = std::stoul(e); } catch (...) {} }
+    arma::uword ns = 600;
+    if (const char* e = std::getenv("CHROMO_MESH_NS")) { try { ns = std::stoul(e); } catch (...) {} }
     return ns;
 }
 
@@ -71,27 +65,20 @@ Scenario make_scenario(const std::string& name, const std::string& data_path) {
         // `model_column` names exactly one solver. The remaining entries are
         // override-preserving defaults for the release model/grid, so
         // selecting model_column means the release configuration without a
-        // launcher-specific collection of ISO_* assignments. No two-fluid,
+        // launcher-specific collection of assignments. No two-fluid,
         // fixed-gamma, finite-rate-ionization, cooling, TRAC or artificial-
         // conduction knob appears here: the release solver has none of them,
-        // and model_column_ic rejects them outright if they are set.
-        if (std::getenv("ISO_GAMMA"))
-            throw std::runtime_error(
-                "make_scenario: model_column is the single-fluid release "
-                "scenario and derives every thermodynamic index from the "
-                "Saha/Gamma1 closure; ISO_GAMMA (the historical fixed-gamma "
-                "two-fluid index) has no meaning here. Use the legacy "
-                "model_gentle scenario for the historical fixed-gamma column.");
-        set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
-        set_env_default("ISO_H_BASE",                     "1600");
-        set_env_default("ISO_DH",                         "553");
-        set_env_default("ISO_NS",                         "500");
-        set_env_default("ISO_HEAT_FLUX",                  "1");
-        set_env_default("ISO_T_TOP",                      "22000");
-        set_env_default("ISO_REFINE_PROFILE",             "outer");
-        set_env_default("ISO_REFINE_FACTOR",              "4");
-        set_env_default("ISO_REFINE_S_LO_KM",             "500");
-        set_env_default("ISO_REFINE_TRANSITION_KM",       "20");
+        // and model_column_ic rejects every retired ISO_* name outright.
+        set_env_default("CHROMO_EOS_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
+        set_env_default("CHROMO_DOMAIN_BASE_KM",          "1600");
+        set_env_default("CHROMO_DOMAIN_SPAN_KM",          "553");
+        set_env_default("CHROMO_MESH_NS",                 "500");
+        set_env_default("CHROMO_CONDUCTION",              "1");
+        set_env_default("CHROMO_BC_T_TOP_K",              "22000");
+        set_env_default("CHROMO_MESH_REFINE_PROFILE",     "outer");
+        set_env_default("CHROMO_MESH_REFINE_FACTOR",      "4");
+        set_env_default("CHROMO_MESH_REFINE_START_KM",    "500");
+        set_env_default("CHROMO_MESH_REFINE_GRADE_KM",    "20");
         sc.peek_ns   = []() { return column_peek_ns(); };
         sc.ic        = [](Grid& g) { return model_column_ic(g); };
         sc.update_bc = [](Grid& g, const Vec& xn) { model_column_update_bc(g, xn); };

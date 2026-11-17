@@ -44,39 +44,29 @@
  * IC: the C7 temperature and ionization FRACTION with the total density re-integrated
  * hydrostatically from the base (clean V ≈ 0 start).
  *
- * Env knobs (numerics are fixed; only physics is tunable):
- *   ISO_NS            grid cells (release preset: 500 coarse-equivalent)
- *   ISO_H_BASE        domain base height [km]   (release preset: 1600)
- *   ISO_DH            domain height span [km]   (release preset: 553)
- *   ISO_HEAT_FLUX     0 = Stage-1 relaxation (conduction off) / 1 = conduction on
- *   ISO_RELAX_TIME    Stage-1 adiabatic relaxation phase length [s] (default 0)
- *   ISO_TJUMP_A/_B    top ghost-T jump factors a, b (default 1)
- *   ISO_T_TOP         absolute imposed top-boundary temperature [K] (release: 22000)
- *   ISO_HYDRO_T_DECOUPLE  1 = hydro ghost T free-floats and conduction keeps the
- *                     fixed wall at the PHYSICAL FACE; 0 = one fixed ghost T
- *                     serves hydro and conduction (release preset: 0)
- *   ISO_VCAP          outer outflow Mach cap (default 0.1)
- *   ISO_INNER_T_NEUMANN  conduction lower BC: 0 = Dirichlet (default) / 1 = Neumann
- *   ISO_REFINE_*      static local mesh refinement (scenarios/mesh.hpp)
+ * Environment (release names; the full table is the configuration reference):
+ *   CHROMO_MESH_NS              coarse-equivalent cell count (preset 500)
+ *   CHROMO_MESH_REFINE_*        static local refinement (scenarios/mesh.hpp;
+ *                               preset outer, factor 4, start 500 km, grade 20 km)
+ *   CHROMO_DOMAIN_BASE_KM       lower truncation height [km] (preset 1600)
+ *   CHROMO_DOMAIN_SPAN_KM       domain span [km] (preset 553)
+ *   CHROMO_CONDUCTION           1 = conduction on (preset) / 0 = off
+ *   CHROMO_BC_T_TOP_K           fixed outer ghost temperature [K] (preset 22000;
+ *                               0 = the IC top-cell temperature)
+ *   CHROMO_BC_VCAP_MACH         outer outflow Mach cap (default 0.1)
+ *   CHROMO_IC_P_TOP_PA          rebuild the IC so the top cell sits at this p [Pa]
+ *   CHROMO_EOS_TABLE            Gamma1 table path (preset: the production table)
+ * Diagnostic / reference only, never production:
+ *   CHROMO_BC_OUTER_P           reservoir (release) | hydrostatic
+ *   CHROMO_COND_FACE            harmonic (release) | kirchhoff | arithmetic
+ *   CHROMO_NUM_RIEMANN          godunov (release) | roe (the previous release
+ *                               flux, the equilibrium-Gamma1 Roe linearization)
  *
- * HISTORICAL two-fluid-only knobs — rejected here; they configure the legacy
- * model_gentle scenario:
- *   ISO_GAMMA         fixed adiabatic index of the two-fluid solver
- *   ISO_TWO_FLUID     evolve ion & neutral as separate fluids
- *   ISO_IONIZATION    Stage-E ionization/recombination network
- *   ISO_COOLING       optically-thick + thin radiative sink (Stage R)
- *   ISO_CORONA / ISO_CORONA_TOP_KM   extend into a resolved ~1 MK corona
- *   ISO_TRAC / _TCHROM / _TCMAXFRAC  TRAC TR-broadening
- *   ISO_QFLUX / _ENHANCE / _T_ON / _RAMP / _0   imposed coronal q(T) flux + ramp
- *   ISO_CHEAT / _E0 / _TMAX_MK / _SH_FRAC / _S0_MM / _ENHANCE / _T_ON / _RAMP
- *                     ambient volumetric coronal heating H(s) + ramp
- *   ISO_TBOOST / _TC / _W            one-time IC coronal superheat
- *   ISO_NUMERICAL_DIFFUSIVITY_MULT   mesh-scaled artificial conduction
- *
- * Reference-only numerical overrides (regression/comparison, never production):
- *   ISO_RIEMANN=roe-local (equilibrium-Gamma1 Roe linearization, the previous
- *   release flux), ISO_RIEMANN=rusanov, ISO_RECONSTRUCTION=lnrho-v-lnt,
- *   ISO_LIMITER
+ * Every ISO_* or GRID_REFINE_* variable, TT_OUTER_TI and GAMMA_TABLE stop a
+ * release run:
+ * the renamed ones name their CHROMO_* replacement, and the historical
+ * two-fluid knobs (ISO_GAMMA, ISO_TWO_FLUID, ISO_COOLING, ISO_TRAC, ...) point
+ * to the legacy model_gentle scenario.
  */
 
 #pragma once
@@ -91,10 +81,10 @@ namespace chromosphere {
 
 /// Initial condition of `model_column` (release).
 ///
-/// Loads the `GAMMA_TABLE` when one is given and throws if no Gamma1 table is
+/// Loads the `CHROMO_EOS_TABLE` when one is given and throws if no Gamma1 table is
 /// loaded (the fixed-gamma two-fluid column is the legacy `model_gentle`
-/// scenario). It REJECTS every historical two-fluid knob listed in the file
-/// header, so a release run cannot be silently reconfigured. Then it
+/// scenario). It REJECTS every retired ISO_* name listed in the file header,
+/// so a release run cannot be silently reconfigured. Then it
 /// builds the mesh (optionally statically refined, which may resize the Grid),
 /// sets the field-line geometry and gravity, samples the Model C7 temperature
 /// and ionization fraction, re-integrates the density hydrostatically from the
@@ -114,13 +104,12 @@ Vec  model_column_ic(Grid& grid);
 ///   * outer — subsonic outflow: a hydrostatic ghost ladder anchored on the fixed
 ///     reservoir back-pressure `kOuterPRef` (captured once, the single externally
 ///     imposed condition of a subsonic outflow face), the top-cell velocity
-///     extrapolated but Mach-capped at `ISO_VCAP` × c_s, and — in the release
-///     preset, where the hydro ghost temperature free-floats with the top cell —
-///     the 22,000 K thermal datum handed to the conduction stage at the PHYSICAL
-///     outer face instead;
+///     extrapolated but Mach-capped at `CHROMO_BC_VCAP_MACH` × c_s, and the
+///     fixed 22,000 K ghost temperature, which conduction reads as its Dirichlet
+///     datum at the ghost centre;
 ///   * inner — the quasi-static stratified reservoir at the 1600 km truncation
-///     temperature `kInnerTRef` with V = 0, laid out on a second-order
-///     (trapezoidal, EOS-closed) ghost ladder.
+///     temperature `kInnerTRef` with V = 0, laid out on an EOS-closed ghost
+///     ladder in the discrete hydrostatic relation of the reconstruction.
 void model_column_update_bc(Grid& grid, const Vec& xn);
 
 /** @} */

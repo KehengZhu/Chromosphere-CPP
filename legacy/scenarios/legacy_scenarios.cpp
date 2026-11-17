@@ -123,7 +123,8 @@ Scenario make_legacy_scenario(const std::string& name, const std::string& data_p
                 "make_scenario: model_column_2t is built on the Saha/Gamma1 "
                 "closure; ISO_GAMMA (the historical fixed-gamma two-fluid index) "
                 "has no meaning here.");
-        set_env_default("GAMMA_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
+        // The driver reads the table path from CHROMO_EOS_TABLE since 2026-11-16.
+        set_env_default("CHROMO_EOS_TABLE", "data/eos/gamma1_hydrogen_v1.dat");
         set_env_default("ISO_H_BASE",                     "1600");
         set_env_default("ISO_DH",                         "553");
         set_env_default("ISO_NS",                         "500");

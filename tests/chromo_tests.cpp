@@ -51,6 +51,8 @@
 #include <utility>
 #include <vector>
 
+extern char** environ;   // POSIX: the process environment
+
 using namespace chromosphere;
 
 static int g_pass = 0;
@@ -999,12 +1001,29 @@ static void test_pressure_face_hint_does_not_change_face_state() {
 }
 
 
+// The release IC stops on any variable of the retired ISO_* / GRID_REFINE_*
+// families or on TT_OUTER_TI / GAMMA_TABLE, and the legacy scenarios' presets leave such
+// variables behind in a -DCHROMO_ENABLE_LEGACY=ON test run, so every release
+// test clears them before building a release column.
+static void clear_retired_env() {
+    std::vector<std::string> names;
+    for (char** entry = environ; entry && *entry; ++entry) {
+        const std::string pair(*entry);
+        const std::string name = pair.substr(0, pair.find('='));
+        if (name.rfind("ISO_", 0) == 0 || name.rfind("GRID_REFINE_", 0) == 0
+            || name == "TT_OUTER_TI" || name == "GAMMA_TABLE")
+            names.push_back(name);
+    }
+    for (const std::string& name : names) unsetenv(name.c_str());
+}
+
 static void clear_model_column_release_defaults_env() {
+    clear_retired_env();
     const char* keys[] = {
-        "GAMMA_TABLE", "ISO_GAMMA", "ISO_H_BASE", "ISO_DH", "ISO_NS",
-        "ISO_HEAT_FLUX", "ISO_T_TOP",
-        "ISO_REFINE_PROFILE", "ISO_REFINE_FACTOR", "ISO_REFINE_S_LO_KM",
-        "ISO_REFINE_TRANSITION_KM", "ISO_NUMERICAL_DIFFUSIVITY_MULT",
+        "CHROMO_EOS_TABLE", "ISO_GAMMA", "CHROMO_DOMAIN_BASE_KM", "CHROMO_DOMAIN_SPAN_KM", "CHROMO_MESH_NS",
+        "CHROMO_CONDUCTION", "CHROMO_BC_T_TOP_K",
+        "CHROMO_MESH_REFINE_PROFILE", "CHROMO_MESH_REFINE_FACTOR", "CHROMO_MESH_REFINE_START_KM",
+        "CHROMO_MESH_REFINE_GRADE_KM", "ISO_NUMERICAL_DIFFUSIVITY_MULT",
         "ISO_COOLING", "ISO_TRAC", "ISO_CORONA", "ISO_TWO_FLUID",
         "ISO_IONIZATION", "ISO_CHEAT", "ISO_QFLUX", "ISO_TBOOST"
     };
@@ -1015,16 +1034,16 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     clear_model_column_release_defaults_env();
     Scenario sc = make_scenario("model_column", "");
     EXPECT_TRUE(sc.peek_ns() == 500u);
-    EXPECT_TRUE(std::string(std::getenv("GAMMA_TABLE")) ==
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_EOS_TABLE")) ==
                 "data/eos/gamma1_hydrogen_v1.dat");
-    EXPECT_TRUE(std::string(std::getenv("ISO_H_BASE")) == "1600");
-    EXPECT_TRUE(std::string(std::getenv("ISO_DH")) == "553");
-    EXPECT_TRUE(std::string(std::getenv("ISO_HEAT_FLUX")) == "1");
-    EXPECT_TRUE(std::string(std::getenv("ISO_T_TOP")) == "22000");
-    EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_PROFILE")) == "outer");
-    EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_FACTOR")) == "4");
-    EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_S_LO_KM")) == "500");
-    EXPECT_TRUE(std::string(std::getenv("ISO_REFINE_TRANSITION_KM")) == "20");
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_DOMAIN_BASE_KM")) == "1600");
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_DOMAIN_SPAN_KM")) == "553");
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_CONDUCTION")) == "1");
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_BC_T_TOP_K")) == "22000");
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_MESH_REFINE_PROFILE")) == "outer");
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_MESH_REFINE_FACTOR")) == "4");
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_MESH_REFINE_START_KM")) == "500");
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_MESH_REFINE_GRADE_KM")) == "20");
     // The release preset must not mention ANY historical two-fluid research knob:
     // the single-fluid release solver has no neutral fluid, no finite-rate
     // ionization, no radiative sink, no TRAC and no artificial conduction, and
@@ -1037,20 +1056,45 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     // Overridable model/grid knobs still win, and the Gamma1 table is supplied
     // UNCONDITIONALLY so model_column always names the release solver.
     clear_model_column_release_defaults_env();
-    setenv("ISO_NS", "777", 1);
-    setenv("ISO_HEAT_FLUX", "0", 1);
+    setenv("CHROMO_MESH_NS", "777", 1);
+    setenv("CHROMO_CONDUCTION", "0", 1);
     Scenario tuned = make_scenario("model_column", "");
     EXPECT_TRUE(tuned.peek_ns() == 777u);
-    EXPECT_TRUE(std::string(std::getenv("ISO_HEAT_FLUX")) == "0");
-    EXPECT_TRUE(std::string(std::getenv("GAMMA_TABLE")) ==
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_CONDUCTION")) == "0");
+    EXPECT_TRUE(std::string(std::getenv("CHROMO_EOS_TABLE")) ==
                 "data/eos/gamma1_hydrogen_v1.dat");
 
     // The fixed-gamma two-fluid index can no longer reroute model_column into the
-    // historical solver: it is a hard scenario error.
+    // historical solver: it is a hard error at the IC.
     clear_model_column_release_defaults_env();
     setenv("ISO_GAMMA", "1.05", 1);
-    EXPECT_TRUE(throws_any([&] { (void)make_scenario("model_column", ""); }));
+    {
+        Grid gamma_grid;
+        gamma_grid.init(16, 0.25f);
+        gamma_grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
+        EXPECT_TRUE(throws_any([&] { (void)model_column_ic(gamma_grid); }));
+    }
     clear_model_column_release_defaults_env();
+
+    // A retired ISO_* / GRID_REFINE_* / GAMMA_TABLE name stops the run and names
+    // its CHROMO_* replacement instead of being ignored silently; an unknown
+    // name in those families stops it too.
+    for (const auto& pair : std::vector<std::pair<const char*, const char*>>{
+             {"ISO_T_TOP", "CHROMO_BC_T_TOP_K"},
+             {"ISO_REFINE_S_LO_KM", "CHROMO_MESH_REFINE_START_KM"},
+             {"GRID_REFINE_FACTOR", "CHROMO_MESH_REFINE_FACTOR"},
+             {"GAMMA_TABLE", "CHROMO_EOS_TABLE"},
+             {"ISO_RELAX_TIME", "not a release setting"},
+             {"TT_OUTER_TI", "not a release setting"}}) {
+        setenv(pair.first, "1", 1);
+        Grid stale;
+        stale.init(16, 0.25f);
+        stale.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
+        std::string message;
+        try { (void)model_column_ic(stale); } catch (const std::exception& e) { message = e.what(); }
+        EXPECT_TRUE(message.find(pair.second) != std::string::npos);
+        unsetenv(pair.first);
+    }
 
     // ...and the retired "model_isentropic" alias is gone entirely.
     EXPECT_TRUE(throws_any([&] { (void)make_scenario("model_isentropic", ""); }));
@@ -1089,7 +1133,7 @@ static void test_model_column_release_scenario_defaults_and_overrides() {
     for (const char* knob : {"ISO_COOLING", "ISO_TRAC", "ISO_CORONA", "ISO_CHEAT",
                              "ISO_QFLUX", "ISO_TBOOST", "ISO_TWO_FLUID",
                              "ISO_IONIZATION", "ISO_NUMERICAL_DIFFUSIVITY_MULT"}) {
-        setenv("ISO_H_BASE", "1600", 1); setenv("ISO_DH", "553", 1);
+        setenv("CHROMO_DOMAIN_BASE_KM", "1600", 1); setenv("CHROMO_DOMAIN_SPAN_KM", "553", 1);
         setenv(knob, "1", 1);
         Grid rejected;
         rejected.init(16, 0.25f);
@@ -1783,9 +1827,9 @@ static void test_model_gentle_two_fluid_path() {
 // an independent direct decode at every stencil offset, and must refuse to be
 // reused for a different state or after a ghost update.
 static void test_mixture_field_cache_contract() {
-    unsetenv("GAMMA_TABLE"); unsetenv("ISO_GAMMA");
-    unsetenv("ISO_COOLING"); unsetenv("ISO_CORONA"); unsetenv("ISO_TRAC");
-    setenv("ISO_HEAT_FLUX","0",1);
+    unsetenv("CHROMO_EOS_TABLE");
+    clear_retired_env();
+    setenv("CHROMO_CONDUCTION","0",1);
     Grid grid; grid.init(24,0.25f);
     grid.eos_gamma_table=EosGammaTable::load(production_gamma_table_path());
     Vec state=model_column_ic(grid);
@@ -1869,11 +1913,11 @@ static void test_mixture_field_cache_contract() {
 }
 
 static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
-    unsetenv("GAMMA_TABLE");        unsetenv("ISO_GAMMA");
+    unsetenv("CHROMO_EOS_TABLE");        unsetenv("ISO_GAMMA");
     unsetenv("ISO_TWO_FLUID");      unsetenv("ISO_IONIZATION");
     unsetenv("ISO_COOLING");        unsetenv("ISO_CORONA");
     unsetenv("ISO_TRAC");
-    setenv("ISO_HEAT_FLUX", "0", 1);
+    setenv("CHROMO_CONDUCTION", "0", 1);
     // Historical fixed-gamma helper remains exactly piecewise linear.
     Real linear_t, linear_ne, linear_nhi;
     c7_full_profile(587.5f, linear_t, linear_ne, linear_nhi);
@@ -1887,6 +1931,7 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
         - c7_full_temperature_pchip(knot))/eps;
     EXPECT_NEAR(derivative_left, derivative_right, 2e-4);
     EXPECT_TRUE(std::abs(c7_full_temperature_pchip(587.5)-linear_t) > 1.0);
+    clear_retired_env();
     Grid grid;
     grid.init(48, 0.25f);
     grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
@@ -1940,7 +1985,7 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
     // so the following tests keep their own configurations.
     clear_model_column_release_defaults_env();
     unsetenv("ISO_TWO_FLUID"); unsetenv("ISO_IONIZATION");
-    unsetenv("ISO_HEAT_FLUX"); unsetenv("ISO_COOLING");
+    unsetenv("CHROMO_CONDUCTION"); unsetenv("ISO_COOLING");
     unsetenv("ISO_CORONA"); unsetenv("ISO_TRAC");
 }
 
@@ -1952,7 +1997,7 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
 // column must stay at rest to round-off. Run through make_scenario on the shipped
 // N=500/R4 mesh (661 cells) at the production CFL 0.50, with conduction off and
 // ONE deliberate exception to the preset: the outer ghost temperature is the
-// initial top-cell temperature (ISO_T_TOP=0) instead of 22 kK. With conduction
+// initial top-cell temperature (CHROMO_BC_T_TOP_K=0) instead of 22 kK. With conduction
 // off nothing relaxes a fixed 22 kK ghost toward the 22.67 kK initial top cell,
 // and that IC/BC entropy jump would mask the interior balance this checks
 // (docs/studies/boundaries/outer_temperature_bc_single_t_recap.md section 4).
@@ -1961,8 +2006,8 @@ static void test_stage8_gamma_model_column_saha_hse_and_ghosts() {
 static void test_hydrostatic_reconstruction_exact_fixed_point() {
     clear_model_column_release_defaults_env();
     Scenario sc = make_scenario("model_column", "");
-    setenv("ISO_HEAT_FLUX", "0", 1);
-    setenv("ISO_T_TOP", "0", 1);
+    setenv("CHROMO_CONDUCTION", "0", 1);
+    setenv("CHROMO_BC_T_TOP_K", "0", 1);
     Grid grid;
     grid.init(sc.peek_ns(), 0.50f);
     grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
@@ -2001,16 +2046,15 @@ static void test_hydrostatic_reconstruction_exact_fixed_point() {
 // ---------------------------------------------------------------------------
 
 // The h=1600..2153 km release column at a test-sized cell count, on a uniform
-// mesh. ISO_T_TOP pins the outer ghost temperature at 22 kK so it is a known
+// mesh. CHROMO_BC_T_TOP_K pins the outer ghost temperature at 22 kK so it is a known
 // constant.
 static Vec setup_release_test_column(Grid& grid, arma::uword ns) {
     // The release scenario REJECTS every historical two-fluid knob, so they must
     // be absent, not set to "0".
-    unsetenv("ISO_GAMMA");  unsetenv("ISO_COOLING");  unsetenv("ISO_CORONA");
-    unsetenv("ISO_TRAC");   unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
-    setenv("ISO_HEAT_FLUX", "1", 1);
-    setenv("ISO_H_BASE", "1600", 1); setenv("ISO_DH", "553", 1);
-    setenv("ISO_T_TOP", "22000", 1);
+    clear_retired_env();
+    setenv("CHROMO_CONDUCTION", "1", 1);
+    setenv("CHROMO_DOMAIN_BASE_KM", "1600", 1); setenv("CHROMO_DOMAIN_SPAN_KM", "553", 1);
+    setenv("CHROMO_BC_T_TOP_K", "22000", 1);
     grid.init(ns, 0.25f);
     grid.eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
     return model_column_ic(grid);
@@ -2018,10 +2062,10 @@ static Vec setup_release_test_column(Grid& grid, arma::uword ns) {
 
 static void clear_release_test_env() {
     unsetenv("ISO_COOLING");
-    unsetenv("ISO_CORONA");    unsetenv("ISO_TRAC");       unsetenv("ISO_HEAT_FLUX");
-    unsetenv("ISO_H_BASE");    unsetenv("ISO_DH");         unsetenv("ISO_T_TOP");
+    unsetenv("ISO_CORONA");    unsetenv("ISO_TRAC");       unsetenv("CHROMO_CONDUCTION");
+    unsetenv("CHROMO_DOMAIN_BASE_KM");    unsetenv("CHROMO_DOMAIN_SPAN_KM");         unsetenv("CHROMO_BC_T_TOP_K");
     unsetenv("ISO_NUMERICAL_DIFFUSIVITY_MULT");
-    unsetenv("ISO_RIEMANN");
+    unsetenv("CHROMO_NUM_RIEMANN");
 }
 
 static MixtureThermo decode_cell(const Grid& grid, const Vec& state, arma::uword i) {
@@ -2072,7 +2116,7 @@ static void add_test_upflow(const Grid& grid, Vec& state) {
 
 static void test_upper_bc_single_fixed_temperature() {
     const arma::uword ns = 200;   // 2.77 km cells; ns=40 over-conducts the coarse top cell
-    // Both hydro ghosts carry the fixed outer temperature ISO_T_TOP, and the
+    // Both hydro ghosts carry the fixed outer temperature CHROMO_BC_T_TOP_K, and the
     // conduction override stays disarmed, so conduction reads the same ghost.
     Grid grid;
     Vec state = setup_release_test_column(grid, ns);
@@ -2172,10 +2216,11 @@ static void test_model_column_release_numerics_defaults() {
         unsetenv("ISO_GAMMA");
         unsetenv("ISO_COOLING");   unsetenv("ISO_CORONA");
         unsetenv("ISO_TRAC");
-        setenv("ISO_HEAT_FLUX","0",1);
+        setenv("CHROMO_CONDUCTION","0",1);
         auto grid = std::make_unique<Grid>();
         grid->init(24,0.25f);
         if (gamma_mode) {
+            clear_retired_env();
             grid->eos_gamma_table = EosGammaTable::load(production_gamma_table_path());
             (void)model_column_ic(*grid);
         } else {
@@ -2189,11 +2234,11 @@ static void test_model_column_release_numerics_defaults() {
     };
     auto clear = [] {
         unsetenv("ISO_COOLING");   unsetenv("ISO_CORONA");
-        unsetenv("ISO_TRAC");      unsetenv("ISO_HEAT_FLUX");
-        unsetenv("ISO_RIEMANN");
+        unsetenv("ISO_TRAC");      unsetenv("CHROMO_CONDUCTION");
+        unsetenv("CHROMO_NUM_RIEMANN");
     };
 
-    unsetenv("ISO_RIEMANN");
+    unsetenv("CHROMO_NUM_RIEMANN");
     {   // release defaults, no environment variables set.
         const auto grid = build(true);
         EXPECT_TRUE(grid->swmf_godunov_flux);
@@ -2212,7 +2257,7 @@ static void test_model_column_release_numerics_defaults() {
     }
 #endif
     {   // Explicitly requesting the release flux is a no-op.
-        setenv("ISO_RIEMANN","swmf-godunov",1);
+        setenv("CHROMO_NUM_RIEMANN","godunov",1);
         const auto grid = build(true);
         EXPECT_TRUE(grid->swmf_godunov_flux);
         EXPECT_TRUE(!grid->roe_characteristic_flux);
@@ -2221,14 +2266,14 @@ static void test_model_column_release_numerics_defaults() {
     {   // The Roe characteristic flux stays reachable as the reference solver, and
         // is mutually exclusive with the release Godunov flux, so the face Riemann
         // solver is the only variable it changes.
-        setenv("ISO_RIEMANN","roe-local",1);
+        setenv("CHROMO_NUM_RIEMANN","roe",1);
         const auto grid = build(true);
         EXPECT_TRUE(grid->roe_characteristic_flux);
         EXPECT_TRUE(!grid->swmf_godunov_flux);
         EXPECT_TRUE(grid->hydrostatic_reconstruct);
     }
     {   // ... and it never leaks into a run that did not ask for it.
-        unsetenv("ISO_RIEMANN");
+        unsetenv("CHROMO_NUM_RIEMANN");
         const auto grid = build(true);
         EXPECT_TRUE(!grid->roe_characteristic_flux);
         EXPECT_TRUE(grid->swmf_godunov_flux);
@@ -2242,9 +2287,9 @@ static void test_model_column_release_numerics_defaults() {
     }
 #endif
     {   // invalid choices throw, including the removed whole-domain Rusanov.
-        setenv("ISO_RIEMANN","hll",1);
+        setenv("CHROMO_NUM_RIEMANN","hll",1);
         EXPECT_TRUE(throws_any([&] { (void)build(true); }));
-        setenv("ISO_RIEMANN","rusanov",1);
+        setenv("CHROMO_NUM_RIEMANN","rusanov",1);
         EXPECT_TRUE(throws_any([&] { (void)build(true); }));
     }
     clear();

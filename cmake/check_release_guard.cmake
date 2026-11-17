@@ -14,7 +14,7 @@ elseif(GUARD STREQUAL "two_fluid")
     set(ION_ARG no-ionization)
     set(EXPECTED "ISO_TWO_FLUID is a legacy two-fluid setting")
 elseif(GUARD STREQUAL "ionization")
-    set(ENV_ARGS ISO_NS=4)
+    set(ENV_ARGS CHROMO_MESH_NS=4)
     set(ION_ARG ionization)
     set(EXPECTED "finite-rate ionization was requested")
 else()
@@ -23,7 +23,7 @@ endif()
 
 execute_process(
     COMMAND ${CMAKE_COMMAND} -E env
-            GAMMA_TABLE=${TABLE} ISO_NS=4 ${ENV_ARGS}
+            CHROMO_EOS_TABLE=${TABLE} CHROMO_MESH_NS=4 ${ENV_ARGS}
             ${EXE} ${OUT} full ${ION_ARG} model_column - 0 no-cooling
     RESULT_VARIABLE STATUS
     OUTPUT_VARIABLE STDOUT

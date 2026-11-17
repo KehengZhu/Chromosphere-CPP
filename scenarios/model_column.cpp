@@ -29,6 +29,10 @@
 #include <string>
 #include <vector>
 
+//! @cond INTERNAL
+extern char** environ;   // POSIX: the process environment
+//! @endcond
+
 namespace chromosphere {
 
 // ---------------------------------------------------------------------------
@@ -63,7 +67,7 @@ Real kInnerPRes0   = 0.0f;     // reservoir pressure at ghost 0 (1 Δs below cel
 Real kInnerPRes1   = 0.0f;     // reservoir pressure at ghost 1 (2 Δs below)
 Real kInnerRhoRes0 = 0.0f;     // EOS density at (kInnerPRes0, kInnerTRef)
 Real kInnerRhoRes1 = 0.0f;
-Real kTtopRef     = 0.0f;      // FIXED outer ghost temperature [K]: ISO_T_TOP, else the IC top cell
+Real kTtopRef     = 0.0f;      // FIXED outer ghost temperature [K]: CHROMO_BC_T_TOP_K, else the IC top cell
 // FIXED reference outer ghost pressure [Pa] — the coronal reservoir back-pressure,
 // captured one-sided-hydrostatically from the IC top cell. Subsonic outflow admits
 // exactly ONE incoming characteristic,
@@ -74,7 +78,7 @@ Real kOuterPRef    = 0.0f;
 bool  kOuterPRefSet = false;    // captured lazily on the first update_bc call
 bool  kHeatFluxOn = false;     // conduction on ⇒ open (Mach-capped) top
 Real kVcapMach    = 0.1f;      // outer outflow cap as a fraction of c_s
-// ISO_OUTER_P_NEUMANN=2: the outer ghost pressure stops being the FIXED reservoir
+// CHROMO_BC_OUTER_P=hydrostatic: the outer ghost pressure stops being the FIXED reservoir
 // back-pressure kOuterPRef and becomes the same EOS-closed hydrostatic ladder
 // (hse_rung) ANCHORED ON THE LIVE TOP CELL — a hydrostatically consistent
 // closure that imposes no external pressure datum. Subsonic outflow admits exactly
@@ -159,6 +163,68 @@ double c7_temperature_cell_average(double h_lo_km, double h_hi_km) {
     const double h1 = mid+half*inv_sqrt3;
     return 0.5*(c7_full_temperature_pchip(h0)+c7_full_temperature_pchip(h1));
 }
+
+// The release reads only CHROMO_* names. Until 2026-11-16 its knobs carried
+// the ISO_ prefix of a retired experimental model (and GRID_REFINE_* /
+// TT_OUTER_TI / GAMMA_TABLE); the frozen legacy scenarios still read those. A stale old name
+// would otherwise be ignored silently and the run would quietly use the release
+// default instead, so any variable in those families stops a release run with
+// the name to use instead.
+void reject_retired_env() {
+    struct Renamed { const char* old_name; const char* new_name; };
+    static const Renamed kRenamed[] = {
+        {"ISO_H_BASE", "CHROMO_DOMAIN_BASE_KM"},
+        {"ISO_DH", "CHROMO_DOMAIN_SPAN_KM"},
+        {"ISO_NS", "CHROMO_MESH_NS"},
+        {"ISO_REFINE_FACTOR", "CHROMO_MESH_REFINE_FACTOR"},
+        {"ISO_REFINE_PROFILE", "CHROMO_MESH_REFINE_PROFILE"},
+        {"ISO_REFINE_S_LO_KM", "CHROMO_MESH_REFINE_START_KM"},
+        {"ISO_REFINE_S_HI_KM", "CHROMO_MESH_REFINE_END_KM"},
+        {"ISO_REFINE_TRANSITION_KM", "CHROMO_MESH_REFINE_GRADE_KM"},
+        {"GRID_REFINE_FACTOR", "CHROMO_MESH_REFINE_FACTOR"},
+        {"GRID_REFINE_PROFILE", "CHROMO_MESH_REFINE_PROFILE"},
+        {"GRID_REFINE_S_LO_KM", "CHROMO_MESH_REFINE_START_KM"},
+        {"GRID_REFINE_S_HI_KM", "CHROMO_MESH_REFINE_END_KM"},
+        {"GRID_REFINE_TRANSITION_KM", "CHROMO_MESH_REFINE_GRADE_KM"},
+        {"ISO_HEAT_FLUX", "CHROMO_CONDUCTION"},
+        {"ISO_P_TOP", "CHROMO_IC_P_TOP_PA"},
+        {"ISO_T_TOP", "CHROMO_BC_T_TOP_K"},
+        {"ISO_VCAP", "CHROMO_BC_VCAP_MACH"},
+        {"ISO_OUTER_P_NEUMANN", "CHROMO_BC_OUTER_P (reservoir | hydrostatic)"},
+        {"ISO_COND_KIRCHHOFF", "CHROMO_COND_FACE=kirchhoff"},
+        {"ISO_COND_ARITH", "CHROMO_COND_FACE=arithmetic"},
+        {"ISO_RIEMANN", "CHROMO_NUM_RIEMANN (godunov | roe)"},
+        {"GAMMA_TABLE", "CHROMO_EOS_TABLE"}};
+    // Research configuration of the historical two-fluid column.
+    static const char* const kTwoFluid[] = {
+        "ISO_GAMMA", "ISO_TWO_FLUID", "ISO_IONIZATION", "ISO_COOLING",
+        "ISO_TRAC", "ISO_CORONA", "ISO_CHEAT", "ISO_QFLUX", "ISO_TBOOST",
+        "ISO_NUMERICAL_DIFFUSIVITY_MULT"};
+    for (char** entry = environ; entry && *entry; ++entry) {
+        const std::string pair(*entry);
+        const std::string name = pair.substr(0, pair.find('='));
+        const bool retired_family = name.rfind("ISO_", 0) == 0
+            || name.rfind("GRID_REFINE_", 0) == 0 || name == "TT_OUTER_TI"
+            || name == "GAMMA_TABLE";
+        if (!retired_family) continue;
+        for (const Renamed& r : kRenamed)
+            if (name == r.old_name)
+                throw std::runtime_error(
+                    "model_column: " + name + " was renamed to " + r.new_name
+                    + "; unset it (the release reads only CHROMO_* names)");
+        for (const char* knob : kTwoFluid)
+            if (name == knob)
+                throw std::runtime_error(
+                    "model_column: " + name + " is historical two-fluid research "
+                    "configuration and has no meaning for the single-fluid release "
+                    "solver; run the legacy model_gentle scenario for that path "
+                    "(build with -DCHROMO_ENABLE_LEGACY=ON)");
+        throw std::runtime_error(
+            "model_column: " + name + " is not a release setting (it was removed, "
+            "or it belongs to a legacy scenario); unset it. See the configuration "
+            "reference for the CHROMO_* names.");
+    }
+}
 } // namespace
 
 Vec model_column_ic(Grid& grid) {
@@ -169,9 +235,8 @@ Vec model_column_ic(Grid& grid) {
         return fallback;
     };
 
-    if (const char* gamma_path = std::getenv("GAMMA_TABLE")) {
-        if (std::getenv("ISO_GAMMA"))
-            throw std::logic_error("GAMMA_TABLE and ISO_GAMMA are mutually exclusive");
+    reject_retired_env();
+    if (const char* gamma_path = std::getenv("CHROMO_EOS_TABLE")) {
         if (grid.eos_gamma_table.empty()) grid.eos_gamma_table = EosGammaTable::load(gamma_path);
     }
     // A loaded Gamma1 table is what selects the Saha/Gamma1 solver. `model_column`
@@ -185,28 +250,11 @@ Vec model_column_ic(Grid& grid) {
             "fixed-gamma two-fluid column is the legacy model_gentle scenario "
             "(build with -DCHROMO_ENABLE_LEGACY=ON)");
 
-    // Release configuration surface. Everything below is historical two-fluid
-    // research physics that the single-fluid release timestep does not contain:
-    // a fixed adiabatic index, a neutral fluid, finite-rate ionization, a
-    // radiative sink, TRAC broadening, volumetric coronal heating, an imposed
-    // Neumann coronal flux, an IC coronal superheat, and the mesh-scaled
-    // artificial conduction term. Rejecting them outright is what keeps
-    // `model_column` a single unambiguous production identity — a release run
-    // can never be silently reconfigured into something else.
-    {
-        static const char* const kNonReleaseKnobs[] = {
-            "ISO_GAMMA", "ISO_TWO_FLUID", "ISO_IONIZATION", "ISO_COOLING",
-            "ISO_TRAC", "ISO_CORONA", "ISO_CHEAT", "ISO_QFLUX", "ISO_TBOOST",
-            "ISO_NUMERICAL_DIFFUSIVITY_MULT"};
-        for (const char* knob : kNonReleaseKnobs) {
-            if (std::getenv(knob))
-                throw std::runtime_error(
-                    std::string(knob) + " is historical two-fluid research "
-                    "configuration and has no meaning for the single-fluid "
-                    "release solver; run the legacy model_gentle scenario for "
-                    "that path (build with -DCHROMO_ENABLE_LEGACY=ON)");
-        }
-    }
+    // The historical two-fluid research knobs (a fixed adiabatic index, a neutral
+    // fluid, finite-rate ionization, a radiative sink, TRAC, coronal heating, an
+    // imposed coronal flux, an IC superheat, artificial conduction) are rejected
+    // by reject_retired_env() above, which is what keeps `model_column` a single
+    // unambiguous production identity.
 
     // --- IC mode ----------------------------------------------------------
     // The IC is ALWAYS the real Model C7 profile with the density re-integrated
@@ -216,27 +264,28 @@ Vec model_column_ic(Grid& grid) {
     // Lower truncation height of the modeled domain, in km measured from the
     // photosphere (that is the HEIGHT GAUGE only -- the domain itself starts
     // here, at 1600 km, well above it). See the inner-boundary block.
-    const Real h_base     = env_f("ISO_H_BASE", 0.0f);
-    Real       DH_km      = env_f("ISO_DH", 1303.0f); // km
+    const Real h_base     = env_f("CHROMO_DOMAIN_BASE_KM", 0.0f);
+    Real       DH_km      = env_f("CHROMO_DOMAIN_SPAN_KM", 1303.0f); // km
     // Base (T, n_H) from the C7 profile at h_base.
     Real T_base, ni_b, nn_b;
     c7_cell(h_base, T_base, ni_b, nn_b);
     T_base = static_cast<Real>(c7_full_temperature_pchip(h_base));
-    const bool  heat_flux_on = (env_f("ISO_HEAT_FLUX", 0.0f) != 0.0f);
+    const bool  heat_flux_on = (env_f("CHROMO_CONDUCTION", 0.0f) != 0.0f);
     kHeatFluxOn        = heat_flux_on;
-    kVcapMach          = env_f("ISO_VCAP", 0.1f);
+    kVcapMach          = env_f("CHROMO_BC_VCAP_MACH", 0.1f);
     // Outer-face closure variant: which ONE condition the subsonic-outflow face
     // imposes. Release (0) = fixed reservoir back-pressure + fixed ghost T;
     // 2 = the swap, a hydrostatic pressure anchored on the live top cell + the
     // same fixed ghost T.
-    {
-        const int mode = static_cast<int>(env_f("ISO_OUTER_P_NEUMANN", 0.0f));
-        if (mode != 0 && mode != 2)
+    kOuterPHydrostatic = false;
+    if (const char* e = std::getenv("CHROMO_BC_OUTER_P")) {
+        const std::string mode(e);
+        if (mode == "hydrostatic") kOuterPHydrostatic = true;
+        else if (mode != "reservoir")
             throw std::runtime_error(
-                "model_column_ic: ISO_OUTER_P_NEUMANN must be 0 (fixed reservoir "
-                "back-pressure, the release) or 2 (dp/ds = -rho g, anchored on the "
-                "live top cell)");
-        kOuterPHydrostatic = (mode == 2);
+                "model_column_ic: CHROMO_BC_OUTER_P must be reservoir (fixed "
+                "back-pressure, the release) or hydrostatic (dp/ds = -rho g, "
+                "anchored on the live top cell)");
     }
 
     // The release is a single-fluid common-temperature equilibrium mixture.
@@ -246,8 +295,9 @@ Vec model_column_ic(Grid& grid) {
 
     // --- geometry: straight field line, gravity on -----------------------
     // Static local refinement (scenarios/mesh.hpp). peek_ns() sized the grid to the
-    // coarse-equivalent count (ISO_NS); ISO_REFINE_* ADD cells inside the refined band
-    // and grade smoothly to the coarse spacing outside it. ISO_REFINE_PROFILE picks
+    // coarse-equivalent count (CHROMO_MESH_NS); CHROMO_MESH_REFINE_* ADD cells inside
+    // the refined band and grade smoothly to the coarse spacing outside it.
+    // CHROMO_MESH_REFINE_PROFILE picks
     // which end the band is anchored to: `lower` (default, historical: fine [s_lo,s_hi]
     // then grade back up to coarse) or `outer` (fine from s_lo to the domain TOP, with
     // the grade in [s_lo−τ, s_lo]) — the latter targets the upper TR / outer boundary.
@@ -356,17 +406,17 @@ Vec model_column_ic(Grid& grid) {
         const double ln_p_c7 = std::log((1.0+xb)*nbase*grid.k_b*T_base);
         const double ln_p_top_c7 = integrate_column(ln_p_c7, xb);
 
-        // ISO_P_TOP > 0 [Pa]: rebuild the column with the SAME C7 T(h) but the base
+        // CHROMO_IC_P_TOP_PA > 0 [Pa]: rebuild the column with the SAME C7 T(h) but the base
         // pressure chosen so the top cell sits at this pressure. The whole column
         // moves consistently (both reservoirs are captured from the rebuilt IC), so
         // the pressure is a controlled parameter rather than a one-cell mismatch.
         // Saha makes p_top a nonlinear function of p_base (a denser column is less
         // ionized and has a shorter scale height), hence the secant iteration.
-        if (const char* e = std::getenv("ISO_P_TOP")) {
+        if (const char* e = std::getenv("CHROMO_IC_P_TOP_PA")) {
             double target = std::numeric_limits<double>::quiet_NaN();
             try { target = std::stod(e); } catch (...) {}
             if (!(std::isfinite(target) && target > 0.0))
-                throw std::runtime_error(std::string("model_column_ic: ISO_P_TOP must be a "
+                throw std::runtime_error(std::string("model_column_ic: CHROMO_IC_P_TOP_PA must be a "
                     "positive pressure in Pa, got '") + e + "'");
             const double ln_target = std::log(target);
             auto base_x = [&](double ln_pb) {
@@ -383,9 +433,9 @@ Vec model_column_ic(Grid& grid) {
                 f1 = integrate_column(a1, base_x(a1))-ln_target;
             }
             if (std::abs(f1) > 1.0e-12)
-                throw std::runtime_error("model_column_ic: ISO_P_TOP secant iteration "
+                throw std::runtime_error("model_column_ic: CHROMO_IC_P_TOP_PA secant iteration "
                     "did not converge (target " + std::to_string(target) + " Pa)");
-            std::cerr << "[model_column] ISO_P_TOP: top-cell p=" << std::exp(f1+ln_target)
+            std::cerr << "[model_column] CHROMO_IC_P_TOP_PA: top-cell p=" << std::exp(f1+ln_target)
                       << " Pa (target " << target << ", C7 " << std::exp(ln_p_top_c7)
                       << ")  base p=" << std::exp(a1) << " Pa (C7 " << std::exp(ln_p_c7)
                       << ")  secant iterations=" << it+1 << std::endl;
@@ -407,10 +457,10 @@ Vec model_column_ic(Grid& grid) {
     // Outer ghost temperature, FIXED for the whole run: the unresolved TR/corona
     // above sits at ~constant T, so the ghost is a fixed hot reservoir and the
     // downward conductive flux q ∝ (T_ghost − T_top) SELF-LIMITS as the
-    // chromosphere heats. ISO_T_TOP > 0 sets it absolutely [K] (release 22000,
+    // chromosphere heats. CHROMO_BC_T_TOP_K > 0 sets it absolutely [K] (release 22000,
     // C7's TR-base T); otherwise it is the IC top-cell temperature.
     kTtopRef = T_c(grid.ns - 1);
-    const Real t_top_abs = env_f("ISO_T_TOP", 0.0f);
+    const Real t_top_abs = env_f("CHROMO_BC_T_TOP_K", 0.0f);
     if (t_top_abs > 0.0f) kTtopRef = t_top_abs;
 
     // --- lower truncation reservoir (h_base = 1600 km, NOT the photosphere) ---
@@ -447,13 +497,21 @@ Vec model_column_ic(Grid& grid) {
     // balanced at rest through the hydrostatic reconstruction (see the eq_wb note
     // at the end of this IC).
     grid.out_base_km              = h_base;   // label output heights from the true base
-    // DIAGNOSTIC-ONLY: Kirchhoff face conductivity for the Spitzer part.
-    grid.conduction_kirchhoff_face = (env_f("ISO_COND_KIRCHHOFF", 0.0f) != 0.0f);
-    grid.conduction_arithmetic_face = (env_f("ISO_COND_ARITH", 0.0f) != 0.0f);
-    if (grid.conduction_kirchhoff_face && grid.conduction_arithmetic_face)
-        throw std::runtime_error(
-            "model_column_ic: ISO_COND_KIRCHHOFF and ISO_COND_ARITH are alternative "
-            "face-conductivity rules; set at most one");
+    // DIAGNOSTIC-ONLY conduction face-conductivity rule (TR-pulse study).
+    // harmonic = the release rule (distance-weighted harmonic mean; arithmetic on
+    // a uniform mesh); kirchhoff = Kirchhoff secant for the Spitzer part;
+    // arithmetic = plain arithmetic mean of the total conductivity.
+    grid.conduction_kirchhoff_face = false;
+    grid.conduction_arithmetic_face = false;
+    if (const char* e = std::getenv("CHROMO_COND_FACE")) {
+        const std::string rule(e);
+        if (rule == "kirchhoff") grid.conduction_kirchhoff_face = true;
+        else if (rule == "arithmetic") grid.conduction_arithmetic_face = true;
+        else if (rule != "harmonic")
+            throw std::runtime_error(
+                "model_column_ic: CHROMO_COND_FACE must be harmonic (the release), "
+                "kirchhoff or arithmetic");
+    }
     grid.mc3_limiter              = true;
     grid.limiter_beta             = 2.0f;
     // --- release numerical flux and MUSCL primitive set (Gamma/Saha path) ---
@@ -466,23 +524,23 @@ Vec model_column_ic(Grid& grid) {
     grid.swmf_godunov_flux       = true;
     grid.roe_characteristic_flux = false;
     grid.hydrostatic_reconstruct = true;
-    // Reference override. ISO_RIEMANN=roe-local selects the mixture Roe
+    // Reference override. CHROMO_NUM_RIEMANN=roe selects the mixture Roe
     // characteristic flux — the equilibrium (Gamma1) linearization that was the
     // previous release flux, kept as the controlled comparison solver. Never
     // needed for a production run. The flux is then the only thing that changes,
     // including the timestep, which mixture_timestep sizes from the signal speed
     // of whichever flux is in force.
-    if (const char* riemann = std::getenv("ISO_RIEMANN")) {
+    if (const char* riemann = std::getenv("CHROMO_NUM_RIEMANN")) {
         const std::string choice(riemann);
-        if (choice == "roe-local") {
+        if (choice == "roe") {
             grid.roe_characteristic_flux = true;
             grid.swmf_godunov_flux = false;
-        } else if (choice != "swmf-godunov") {
+        } else if (choice != "godunov") {
             throw std::invalid_argument(
-                "ISO_RIEMANN must be swmf-godunov (the release) or roe-local");
+                "CHROMO_NUM_RIEMANN must be godunov (the release) or roe");
         }
-        std::cerr << "[model_column] Riemann override: ISO_RIEMANN=" << choice
-                  << " (release default: swmf-godunov)" << std::endl;
+        std::cerr << "[model_column] Riemann override: CHROMO_NUM_RIEMANN=" << choice
+                  << " (release default: godunov)" << std::endl;
     }
     // One line naming the numerical method actually in force, so a run log always
     // records it without having to enable the face-flux sidecar.
@@ -508,7 +566,7 @@ Vec model_column_ic(Grid& grid) {
     grid.enable_vacuum_floor      = false;
 
     kOuterPRefSet   = false;        // fresh IC ⇒ recapture the outer back-pressure
-    // ISO_HEAT_FLUX=0 runs the column with conduction off (an adiabatic hydrostatic
+    // CHROMO_CONDUCTION=0 runs the column with conduction off (an adiabatic hydrostatic
     // check); otherwise conduction is on from t = 0, driven by the outer wall.
     grid.enable_conduction        = heat_flux_on;
     // The release conduction operator is structurally physical-only and never

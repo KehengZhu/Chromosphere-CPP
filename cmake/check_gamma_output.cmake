@@ -1,7 +1,7 @@
 file(REMOVE "${OUT}" "${OUT}.gamma_diag")
 execute_process(
     COMMAND ${CMAKE_COMMAND} -E env
-            GAMMA_TABLE=${TABLE} ISO_NS=48
+            CHROMO_EOS_TABLE=${TABLE} CHROMO_MESH_NS=48
             ${EXE} ${OUT} full no-ionization model_column - 0 no-cooling
     RESULT_VARIABLE STATUS
     OUTPUT_VARIABLE STDOUT

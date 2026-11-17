@@ -208,10 +208,10 @@ int main(int argc, char** argv) {
     grid.init(sc.peek_ns(), cfl);
     std::string gamma_table_path;
     std::string gamma_table_sha256;
-    if (const char* gamma_path = std::getenv("GAMMA_TABLE")) {
+    if (const char* gamma_path = std::getenv("CHROMO_EOS_TABLE")) {
         try {
             if (std::getenv("ISO_GAMMA"))
-                throw std::logic_error("GAMMA_TABLE and explicitly supplied ISO_GAMMA are mutually exclusive");
+                throw std::logic_error("CHROMO_EOS_TABLE and explicitly supplied ISO_GAMMA are mutually exclusive");
             gamma_table_path = gamma_path;
             gamma_table_sha256 = sha256_file(gamma_table_path);
             grid.eos_gamma_table = EosGammaTable::load(gamma_table_path);

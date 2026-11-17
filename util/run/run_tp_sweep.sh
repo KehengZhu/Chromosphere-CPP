@@ -5,8 +5,8 @@
 #
 # Each case is the canonical release (N=500/R4, single fixed outer temperature,
 # physical conduction only, CFL 0.50) with two things changed:
-#   ISO_T_TOP  -- the outer ghost / conduction temperature;
-#   ISO_P_TOP  -- the IC is rebuilt with the same C7 T(h) and the base pressure
+#   CHROMO_BC_T_TOP_K  -- the outer ghost / conduction temperature;
+#   CHROMO_IC_P_TOP_PA -- the IC is rebuilt with the same C7 T(h) and the base pressure
 #                 that puts the top cell at this pressure, so both reservoirs
 #                 move consistently with it (unset = the C7 column).
 # One N=1000 control at a mid-grid point bounds the resolution error.
@@ -35,7 +35,7 @@ if [[ "${1:-}" == "--one" ]]; then
     stride=$(( 1780 * NS / 500 ))
     set +e
     OMP_NUM_THREADS="${SWEEP_THREADS:-2}" \
-    ISO_T_TOP="${T}" ISO_P_TOP="${P}" ISO_NS="${NS}" \
+    CHROMO_BC_T_TOP_K="${T}" CHROMO_IC_P_TOP_PA="${P}" CHROMO_MESH_NS="${NS}" \
     CHROMO_T_END="${T_END}" \
     CHROMO_OUTPUT=1 CHROMO_GAMMA_DIAG=1 CHROMO_FRAME_DT="${FRAME_DT}" \
     CHROMO_OUTER_COND_DIAG=1 CHROMO_OUTER_COND_STRIDE=2000 \
